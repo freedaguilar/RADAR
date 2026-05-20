@@ -56,8 +56,13 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
       <div className="w-full max-w-md mx-auto p-4">
         {/* Logo and Brand Header */}
         <div className="text-center mb-8" id="login-brand-header">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-[#D40511] text-white shadow-md font-sans font-black text-2xl tracking-tighter mb-3">
-            RD
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white shadow-sm border border-gray-100 p-2 overflow-hidden mb-3">
+            <img
+              src="https://i.imgur.com/yFECwYD.png"
+              alt="Radar Logo"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-[#1A1A1A] font-sans">
             RADAR<span className="text-[#D40511] font-semibold">.</span>

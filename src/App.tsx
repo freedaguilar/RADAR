@@ -418,8 +418,13 @@ export default function App() {
             id="sidebar-logo-header"
           >
             <div className="flex items-center gap-3">
-              <div className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-[#D40511] text-white font-black text-xs font-sans">
-                RD
+              <div className="w-8 h-8 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-gray-100 shrink-0">
+                <img
+                  src="https://i.imgur.com/yFECwYD.png"
+                  alt="Radar Logo"
+                  className="w-full h-full object-contain"
+                  referrerPolicy="no-referrer"
+                />
               </div>
               <div>
                 <h1 className="text-md font-bold tracking-tight text-[#1A1A1A] font-sans">
@@ -516,8 +521,13 @@ export default function App() {
         id="mobile-top-header"
       >
         <div className="flex items-center gap-2.5">
-          <div className="inline-flex items-center justify-center w-7 h-7 rounded bg-[#D40511] text-white font-black text-[11px]">
-            RD
+          <div className="w-7 h-7 rounded bg-white overflow-hidden flex items-center justify-center border border-gray-100 shrink-0">
+            <img
+              src="https://i.imgur.com/yFECwYD.png"
+              alt="Radar Logo"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <div>
             <h1 className="text-sm font-black text-[#1A1A1A] leading-none">
