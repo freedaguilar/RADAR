@@ -1,7 +1,53 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2 } from 'lucide-react';
+import { Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { uploadToSupabaseStorage } from '../lib/supabase';
+
+
+// Visual premium logo generator corresponding to Dashboard.tsx RetailerLogo
+function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md" | "lg" }) {
+  const getInitialsAndColors = (name: string) => {
+    const uppercase = name.toUpperCase();
+    if (uppercase.includes("CARREFOUR")) return { text: "C", bg: "bg-blue-600", border: "border-blue-700/50", textCol: "text-white" };
+    if (uppercase.includes("PÃO DE AÇÚCAR") || uppercase.includes("PAO DE ACUCAR") || uppercase.includes("GPA")) {
+      return { text: "PA", bg: "bg-emerald-700", border: "border-emerald-800/50", textCol: "text-white" };
+    }
+    if (uppercase.includes("SONDA")) return { text: "SD", bg: "bg-red-500", border: "border-red-600/50", textCol: "text-white" };
+    if (uppercase.includes("MAMBO")) return { text: "MB", bg: "bg-amber-500", border: "border-amber-600/50", textCol: "text-amber-950" };
+    if (uppercase.includes("HIROTA")) return { text: "HR", bg: "bg-orange-600", border: "border-orange-700/50", textCol: "text-white" };
+    if (uppercase.includes("BH") || uppercase.includes("BELO HORIZONTE")) return { text: "BH", bg: "bg-amber-400", border: "border-amber-500/50", textCol: "text-blue-900" };
+    if (uppercase.includes("ASSAÍ") || uppercase.includes("ASSAI")) return { text: "AS", bg: "bg-orange-500", border: "border-orange-600/50", textCol: "text-white" };
+    if (uppercase.includes("ATACADÃO") || uppercase.includes("ATACADAO")) return { text: "AT", bg: "bg-red-600", border: "border-red-750", textCol: "text-white" };
+    if (uppercase.includes("VILLEFORT")) return { text: "VF", bg: "bg-sky-600", border: "border-sky-700", textCol: "text-white" };
+
+    const parts = name.split(" ").filter(Boolean);
+    const initials = parts.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+    return {
+      text: initials || "?",
+      bg: chain.logoColor || "bg-gray-600",
+      border: "border-gray-500/20",
+      textCol: "text-white",
+    };
+  };
+
+  const { text, bg, border, textCol } = getInitialsAndColors(chain.name);
+  const sizeClasses = size === "sm" ? "w-6 h-6 text-[9px] font-bold rounded" : size === "md" ? "w-10 h-10 text-sm font-black rounded-lg" : "w-16 h-16 text-xl font-black rounded-xl";
+
+  if (chain.logoUrl) {
+    return (
+      <div className={`overflow-hidden border border-gray-200 shrink-0 bg-white flex items-center justify-center ${sizeClasses}`}>
+        <img src={chain.logoUrl} alt={chain.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center justify-center shrink-0 border select-none font-bold uppercase ${bg} ${border} ${textCol} ${sizeClasses} font-mono`} title={chain.name}>
+      {text}
+    </div>
+  );
+}
 
 
 interface RegisterPriceProps {
@@ -9,9 +55,13 @@ interface RegisterPriceProps {
   chains: Chain[];
   onSaveRecord: (newRecord: PriceRecord) => void;
   currentUser: User | null;
+  onNavigate?: (page: string, params?: any) => void;
 }
 
-export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onNavigate }: RegisterPriceProps) {
+  // Navigation Steps
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+
   // Inputs
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedChainId, setSelectedChainId] = useState('');
@@ -19,6 +69,10 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: R
   const [notes, setNotes] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+
+  // Redirect after success prompt state
+  const [showRedirectPrompt, setShowRedirectPrompt] = useState(false);
+  const [lastRegisteredProductId, setLastRegisteredProductId] = useState('');
 
   // Image & upload state
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -92,6 +146,8 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: R
       setAiAnalysisMessage('⚠️ Não foi possível analisar a imagem automaticamente. Insira os dados manualmente.');
     } finally {
       setIsAnalyzing(false);
+      // Auto advance to step 3 once the AI scanner completes (on success or fail to allow manual correction)
+      setStep(3);
     }
   };
 
@@ -301,6 +357,11 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: R
         finalImageUrl = await uploadToSupabaseStorage(imagePreview, 'images');
       }
 
+      let finalNotes = notes.trim();
+      if (aiAnalysisMessage) {
+        finalNotes = finalNotes ? `[IA] ${finalNotes}` : '[IA] Monitorado via Scanner Inteligente';
+      }
+
       const newRecord: PriceRecord = {
         id: `rec-usr-${Date.now()}`,
         productId: selectedProductId,
@@ -308,10 +369,13 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: R
         price: priceNum,
         date: new Date().toISOString().split('T')[0],
         imageUrl: finalImageUrl,
-        notes: notes.trim() || undefined,
+        notes: finalNotes || undefined,
         userName: currentUser?.name || 'Vendedor Autônomo',
         userEmail: currentUser?.email || 'vendas@radar.com'
       };
+
+      const productIdRegistered = selectedProductId;
+      setLastRegisteredProductId(productIdRegistered);
 
       onSaveRecord(newRecord);
 
@@ -328,6 +392,8 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: R
       setCompressionRatio(0);
       setAiAnalysisMessage('');
       setIsAnalyzing(false);
+      setStep(1); // Back to Step 1 upon successful completion
+      setShowRedirectPrompt(true); // Ask if user wants to register more
 
       setTimeout(() => {
         setSuccessMsg(false);
@@ -341,325 +407,534 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser }: R
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6" id="register-price-view">
+    <div className="max-w-2xl mx-auto space-y-10" id="register-price-view">
       {/* View Title */}
-      <div className="border-b border-[#E0E0E0] pb-6" id="register-price-header">
-        <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase font-mono">
+      <div className="border-b border-slate-100 pb-6 text-center sm:text-left" id="register-price-header">
+        <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase font-mono block mb-2">
           Painel do Colaborador em Campo
         </span>
-        <h1 className="text-3xl font-black text-[#1A1A1A] font-sans">
+        <h1 className="text-3xl font-extrabold text-slate-900 font-sans tracking-tight">
           Registrar Preço Rápido
         </h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Formulário leve otimizado para celulares. Pesquise o produto e registre fotos das gôndolas em tempo real.
+        <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed max-w-lg">
+          Fluxo sequencial inteligente. Identifique a rede, escolha a foto para análise por IA e confirme os valores do PDV instantaneamente.
         </p>
       </div>
 
+      {/* Visual Stepper Progress Indicator */}
+      <div className="flex items-center justify-between max-w-lg mx-auto px-4 select-none" id="stepper-progress-indicator">
+        {[
+          { num: 1, label: 'Rede', desc: 'Identificar Canal' },
+          { num: 2, label: 'Foto', desc: 'Scanner Inteligente' },
+          { num: 3, label: 'Confirmação', desc: 'Auditar Dados' }
+        ].map((s, idx) => (
+          <React.Fragment key={s.num}>
+            {idx > 0 && (
+              <div 
+                className={`flex-1 h-0.5 mx-2 sm:mx-4 transition-colors duration-300 ${
+                  step >= s.num ? 'bg-[#D40511]' : 'bg-slate-100'
+                }`}
+              />
+            )}
+            <button
+              type="button"
+              disabled={s.num > step} // Can only navigate backward manually to edit
+              onClick={() => {
+                if (s.num < step) {
+                  stopCamera();
+                  setStep(s.num as 1 | 2 | 3);
+                }
+              }}
+              className="flex flex-col items-center focus:outline-none group disabled:cursor-not-allowed"
+            >
+              <div 
+                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all duration-300 ${
+                  step === s.num 
+                    ? 'bg-[#D40511] text-white shadow-sm ring-4 ring-red-150' 
+                    : step > s.num 
+                      ? 'bg-emerald-500 text-white shadow-2xs' 
+                      : 'bg-slate-50 text-slate-400 border border-slate-100'
+                }`}
+              >
+                {step > s.num ? <CheckCircle2 className="w-4 h-4 text-white" /> : s.num}
+              </div>
+              <span className={`text-[10px] font-bold mt-2 tracking-wide uppercase transition-colors duration-300 ${
+                step === s.num ? 'text-slate-800' : 'text-slate-400'
+              }`}>
+                {s.label}
+              </span>
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+
       {successMsg && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl flex items-start gap-3" id="register-success-box">
-          <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+        <div className="p-5 bg-emerald-50 border border-emerald-100 text-emerald-800 rounded-2xl flex items-start gap-4 shadow-sm" id="register-success-box">
+          <div className="p-2 bg-emerald-500 text-white rounded-xl">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+          </div>
           <div>
-            <p className="text-sm font-bold font-sans">Auditoria salva com sucesso!</p>
-            <p className="text-xs text-emerald-700 mt-0.5">O preço foi processado, otimizado e sincronizado no painel geral.</p>
+            <p className="text-sm font-bold font-sans">Preço Auditado com Sucesso!</p>
+            <p className="text-xs text-emerald-700/90 mt-1 font-medium leading-relaxed">
+              O registro foi consolidado, verificado por scanner IA e transmitido em tempo real para o dashboard executivo do RADAR.
+            </p>
           </div>
         </div>
       )}
 
       {errorMsg && (
-        <div className="p-4 bg-red-50 border border-red-200 text-red-800 rounded-xl flex items-start gap-3" id="register-error-box">
-          <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+        <div className="p-5 bg-rose-50 border border-rose-100 text-rose-800 rounded-2xl flex items-start gap-4 shadow-sm" id="register-error-box">
+          <div className="p-2 bg-rose-500 text-white rounded-xl col-span-1 shrink-0">
+            <AlertTriangle className="w-5 h-5 shrink-0" />
+          </div>
           <div>
-            <p className="text-sm font-bold font-sans">Atenção</p>
-            <p className="text-xs text-red-700 mt-0.5">{errorMsg}</p>
+            <p className="text-sm font-bold font-sans">Falha na Auditoria</p>
+            <p className="text-xs text-rose-700/90 mt-1 font-medium leading-relaxed">{errorMsg}</p>
           </div>
         </div>
       )}
 
-      {/* Main Registration Form */}
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-[#E0E0E0] shadow-sm p-6 space-y-5" id="register-price-form">
-        
-        {/* Product selector search dropdown */}
-        <div className="relative" id="product-search-combobox">
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 mb-1">
-            Produto Auditado *
-          </label>
-          <div className="relative">
-            <input
-              id="register-product-search-input"
-              type="text"
-              placeholder="Digite o nome do produto..."
-              value={productSearch}
-              onChange={(e) => {
-                setProductSearch(e.target.value);
-                setShowSearchDropdown(true);
-              }}
-              onFocus={() => setShowSearchDropdown(true)}
-              className="w-full px-3 py-2.5 bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg text-sm text-[#1A1A1A] placeholder-gray-400 focus:outline-none focus:border-[#D40511]"
-              required
-            />
-            {productSearch && (
-              <button
-                type="button"
-                onClick={() => {
-                  setProductSearch('');
-                  setSelectedProductId('');
-                  setShowSearchDropdown(true);
-                }}
-                className="absolute right-3 top-3 text-xs text-gray-400 hover:text-gray-600"
-              >
-                Limpar
-              </button>
-            )}
+      {/* STEP 1 — Selecionar Rede */}
+      {step === 1 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-8 space-y-6" id="step-1-container">
+          <div className="border-b border-slate-50 pb-4">
+            <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest leading-none">
+              Etapa 1 — Selecionar Rede
+            </h2>
+            <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">
+              Inicie selecionando a bandeira do ponto de venda para habilitar a coleta de fotos e dados.
+            </p>
           </div>
 
-          {/* Dynamic autocomplete dropdown list */}
-          {showSearchDropdown && (
-            <div className="absolute z-10 w-full left-0 mt-1 bg-white border border-[#E0E0E0] rounded-lg shadow-lg max-h-48 overflow-y-auto" id="autocomplete-list">
-              {filteredProductsBySearch.map((prod) => (
-                <div
-                  id={`autocomplete-item-${prod.id}`}
-                  key={prod.id}
-                  onClick={() => handleProductSelect(prod)}
-                  className="px-4 py-2.5 hover:bg-[#F5F5F5] text-xs text-[#1A1A1A] cursor-pointer flex items-center justify-between pointer-events-auto"
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" id="chains-selection-grid">
+            {chains.map((chain) => {
+              const borderCol = chain.logoColor ? chain.logoColor.replace('bg-', 'border-') : 'border-slate-200';
+              const ringColor = chain.logoColor ? chain.logoColor.replace('bg-', 'ring-') : 'ring-red-500';
+
+              return (
+                <button
+                  key={chain.id}
+                  type="button"
+                  id={`select-chain-${chain.id}`}
+                  onClick={() => {
+                    setSelectedChainId(chain.id);
+                    setStep(2);
+                  }}
+                  className={`p-5 rounded-2xl border text-left flex items-center gap-4 transition-all duration-300 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer ${
+                    selectedChainId === chain.id
+                      ? `${borderCol} ring-2 ${ringColor}/30 bg-slate-50/25`
+                      : 'border-slate-100 bg-white hover:border-slate-300 hover:bg-slate-50/10'
+                  }`}
                 >
-                  <div className="flex flex-col min-w-0 pr-2">
-                    <span className="font-medium font-sans text-xs text-[#1A1A1A] truncate">{prod.name}</span>
-                    <span className="text-[9px] text-gray-400 font-sans mt-0.5">
-                      {prod.category} {prod.subcategory ? `• ${prod.subcategory}` : ''} {prod.weight ? `• ${prod.weight}` : ''}
+                  <RetailerLogo chain={chain} size="md" />
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-sm font-black text-slate-800 truncate leading-snug">
+                      {chain.name}
+                    </h3>
+                    <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest block mt-0.5">
+                      Ponto de Venda
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {prod.isCompetitor ? (
-                      <span className="text-[8px] font-extrabold bg-blue-50 text-blue-700 border border-blue-150 rounded px-1.5 py-0.5 whitespace-nowrap uppercase font-mono">
-                        Concorrente: {prod.brand}
-                      </span>
-                    ) : (
-                      <span className={`text-[8px] font-extrabold border rounded px-1.5 py-0.5 whitespace-nowrap uppercase font-mono ${
-                        (prod.brand?.toLowerCase().includes('mavalerio') || prod.brand?.toLowerCase().includes('mavalério'))
-                          ? 'bg-violet-50 text-violet-800 border-violet-150'
-                          : 'bg-emerald-50 text-emerald-800 border-emerald-150'
-                      }`}>
-                        Nossa Marca: {prod.brand || 'Dr. Oetker'}
-                      </span>
-                    )}
+                  <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-slate-500 transition-colors shrink-0 ml-auto" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2 — Foto da Gôndola */}
+      {step === 2 && (
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-8 space-y-6" id="step-2-container">
+          <div className="border-b border-slate-50 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest leading-none">
+                Etapa 2 — Foto da Gôndola
+              </h2>
+              <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">
+                Envie uma foto de gôndola nítida para que a IA detecte preço e produto correspondentes.
+              </p>
+            </div>
+            {selectedChainId && (
+              <div className="sm:flex items-center gap-2 bg-slate-50 border border-slate-100/50 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 self-start sm:self-auto shrink-0 max-w-full truncate">
+                <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                <span className="truncate max-w-[120px]">{chains.find(c => c.id === selectedChainId)?.name}</span>
+              </div>
+            )}
+          </div>
+
+          {!useCamera && !isAnalyzing ? (
+            <div className="space-y-6" id="photo-triggers-container">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                {/* Abrir Câmera */}
+                <button
+                  id="btn-open-camera"
+                  type="button"
+                  onClick={startCamera}
+                  className="p-8 rounded-2xl bg-[#D40511] hover:bg-[#b0040e] text-white flex flex-col items-center justify-center gap-4 transition-all duration-300 group shadow-sm hover:shadow-md cursor-pointer"
+                >
+                  <div className="p-4 bg-white/10 rounded-full group-hover:scale-105 transition-transform">
+                    <Camera className="w-8 h-8 text-white" />
                   </div>
+                  <div className="text-center">
+                    <h3 className="font-extrabold text-base">Abrir Câmera</h3>
+                    <p className="text-xs text-white/70 mt-1 max-w-[160px] mx-auto font-medium leading-relaxed">
+                      Capture fotos em tempo real usando a lente do celular
+                    </p>
+                  </div>
+                </button>
+
+                {/* Selecionar Galeria */}
+                <label
+                  id="label-select-gallery"
+                  className="p-8 rounded-2xl bg-white border border-slate-200 hover:border-[#D40511]/40 text-slate-800 flex flex-col items-center justify-center gap-4 transition-all duration-300 group shadow-2xs hover:shadow-xs cursor-pointer"
+                >
+                  <div className="p-4 bg-slate-50 border border-slate-100 group-hover:bg-slate-100 group-hover:border-[#D40511]/20 rounded-full group-hover:scale-105 transition-all">
+                    <Image className="w-8 h-8 text-slate-500 group-hover:text-[#D40511]" />
+                  </div>
+                  <div className="text-center">
+                    <h3 className="font-extrabold text-base text-slate-800">Selecionar Galeria</h3>
+                    <p className="text-xs text-slate-400 mt-1 max-w-[160px] mx-auto font-medium leading-relaxed">
+                      Selecione uma imagem das pastas locais do dispositivo
+                    </p>
+                  </div>
+                  <input
+                    id="register-photo-file-picker"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+
+              <div className="flex flex-col items-center gap-4 pt-4 border-t border-slate-50 text-center">
+                <button
+                  id="btn-skip-photo"
+                  type="button"
+                  onClick={() => {
+                    setImagePreview(null);
+                    setAiAnalysisMessage('');
+                    setIsAnalyzing(false);
+                    // Clear fields to let user insert manually
+                    setSelectedProductId('');
+                    setProductSearch('');
+                    setPrice('');
+                    setNotes('');
+                    setStep(3);
+                  }}
+                  className="text-xs text-slate-500 hover:text-[#D40511] font-bold transition-colors inline-flex items-center gap-1 cursor-pointer"
+                >
+                  Registrar sem foto →
+                </button>
+              </div>
+            </div>
+          ) : useCamera ? (
+            /* Live Camera view screen */
+            <div className="space-y-5" id="live-camera-feed-box-camera">
+              <div className="relative rounded-2xl overflow-hidden bg-black aspect-video max-h-72 shadow-inner border border-slate-800">
+                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted></video>
+                {/* Overlay bounding box effect */}
+                <div className="absolute inset-x-6 inset-y-8 border border-dashed border-violet-400/50 rounded-lg pointer-events-none flex items-center justify-center">
+                  <div className="w-full h-0.5 bg-violet-400 animate-pulse absolute"></div>
+                  <span className="text-[10px] text-violet-300 font-mono tracking-widest font-extrabold uppercase bg-black/65 px-2.5 py-0.5 rounded border border-violet-500/20">Ajuste o Enquadramento</span>
                 </div>
-              ))}
-              {filteredProductsBySearch.length === 0 && (
-                <div className="p-3 text-center text-xs text-gray-400 italic">Nenhum produto correspondente ativo.</div>
+              </div>
+              <div className="flex justify-center gap-3">
+                <button
+                  id="capture-shutter-btn"
+                  type="button"
+                  onClick={captureFrame}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <CheckCircle2 className="w-4 h-4 shrink-0" />
+                  <span>Capturar Foto</span>
+                </button>
+                <button
+                  id="cancel-camera-stream-btn"
+                  type="button"
+                  onClick={stopCamera}
+                  className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <XCircle className="w-4 h-4 shrink-0" />
+                  <span>Cancelar</span>
+                </button>
+              </div>
+            </div>
+          ) : isAnalyzing ? (
+            /* AI Scanner Processing animation screen */
+            <div className="flex flex-col items-center justify-center gap-4 py-12 text-center" id="ai-scanning-progress">
+              <div className="relative">
+                <div className="w-16 h-16 rounded-full border-4 border-slate-50 border-t-violet-600 animate-spin"></div>
+                <Sparkles className="w-6 h-6 text-violet-600 animate-pulse absolute top-5 left-5" />
+              </div>
+              <div>
+                <h4 className="font-extrabold text-slate-800 text-sm">Scanner Inteligente Ativo</h4>
+                <p className="text-xs text-slate-400 mt-1 animate-pulse font-medium">Lendo produto e preço da prateleira por Inteligência Artificial...</p>
+              </div>
+              {imagePreview && (
+                <div className="mt-4 max-w-xs relative rounded-xl overflow-hidden border border-slate-100 shadow-2xs">
+                  <img src={imagePreview} alt="Enviado" className="max-h-36 object-contain opacity-70" referrerPolicy="no-referrer" />
+                </div>
               )}
             </div>
-          )}
-        </div>
+          ) : null}
 
-        {/* Chain Selector and Price Input */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" id="chain-price-inputs">
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 mb-1">
-              Bandeira / Canal *
-            </label>
-            <select
-              id="register-chain-select"
-              value={selectedChainId}
-              onChange={(e) => setSelectedChainId(e.target.value)}
-              className="w-full px-3 py-2.5 bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg text-sm text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
-              required
+          <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
+            <button
+              type="button"
+              onClick={() => setStep(1)}
+              className="text-xs font-extrabold text-slate-400 hover:text-slate-850 transition duration-150 cursor-pointer inline-flex items-center gap-1"
             >
-              <option value="">Selecione a rede do ponto de venda...</option>
-              {chains.map((chain) => (
-                <option key={chain.id} value={chain.id}>{chain.name}</option>
-              ))}
-            </select>
+              &larr; Voltar para Rede
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3 — Confirmação dos dados */}
+      {step === 3 && (
+        <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-100 shadow-xs p-8 space-y-6" id="step-3-container">
+          <div className="border-b border-slate-50 pb-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest leading-none">
+                Etapa 3 — Confirmação dos dados
+              </h2>
+              <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">
+                Revise os valores detectados automaticamente ou faça as correções necessárias.
+              </p>
+            </div>
+            {selectedChainId && (
+              <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 self-start sm:self-auto shrink-0 max-w-full truncate">
+                <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                <span className="truncate max-w-[120px] font-bold">{chains.find(c => c.id === selectedChainId)?.name}</span>
+              </div>
+            )}
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 mb-1">
-              Preço de Gôndola (R$) *
-            </label>
-            <div className="relative">
-              <span className="absolute left-3 top-2.5 text-sm text-gray-400 font-mono">R$</span>
-              <input
-                id="register-price-input"
-                type="text"
-                placeholder="0,00"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-                className="w-full pl-9 pr-3 py-2.5 bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg text-sm text-[#1A1A1A] font-mono focus:outline-none focus:border-[#D40511]"
-                required
-              />
+          {/* AI Banner feedback if image exists */}
+          {imagePreview && (
+            <div className="p-4 bg-violet-50/45 border border-violet-100/50 rounded-xl space-y-4" id="ai-feedback-banner">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50/20 p-1 rounded-lg">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-violet-900">Leitura Inteligente Concluída</h4>
+                    <p className="text-xs text-violet-700/90 mt-0.5 leading-relaxed">{aiAnalysisMessage || 'Valores preenchidos sob os rótulos de gôndola.'}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => analyzeImage(imagePreview)}
+                  className="sm:self-center shrink-0 flex items-center justify-center gap-1 text-[9px] bg-violet-600 hover:bg-violet-700 text-white font-extrabold py-1.5 px-3 rounded-lg font-mono transition cursor-pointer"
+                >
+                  <RefreshCw className="w-2.5 h-2.5 animate-spin-hover" />
+                  Reanalisar
+                </button>
+              </div>
+
+              {/* Compression stats values */}
+              <div className="grid grid-cols-3 gap-2 bg-slate-900 text-white rounded-xl p-3 max-w-sm mx-auto text-xs text-center divide-x divide-slate-800">
+                <div>
+                  <span className="block text-[8px] text-slate-400 font-mono capitalize mb-0.5">Original</span>
+                  <span className="font-mono text-slate-200">{originalSizeKB} KB</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] text-slate-400 font-mono capitalize mb-0.5">Comprimido</span>
+                  <span className="font-mono text-emerald-400 font-semibold">{compressedSizeKB} KB</span>
+                </div>
+                <div>
+                  <span className="block text-[8px] text-slate-400 font-mono capitalize mb-0.5 font-bold">Ganho</span>
+                  <span className="font-mono text-emerald-400 font-black">-{compressionRatio}%</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Inputs */}
+          <div className="space-y-5" id="form-fields-grid">
+            
+            {/* Product combo picker */}
+            <div className="relative" id="product-search-combobox">
+              <label className="block text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-2">
+                Produto Auditado *
+              </label>
+              <div className="relative">
+                <input
+                  id="register-product-search-input"
+                  type="text"
+                  placeholder="Digite o nome, marca ou peso do produto..."
+                  value={productSearch}
+                  onChange={(e) => {
+                    setProductSearch(e.target.value);
+                    setShowSearchDropdown(true);
+                  }}
+                  onFocus={() => setShowSearchDropdown(true)}
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all"
+                  required
+                />
+                {productSearch && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setProductSearch('');
+                      setSelectedProductId('');
+                      setShowSearchDropdown(true);
+                    }}
+                    className="absolute right-4 top-3 text-xs text-slate-400 hover:text-slate-600 font-bold"
+                  >
+                    Limpar
+                  </button>
+                )}
+              </div>
+
+              {/* Combobox autocomplete selections list */}
+              {showSearchDropdown && (
+                <div className="absolute z-10 w-full left-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto pointer-events-auto" id="autocomplete-list" onClick={(e) => e.stopPropagation()}>
+                  {filteredProductsBySearch.map((prod) => (
+                    <div
+                      id={`autocomplete-item-${prod.id}`}
+                      key={prod.id}
+                      onClick={() => handleProductSelect(prod)}
+                      className="px-4 py-3 hover:bg-slate-50 text-xs text-slate-800 cursor-pointer flex items-center justify-between pointer-events-auto border-b border-slate-50/50 last:border-0"
+                    >
+                      <div className="flex flex-col min-w-0 pr-2">
+                        <span className="font-bold text-slate-800 truncate">{prod.name}</span>
+                        <span className="text-[10px] text-slate-400 mt-0.5">
+                          {prod.category} {prod.subcategory ? `• ${prod.subcategory}` : ''} {prod.weight ? `• ${prod.weight}` : ''}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {prod.isCompetitor ? (
+                          <span className="text-[8px] font-extrabold bg-rose-50 text-rose-700 border border-rose-100 rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide">
+                            {prod.brand}
+                          </span>
+                        ) : (
+                          <span className={`text-[8px] font-extrabold border rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide ${
+                            (prod.brand?.toLowerCase().includes('mavalerio') || prod.brand?.toLowerCase().includes('mavalério'))
+                              ? 'bg-violet-50 text-violet-800 border-violet-100'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                          }`}>
+                            {prod.brand || 'Dr. Oetker'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {filteredProductsBySearch.length === 0 && (
+                    <div className="p-4 text-center text-xs text-slate-400 italic">Nenhum produto correspondente encontrado.</div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Price field */}
+            <div>
+              <label className="block text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-2">
+                Preço de Gôndola (R$) *
+              </label>
+              <div className="relative">
+                <span className="absolute left-4 top-3 text-sm text-slate-400 font-mono font-bold">R$</span>
+                <input
+                  id="register-price-input"
+                  type="text"
+                  placeholder="0,00"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-800 font-mono focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Observations text field */}
+            <div>
+              <label className="block text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-2">
+                Observações Técnicas <span className="text-slate-400 font-medium lowercase">(opcional)</span>
+              </label>
+              <textarea
+                id="register-notes-textarea"
+                placeholder="Destaques na gôndola, ruptura de estoque, preços promocionais, campanhas, etc."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all h-24 resize-none"
+              ></textarea>
+            </div>
+
+          </div>
+
+          <canvas ref={canvasRef} className="hidden"></canvas>
+
+          {/* Stepper bottom control buttons */}
+          <div className="pt-4 border-t border-slate-50 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <button
+              type="button"
+              onClick={() => setStep(2)}
+              className="w-full sm:w-auto text-xs font-extrabold text-slate-400 hover:text-slate-850 transition duration-150 cursor-pointer inline-flex items-center justify-center gap-1 py-3"
+            >
+              &larr; Voltar para Foto
+            </button>
+
+            <button
+              id="submit-register-price-form"
+              type="submit"
+              disabled={isUploading}
+              className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-8 py-3.5 rounded-xl text-sm font-bold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-sm flex items-center justify-center gap-2"
+            >
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  <span>Hospedando Imagem...</span>
+                </>
+              ) : (
+                <span>Confirmar Auditoria de Preço</span>
+              )}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {/* Success/Redirect prompt Modal overlay */}
+      {showRedirectPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs font-sans" id="register-redirect-modal-overlay">
+          <div className="bg-white rounded-2xl border border-slate-100 p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl space-y-6" id="register-redirect-modal-content">
+            <div className="mx-auto w-12 h-12 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center">
+              <CheckCircle2 className="w-5 h-5 shrink-0" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-lg font-extrabold text-slate-900">Preço Registrado com Sucesso!</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Os dados foram computados e publicados no painel do RADAR. Deseja realizar outra auditoria de preço agora?
+              </p>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                id="btn-register-more-yes"
+                onClick={() => {
+                  setShowRedirectPrompt(false);
+                }}
+                className="flex-1 px-4 py-2.5 bg-[#D40511] hover:bg-[#b0040e] text-white rounded-xl text-xs font-bold transition duration-150 cursor-pointer shadow-xs text-center"
+              >
+                Sim, registrar outro
+              </button>
+              <button
+                type="button"
+                id="btn-register-more-no"
+                onClick={() => {
+                  setShowRedirectPrompt(false);
+                  if (onNavigate && lastRegisteredProductId) {
+                    onNavigate("produtos", { action: "detail", productId: lastRegisteredProductId });
+                  }
+                }}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition duration-150 cursor-pointer border border-slate-200 text-center"
+              >
+                Não, ver detalhes
+              </button>
             </div>
           </div>
         </div>
-
-        {/* Audit Verification Photo Upload Component (Required as proof) */}
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 mb-1">
-            Foto Comprobatória de Gôndola (Opcional)
-          </label>
-
-          <div className="border-2 border-dashed border-[#E0E0E0] rounded-xl p-6 bg-[#F5F5F5]/40 text-center relative" id="photo-uploader-container">
-            {useCamera ? (
-              // Live camera feed simulator frame
-              <div className="space-y-4" id="live-camera-feed-box">
-                <video ref={videoRef} className="w-full rounded-lg mx-auto aspect-video max-h-48 object-cover bg-black" playsInline muted></video>
-                <div className="flex justify-center gap-2">
-                  <button
-                    id="trigger-shutter-btn"
-                    type="button"
-                    onClick={captureFrame}
-                    className="px-4 py-2 bg-emerald-600 text-white rounded-md text-xs font-bold hover:bg-emerald-700 transition"
-                  >
-                    Capturar Foto
-                  </button>
-                  <button
-                    id="cancel-camera-btn"
-                    type="button"
-                    onClick={stopCamera}
-                    className="px-4 py-2 bg-[#D40511] text-white rounded-md text-xs font-bold hover:bg-red-700 transition"
-                  >
-                    Fechar Câmera
-                  </button>
-                </div>
-              </div>
-            ) : imagePreview ? (
-              // Uploaded/Captured Image Preview and Compression Metrics Banner
-              <div className="space-y-4" id="uploaded-photo-preview-box">
-                <div className="relative inline-block max-h-48 overflow-hidden rounded-lg border border-[#E0E0E0]">
-                  <img src={imagePreview} alt="Comprovação de Gôndola" referrerPolicy="no-referrer" className="max-h-44 object-contain" />
-                  <button
-                    id="remove-uploaded-photo-btn"
-                    type="button"
-                    onClick={() => {
-                      setImagePreview(null);
-                      setAiAnalysisMessage('');
-                      setIsAnalyzing(false);
-                    }}
-                    className="absolute -top-1 -right-1 bg-[#1A1A1A] text-white rounded-full w-5 h-5 flex items-center justify-center font-bold text-xs cursor-pointer"
-                  >
-                    &times;
-                  </button>
-                </div>
-
-                {/* Intelligent Compression Savings Tag */}
-                <div className="bg-[#1A1A1A] text-white rounded-xl p-3 max-w-sm mx-auto text-xs grid grid-cols-3 divide-x divide-gray-700 text-center">
-                  <div>
-                    <span className="block text-[8px] text-gray-400 capitalize font-mono">Original</span>
-                    <span className="font-mono text-xs">{originalSizeKB} KB</span>
-                  </div>
-                  <div>
-                    <span className="block text-[8px] text-gray-400 capitalize font-mono">Comprimido</span>
-                    <span className="font-mono text-emerald-400 text-xs font-semibold">{compressedSizeKB} KB</span>
-                  </div>
-                  <div>
-                    <span className="block text-[8px] text-gray-400 capitalize font-mono">Economia</span>
-                    <span className="font-mono text-emerald-400 text-xs font-bold"><Sparkles className="inline w-3 h-3 text-amber-400 -mt-0.5" /> -{compressionRatio}%</span>
-                  </div>
-                </div>
-
-                {/* AI Scanner Analysis Box */}
-                {isAnalyzing ? (
-                  <div className="flex items-center justify-center gap-2 p-3 text-xs text-violet-700 bg-violet-50 border border-violet-100 rounded-xl animate-pulse max-w-sm mx-auto">
-                    <Loader2 className="w-4 h-4 animate-spin text-violet-600 shrink-0" />
-                    <span className="font-semibold">Scanner Inteligente IA analisando preço e produto...</span>
-                  </div>
-                ) : aiAnalysisMessage ? (
-                  <div className="p-3 text-xs bg-violet-50 text-violet-800 border border-violet-200 rounded-xl flex items-center justify-between gap-3 max-w-sm mx-auto text-left">
-                    <div className="flex items-start gap-1.5 min-w-0">
-                      <Sparkles className="w-4 h-4 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
-                      <span className="leading-relaxed">{aiAnalysisMessage}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => analyzeImage(imagePreview)}
-                      className="shrink-0 flex items-center gap-1 text-[9px] bg-violet-600 text-white font-bold py-1.5 px-2.5 rounded hover:bg-violet-700 font-mono transition cursor-pointer"
-                    >
-                      <RefreshCw className="w-2.5 h-2.5" />
-                      Reanalisar
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              // Empty selection prompt buttons
-              <div className="space-y-3" id="uploader-idle-prompt">
-                <div className="mx-auto w-10 h-10 bg-[#F5F5F5] rounded-full flex items-center justify-center text-gray-400">
-                  <Camera className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 font-sans">
-                    Arraste ou envie uma foto do preço legível na prateleira
-                  </p>
-                  <p className="text-[10px] text-gray-400 mt-1">
-                    Formatos suportados: PNG, JPG, WEBP. O sistema comprimirá antes do upload para Supabase.
-                  </p>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-center gap-3 pt-2" id="uploader-action-triggers">
-                  {/* File Selector */}
-                  <label className="px-4 py-2 bg-white border border-[#E0E0E0] hover:border-[#D40511] font-sans text-xs font-bold text-gray-700 rounded-lg shadow-sm hover:shadow duration-150 inline-flex items-center gap-1.5 cursor-pointer">
-                    <Image className="w-3.5 h-3.5 text-gray-400" />
-                    <span>Selecionar Galeria</span>
-                    <input
-                      id="register-photo-file-picker"
-                      type="file"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                  </label>
-
-                  {/* Camera Launcher */}
-                  <button
-                    id="trigger-camera-launcher-btn"
-                    type="button"
-                    onClick={startCamera}
-                    className="px-4 py-2 bg-[#D40511] text-white hover:bg-red-700 font-sans text-xs font-bold rounded-lg shadow-sm hover:shadow duration-150 inline-flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>Abrir Câmera</span>
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Observations Optional Comments */}
-        <div>
-          <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 mb-1">
-            Observações Técnicas <span className="text-gray-400 normal-case">(Opcional)</span>
-          </label>
-          <textarea
-            id="register-notes-textarea"
-            placeholder="Destaques na gôndola, ruptura de estoque, preços promocionais, campanhas, etc."
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            className="w-full px-3 py-2 bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg text-sm text-[#1A1A1A] placeholder-gray-400 focus:outline-none focus:border-[#D40511] h-20 resize-none"
-          ></textarea>
-        </div>
-
-        {/* Hidden Canvas reference for camera capture */}
-        <canvas ref={canvasRef} className="hidden"></canvas>
-
-        {/* Submit action */}
-        <div className="pt-2">
-          <button
-            id="submit-register-price-form"
-            type="submit"
-            disabled={isUploading}
-            className="w-full bg-[#D40511] text-white py-3 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-sm active:translate-y-0.5 inline-flex items-center justify-center gap-2"
-          >
-            {isUploading ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Hospedando Imagem no Supabase...</span>
-              </>
-            ) : (
-              <span>Registrar Preço e Auditar</span>
-            )}
-          </button>
-        </div>
-      </form>
+      )}
     </div>
   );
 }

@@ -185,6 +185,9 @@ export function Products({
         setNewProdIsCompetitor(prod.isCompetitor || false);
         setNewProdBrand(prod.brand || "Dr. Oetker");
       }
+    } else if (pageParams?.action === "detail" && pageParams.productId) {
+      setSelectedProductId(pageParams.productId);
+      setActiveView("detail");
     } else {
       setActiveView("list");
     }
@@ -1871,119 +1874,115 @@ export function Products({
                     className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3" 
                     id="current-prices-cards-grid"
                   >
-                    {chains.map((chain) => {
-                      const chainRecords = selectedProductHistory.filter(
-                        (r) => r.chainId === chain.id,
-                      );
-                      const latestRecord = chainRecords[chainRecords.length - 1];
+                    {pricedRecords.length > 0 ? (
+                      pricedRecords.map(({ chain, latestRecord }) => {
+                        const calculatedPercent =
+                          latestRecord && selectedProduct
+                            ? ((latestRecord.price - selectedProduct.basePrice) /
+                                selectedProduct.basePrice) *
+                              100
+                            : null;
 
-                      const calculatedPercent =
-                        latestRecord && selectedProduct
-                          ? ((latestRecord.price - selectedProduct.basePrice) /
-                              selectedProduct.basePrice) *
-                            100
-                          : null;
+                        // Redesign comparison indicators & colors as instructed
+                        let borderStyle = "border-l-4 border-l-gray-300";
+                        let bgStyle = "bg-white border-y border-r border-[#E0E0E0] text-gray-700 hover:border-gray-300";
+                        let indicatorText = "Na Média";
+                        let indicatorColorClass = "text-blue-600 bg-blue-50 border-blue-150";
 
-                      // Redesign comparison indicators & colors as instructed
-                      let borderStyle = "border-l-4 border-l-gray-300";
-                      let bgStyle = "bg-white border-y border-r border-[#E0E0E0] text-gray-700 hover:border-gray-300";
-                      let indicatorText = "Na Média";
-                      let indicatorColorClass = "text-blue-600 bg-blue-50 border-blue-150";
-
-                      if (latestRecord && pricedRecords.length > 1) {
-                        const diff = latestRecord.price - averagePrice;
-                        if (diff < -0.01) {
-                          borderStyle = "border-l-4 border-l-emerald-500";
-                          bgStyle = "bg-gradient-to-r from-emerald-50/10 to-white/90 border-y border-r border-emerald-200/70 text-emerald-950 hover:bg-emerald-50/20 hover:border-emerald-300/80";
-                          indicatorText = "- Média";
-                          indicatorColorClass = "text-emerald-700 bg-emerald-50 border-emerald-150";
-                        } else if (diff > 0.01) {
-                          borderStyle = "border-l-4 border-l-red-500";
-                          bgStyle = "bg-gradient-to-r from-red-50/10 to-white/90 border-y border-r border-red-150/70 text-red-950 hover:bg-red-50/20 hover:border-red-250/80";
-                          indicatorText = "+ Média";
-                          indicatorColorClass = "text-red-700 bg-red-50 border-red-150";
-                        } else {
-                          borderStyle = "border-l-4 border-l-gray-350";
-                          bgStyle = "bg-gradient-to-r from-gray-50/10 to-white/90 border-y border-r border-gray-200 text-gray-800 hover:bg-gray-50/20 hover:border-gray-350";
-                          indicatorText = "No Preço";
-                          indicatorColorClass = "text-gray-650 bg-gray-50 border-gray-200";
+                        if (latestRecord && pricedRecords.length > 1) {
+                          const diff = latestRecord.price - averagePrice;
+                          if (diff < -0.01) {
+                            borderStyle = "border-l-4 border-l-emerald-500";
+                            bgStyle = "bg-gradient-to-r from-emerald-50/10 to-white/90 border-y border-r border-emerald-200/70 text-emerald-950 hover:bg-emerald-50/20 hover:border-emerald-300/80";
+                            indicatorText = "- Média";
+                            indicatorColorClass = "text-emerald-700 bg-emerald-50 border-emerald-150";
+                          } else if (diff > 0.01) {
+                            borderStyle = "border-l-4 border-l-red-500";
+                            bgStyle = "bg-gradient-to-r from-red-50/10 to-white/90 border-y border-r border-red-150/70 text-red-950 hover:bg-red-50/20 hover:border-red-250/80";
+                            indicatorText = "+ Média";
+                            indicatorColorClass = "text-red-700 bg-red-50 border-red-150";
+                          } else {
+                            borderStyle = "border-l-4 border-l-gray-350";
+                            bgStyle = "bg-gradient-to-r from-gray-50/10 to-white/90 border-y border-r border-gray-200 text-gray-800 hover:bg-gray-50/20 hover:border-gray-350";
+                            indicatorText = "No Preço";
+                            indicatorColorClass = "text-gray-650 bg-gray-50 border-gray-200";
+                          }
                         }
-                      } else if (!latestRecord) {
-                        borderStyle = "border-l-4 border-l-gray-200";
-                        bgStyle = "bg-gray-50/30 border-y border-r border-gray-150 text-gray-400";
-                        indicatorText = "Sem dados";
-                        indicatorColorClass = "text-gray-400 bg-gray-100 border-gray-200";
-                      }
 
-                      const tooltipText = latestRecord
-                        ? `Registrado por: ${latestRecord.userName || "N/A"} • Preço Base: R$ ${selectedProduct.basePrice.toFixed(2)} (${calculatedPercent !== null ? `${calculatedPercent > 0 ? "+" : ""}${calculatedPercent.toFixed(1)}%` : "0%"})`
-                        : "Nenhum histórico nesta rede";
+                        const tooltipText = latestRecord
+                          ? `Registrado por: ${latestRecord.userName || "N/A"} • Preço Base: R$ ${selectedProduct.basePrice.toFixed(2)} (${calculatedPercent !== null ? `${calculatedPercent > 0 ? "+" : ""}${calculatedPercent.toFixed(1)}%` : "0%"})`
+                          : "Nenhum histórico nesta rede";
 
-                      return (
-                        <div
-                          key={chain.id}
-                          title={tooltipText}
-                          className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-sm min-h-[110px] ${borderStyle} ${bgStyle}`}
-                          id={`current-price-card-${chain.id}`}
-                        >
-                          {/* Top Row: Logo larger (increased to w-7 h-7) & Chain Name smaller/discrete */}
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span
-                              style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
-                              className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-[10px] shrink-0 overflow-hidden border border-gray-100 shadow-xs ${
-                                chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
-                              }`}
-                            >
-                              {chain.logoUrl ? (
-                                <img
-                                  src={chain.logoUrl}
-                                  alt={chain.name}
-                                  className="w-full h-full object-contain p-0.5 bg-white"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <span>{chain.name.substring(0, 2).toUpperCase()}</span>
-                              )}
-                            </span>
-                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-tight truncate block leading-none flex-1">
-                              {chain.name}
-                            </span>
-                          </div>
+                        return (
+                          <div
+                            key={chain.id}
+                            title={tooltipText}
+                            className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-sm min-h-[110px] ${borderStyle} ${bgStyle}`}
+                            id={`current-price-card-${chain.id}`}
+                          >
+                            {/* Top Row: Logo larger (increased to w-7 h-7) & Chain Name smaller/discrete */}
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
+                                className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-[10px] shrink-0 overflow-hidden border border-gray-100 shadow-xs relative ${
+                                  chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
+                                }`}
+                              >
+                                {chain.logoUrl ? (
+                                  <img
+                                    src={chain.logoUrl}
+                                    alt={chain.name}
+                                    className="w-full h-full object-contain p-0.5 bg-white"
+                                    referrerPolicy="no-referrer"
+                                  />
+                                ) : (
+                                  <span>{chain.name.substring(0, 2).toUpperCase()}</span>
+                                )}
+                              </span>
+                              <span className="text-[9px] font-black text-gray-400 uppercase tracking-tight truncate block leading-none flex-1">
+                                {chain.name}
+                              </span>
+                            </div>
 
-                          {/* Price in maximum prominence (Display typography style) */}
-                          <div className="my-2.5 text-left">
-                            {latestRecord ? (
-                              <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline">
-                                <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
-                                {latestRecord.price.toFixed(2)}
-                              </div>
-                            ) : (
-                              <div className="text-[10px] font-bold text-gray-350 italic">
-                                ————
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Footer Row: Date & Small Pill Status Info */}
-                          <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
-                            <span className="text-[8px] text-gray-400 font-mono flex items-center gap-0.5 min-w-0">
+                            {/* Price in maximum prominence (Display typography style) */}
+                            <div className="my-2.5 text-left">
                               {latestRecord ? (
-                                <>
-                                  <Clock className="w-2 h-2 text-gray-300 shrink-0" />
-                                  <span className="truncate">{formatDateBR(latestRecord.date).substring(0, 5)}</span>
-                                </>
+                                <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline">
+                                  <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
+                                  {latestRecord.price.toFixed(2)}
+                                </div>
                               ) : (
-                                "-"
+                                <div className="text-[10px] font-bold text-gray-350 italic">
+                                  ————
+                                </div>
                               )}
-                            </span>
-                            
-                            <span className={`text-[8px] font-bold uppercase px-1 py-0.2 rounded border tracking-tight truncate shrink-0 ${indicatorColorClass}`}>
-                              {indicatorText}
-                            </span>
+                            </div>
+
+                            {/* Footer Row: Date & Small Pill Status Info */}
+                            <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
+                              <span className="text-[8px] text-gray-400 font-mono flex items-center gap-0.5 min-w-0">
+                                {latestRecord ? (
+                                  <>
+                                    <Clock className="w-2 h-2 text-gray-300 shrink-0" />
+                                    <span className="truncate">{formatDateBR(latestRecord.date).substring(0, 5)}</span>
+                                  </>
+                                ) : (
+                                  "-"
+                                )}
+                              </span>
+                              
+                              <span className={`text-[8px] font-bold uppercase px-1 py-0.2 rounded border tracking-tight truncate shrink-0 ${indicatorColorClass}`}>
+                                {indicatorText}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    ) : (
+                      <div className="col-span-full py-8 text-center text-xs font-medium text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 font-sans italic" id="no-current-prices-alert">
+                        Nenhum preço coletado atualmente para este produto.
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -2167,10 +2166,14 @@ export function Products({
                           return (
                             <div
                               key={item.product.id}
-                              className={`p-3.5 rounded-xl border transition-all duration-150 ${
+                              onClick={() => {
+                                handleProductClick(item.product.id);
+                                window.scrollTo({ top: 0, behavior: "smooth" });
+                              }}
+                              className={`p-3.5 rounded-xl border transition-all duration-150 cursor-pointer ${
                                 isSelf
-                                  ? "bg-amber-50/20 border-amber-300 shadow-xs animate-pulse"
-                                  : "bg-white border-gray-150 hover:border-gray-250 hover:bg-gray-50/30"
+                                  ? "bg-amber-50/20 border-amber-300 shadow-xs ring-2 ring-amber-500/20"
+                                  : "bg-white border-gray-150 hover:border-gray-250 hover:bg-gray-100/45 hover:shadow-2xs"
                               }`}
                               id={`peer-row-${item.product.id}`}
                             >

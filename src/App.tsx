@@ -568,6 +568,7 @@ export default function App() {
             chains={state.chains}
             onSaveRecord={handleSavePriceRecord}
             currentUser={state.currentUser}
+            onNavigate={handleNavigate}
           />
         )}
 
