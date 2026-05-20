@@ -476,15 +476,24 @@ export default function App() {
             id="sidebar-user-card"
           >
             <div className="flex items-center gap-2.5 min-w-0">
-              <span className="w-8 h-8 rounded-full bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0">
-                {state.currentUser.avatarUrl || "JA"}
+              <span className="w-8 h-8 rounded-full bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
+                {state.currentUser.avatarUrl && (state.currentUser.avatarUrl.startsWith("http") || state.currentUser.avatarUrl.startsWith("data:")) ? (
+                  <img
+                    src={state.currentUser.avatarUrl}
+                    alt={state.currentUser.name}
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  state.currentUser.avatarUrl || "JA"
+                )}
               </span>
               <div className="min-w-0">
                 <p className="text-xs font-mono font-bold text-[#1A1A1A] truncate">
                   {state.currentUser.name}
                 </p>
                 <p className="text-[10px] text-gray-500 truncate lowercase">
-                  {state.currentUser.role === "gestor" ? "Gestor" : "Auditor"}
+                  {state.currentUser.role === "gestor" ? "Gestor/Administrador" : "Vendedor / Campo"}
                 </p>
               </div>
             </div>
@@ -522,8 +531,17 @@ export default function App() {
 
         <div className="flex items-center gap-2">
           {/* Quick active profile bubble */}
-          <span className="w-7 h-7 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-[10px] uppercase">
-            {state.currentUser.avatarUrl}
+          <span className="w-7 h-7 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-[10px] uppercase overflow-hidden shrink-0">
+            {state.currentUser.avatarUrl && (state.currentUser.avatarUrl.startsWith("http") || state.currentUser.avatarUrl.startsWith("data:")) ? (
+              <img
+                src={state.currentUser.avatarUrl}
+                alt={state.currentUser.name}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              state.currentUser.avatarUrl || "JA"
+            )}
           </span>
           <button
             id="mobile-quick-logout-btn"
@@ -586,6 +604,7 @@ export default function App() {
             products={state.products}
             chains={state.chains}
             users={state.users}
+            currentUser={state.currentUser}
             onAddProduct={handleAddProduct}
             onDeleteProduct={handleDeleteProduct}
             onAddChain={handleAddChain}

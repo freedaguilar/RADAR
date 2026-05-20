@@ -110,6 +110,7 @@ interface SettingsProps {
   products: Product[];
   chains: Chain[];
   users: User[];
+  currentUser?: User | null;
   onAddProduct: (newProduct: Product) => void;
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
@@ -125,6 +126,7 @@ export function Settings({
   products,
   chains,
   users,
+  currentUser,
   onAddProduct,
   onEditProduct,
   onDeleteProduct,
@@ -179,6 +181,9 @@ export function Settings({
   const [newUserRole, setNewUserRole] = useState<"gestor" | "vendedor">(
     "vendedor",
   );
+  const [newUserAvatarUrl, setNewUserAvatarUrl] = useState("");
+  const [isUploadingUserAvatar, setIsUploadingUserAvatar] = useState(false);
+  const [userAvatarDragActive, setUserAvatarDragActive] = useState(false);
   const [userFormError, setUserFormError] = useState("");
 
   const [filterText, setFilterText] = useState("");
@@ -475,6 +480,49 @@ export function Settings({
     }
   };
 
+  const handleUserAvatarFileChange = async (file: File) => {
+    if (!file) return;
+    
+    const validTypes = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml"];
+    if (!validTypes.includes(file.type)) {
+      setUserFormError("Formato de arquivo inválido. Apenas PNG, JPG e SVG são aceitos.");
+      return;
+    }
+    
+    setIsUploadingUserAvatar(true);
+    setUserFormError("");
+    
+    try {
+      const url = await uploadToSupabaseStorage(file, "images", "avatars/colaboradores");
+      setNewUserAvatarUrl(url);
+    } catch (err) {
+      console.error("Error uploading avatar:", err);
+      setUserFormError("Erro ao enviar imagem de foto. Tente novamente.");
+    } finally {
+      setIsUploadingUserAvatar(false);
+    }
+  };
+
+  const handleUserAvatarDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setUserAvatarDragActive(true);
+    } else if (e.type === "dragleave" || e.type === "drop") {
+      setUserAvatarDragActive(false);
+    }
+  };
+
+  const handleUserAvatarDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setUserAvatarDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleUserAvatarFileChange(e.dataTransfer.files[0]);
+    }
+  };
+
   const handleCreateChainSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setChainFormError("");
@@ -558,13 +606,14 @@ export function Settings({
       email: newUserEmail,
       role: newUserRole,
       active: true,
-      avatarUrl: cleanInitials,
+      avatarUrl: newUserAvatarUrl || cleanInitials,
     };
 
     onAddUser(newUserObj);
     setNewUserName("");
     setNewUserEmail("");
     setNewUserRole("vendedor");
+    setNewUserAvatarUrl("");
     triggerSuccessMsg("Usuário cadastrado com sucesso!");
   };
 
@@ -680,26 +729,33 @@ export function Settings({
                         className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
                       />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setProductView("create");
-                        setNewProdName("");
-                        setNewProdCategory("");
-                        setNewProdSubcategory("");
-                        setNewProdWeight("");
-                        setNewProdImageUrl("");
-                        setNewProdBasePrice("0.00");
-                        setNewProdIsCompetitor(false);
-                        setNewProdBrand("");
-                        setFormFeedback(null);
-                        setAutoFilledFields({});
-                        setUserModifiedFields({});
-                      }}
-                      className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition whitespace-nowrap cursor-pointer"
-                    >
-                      Cadastrar Novo Produto
-                    </button>
+                    {currentUser?.role === "gestor" ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProductView("create");
+                          setNewProdName("");
+                          setNewProdCategory("");
+                          setNewProdSubcategory("");
+                          setNewProdWeight("");
+                          setNewProdImageUrl("");
+                          setNewProdBasePrice("0.00");
+                          setNewProdIsCompetitor(false);
+                          setNewProdBrand("");
+                          setFormFeedback(null);
+                          setAutoFilledFields({});
+                          setUserModifiedFields({});
+                        }}
+                        className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition whitespace-nowrap cursor-pointer"
+                      >
+                        Cadastrar Novo Produto
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-slate-500 font-sans text-xs bg-slate-100/60 p-2 rounded-lg border border-slate-200">
+                        <Shield className="w-4 h-4 text-slate-400" />
+                        <span>Edição restrita a Gestores.</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="overflow-x-auto">
@@ -713,7 +769,7 @@ export function Settings({
                           <th className="pb-3">Nome do Produto</th>
                           <th className="pb-3">Categoria</th>
                           <th className="pb-3">Preço Base</th>
-                          <th className="pb-3 text-right">Ações</th>
+                          {currentUser?.role === "gestor" && <th className="pb-3 text-right">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#F5F5F5]">
@@ -739,44 +795,46 @@ export function Settings({
                             <td className="py-2.5 font-mono">
                               R$ {prod.basePrice.toFixed(2)}
                             </td>
-                            <td className="py-2.5 text-right flex items-center justify-end gap-1">
-                              <button
-                                id={`edit-product-setting-${prod.id}`}
-                                onClick={() => {
-                                  setSelectedProductId(prod.id);
-                                  setProductView("edit");
-                                  setNewProdName(prod.name);
-                                  setNewProdCategory(prod.category);
-                                  setNewProdSubcategory(prod.subcategory || "");
-                                  setNewProdWeight(prod.weight || "");
-                                  setNewProdImageUrl(prod.imageUrl || "");
-                                  setNewProdBasePrice(prod.basePrice.toString());
-                                  setNewProdIsCompetitor(prod.isCompetitor || false);
-                                  setNewProdBrand(prod.brand || "");
-                                  setFormFeedback(null);
-                                  setAutoFilledFields({});
-                                  setUserModifiedFields({});
-                                }}
-                                className="text-gray-400 hover:text-[#1A1A1A] p-1.5 rounded transition-colors cursor-pointer"
-                                title="Editar produto"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                id={`delete-product-setting-${prod.id}`}
-                                onClick={() => {
-                                  setDeleteConfirm({
-                                    type: "product",
-                                    id: prod.id,
-                                    name: prod.name,
-                                  });
-                                }}
-                                className="text-gray-400 hover:text-[#D40511] p-1.5 rounded transition-colors cursor-pointer"
-                                title="Remover produto"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </td>
+                            {currentUser?.role === "gestor" ? (
+                              <td className="py-2.5 text-right flex items-center justify-end gap-1">
+                                <button
+                                  id={`edit-product-setting-${prod.id}`}
+                                  onClick={() => {
+                                    setSelectedProductId(prod.id);
+                                    setProductView("edit");
+                                    setNewProdName(prod.name);
+                                    setNewProdCategory(prod.category);
+                                    setNewProdSubcategory(prod.subcategory || "");
+                                    setNewProdWeight(prod.weight || "");
+                                    setNewProdImageUrl(prod.imageUrl || "");
+                                    setNewProdBasePrice(prod.basePrice.toString());
+                                    setNewProdIsCompetitor(prod.isCompetitor || false);
+                                    setNewProdBrand(prod.brand || "");
+                                    setFormFeedback(null);
+                                    setAutoFilledFields({});
+                                    setUserModifiedFields({});
+                                  }}
+                                  className="text-gray-400 hover:text-[#1A1A1A] p-1.5 rounded transition-colors cursor-pointer"
+                                  title="Editar produto"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  id={`delete-product-setting-${prod.id}`}
+                                  onClick={() => {
+                                    setDeleteConfirm({
+                                      type: "product",
+                                      id: prod.id,
+                                      name: prod.name,
+                                    });
+                                  }}
+                                  className="text-gray-400 hover:text-[#D40511] p-1.5 rounded transition-colors cursor-pointer"
+                                  title="Remover produto"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            ) : null}
                           </tr>
                         ))}
                       </tbody>
@@ -1035,21 +1093,22 @@ export function Settings({
           {activeTab === "chains" && (
             <div className="space-y-6" id="settings-tab-chains-panel">
               {/* Creator form */}
-              <div className="border border-[#E0E0E0] rounded-xl p-4 bg-[#F5F5F5]/50">
-                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">
-                  {editingChainId ? `Editar Rede: ${newChainName}` : "Cadastrar Nova Loja / Rede"}
-                </h4>
-                <form
-                  onSubmit={handleCreateChainSubmit}
-                  className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"
-                  id="add-chain-micro-form"
-                >
-                  <div className="md:col-span-2">
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
-                      Nome da Rede
-                    </label>
-                    <input
-                      id="new-chain-name-input"
+              {currentUser?.role === "gestor" ? (
+                <div className="border border-[#E0E0E0] rounded-xl p-4 bg-[#F5F5F5]/50">
+                  <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">
+                    {editingChainId ? `Editar Rede: ${newChainName}` : "Cadastrar Nova Loja / Rede"}
+                  </h4>
+                  <form
+                    onSubmit={handleCreateChainSubmit}
+                    className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"
+                    id="add-chain-micro-form"
+                  >
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
+                        Nome da Rede
+                      </label>
+                      <input
+                        id="new-chain-name-input"
                       type="text"
                       placeholder="Ex: Supermercados Extra"
                       value={newChainName}
@@ -1206,6 +1265,12 @@ export function Settings({
                   </div>
                 </form>
               </div>
+              ) : (
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 flex items-center gap-2 text-xs font-sans">
+                  <Shield className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span>Para segurança e integridade das redes e filiais, o cadastro de novas lojas é restrito a Gestores.</span>
+                </div>
+              )}
 
               {/* Registered list */}
               <div>
@@ -1264,37 +1329,39 @@ export function Settings({
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => {
-                            setEditingChainId(chain.id);
-                            setNewChainName(chain.name);
-                            setNewChainLogoColor(chain.logoColor || "bg-blue-600");
-                            setNewChainLogoUrl(chain.logoUrl || "");
-                            document
-                              .getElementById("settings-tab-chains-panel")
-                              ?.scrollIntoView({ behavior: "smooth" });
-                          }}
-                          className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition cursor-pointer"
-                          title="Editar Rede"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          id={`delete-chain-btn-${chain.id}`}
-                          onClick={() => {
-                            setDeleteConfirm({
-                              type: "chain",
-                              id: chain.id,
-                              name: chain.name,
-                            });
-                          }}
-                          className="text-gray-400 hover:text-[#D40511] p-1 rounded hover:bg-red-50 transition cursor-pointer"
-                          title="Remover Rede"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                      {currentUser?.role === "gestor" && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              setEditingChainId(chain.id);
+                              setNewChainName(chain.name);
+                              setNewChainLogoColor(chain.logoColor || "bg-blue-600");
+                              setNewChainLogoUrl(chain.logoUrl || "");
+                              document
+                                .getElementById("settings-tab-chains-panel")
+                                ?.scrollIntoView({ behavior: "smooth" });
+                            }}
+                            className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition cursor-pointer"
+                            title="Editar Rede"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            id={`delete-chain-btn-${chain.id}`}
+                            onClick={() => {
+                              setDeleteConfirm({
+                                type: "chain",
+                                id: chain.id,
+                                name: chain.name,
+                              });
+                            }}
+                            className="text-gray-400 hover:text-[#D40511] p-1 rounded hover:bg-red-50 transition cursor-pointer"
+                            title="Remover Rede"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1358,12 +1425,91 @@ export function Settings({
                       className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
                     >
                       <option value="vendedor">
-                        Vendedor / Campo (Somente envia dados)
+                        Vendedor / Campo (Acesso total, exceto editar produtos e redes)
                       </option>
                       <option value="gestor">
-                        Gestor / Administrador (Visualiza tudo)
+                        Gestor / Administrador (Acesso total + cadastro e edição)
                       </option>
                     </select>
+                  </div>
+
+                  {/* Option to Add User Photo */}
+                  <div className="col-span-full mt-2">
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
+                      Foto do Usuário (Formatos: PNG, JPG ou SVG)
+                    </label>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                      {/* Photo Preview */}
+                      <div className="flex flex-col items-center justify-center p-3 border border-[#E0E0E0] rounded-xl bg-white min-h-[105px]">
+                        {newUserAvatarUrl ? (
+                          <div className="relative group w-16 h-16">
+                            <img
+                              src={newUserAvatarUrl}
+                              alt="Avatar Preview"
+                              className="w-full h-full object-cover rounded-full border border-gray-200"
+                              referrerPolicy="no-referrer"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewUserAvatarUrl("");
+                              }}
+                              className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 text-[8px] hover:bg-red-700 font-bold transition shadow flex items-center justify-center cursor-pointer"
+                              title="Remover foto"
+                            >
+                              X
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="w-12 h-12 rounded-full bg-slate-100 border border-slate-200 text-slate-400 flex items-center justify-center font-bold text-xs uppercase">
+                            {newUserName ? newUserName.split(" ").map(n => n[0]).join("").toUpperCase().substring(0,2) : "US"}
+                          </span>
+                        )}
+                        <span className="text-[8px] text-gray-400 mt-2 font-mono uppercase tracking-wider text-center">
+                          Visualização
+                        </span>
+                      </div>
+
+                      {/* Drag & Drop Select Zone */}
+                      <div className="md:col-span-3 font-sans">
+                        <div
+                          onDragEnter={handleUserAvatarDrag}
+                          onDragOver={handleUserAvatarDrag}
+                          onDragLeave={handleUserAvatarDrag}
+                          onDrop={handleUserAvatarDrop}
+                          className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition relative bg-white min-h-[105px] ${
+                            userAvatarDragActive
+                              ? "border-[#D40511] bg-red-50/20"
+                              : "border-[#E0E0E0] hover:border-gray-400 hover:bg-gray-50/30"
+                          }`}
+                        >
+                          <input
+                            type="file"
+                            accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/jpg,image/svg+xml"
+                            disabled={isUploadingUserAvatar}
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                handleUserAvatarFileChange(e.target.files[0]);
+                              }
+                            }}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <Upload
+                            className={`w-5 h-5 mb-1 ${
+                              isUploadingUserAvatar ? "text-[#D40511] animate-spin" : "text-gray-400"
+                            }`}
+                          />
+                          <span className="text-[11px] font-bold text-gray-700 text-center">
+                            {isUploadingUserAvatar
+                              ? "Salvando imagem da foto..."
+                              : "Arraste ou clique para enviar foto de perfil"}
+                          </span>
+                          <span className="text-[9px] text-gray-400 mt-0.5">
+                            PNG, JPG ou SVG recomendados
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {userFormError && (
@@ -1377,7 +1523,8 @@ export function Settings({
                     <button
                       id="submit-user-form-btn"
                       type="submit"
-                      className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition"
+                      disabled={isUploadingUserAvatar}
+                      className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed cursor-pointer"
                     >
                       Adicionar Usuário
                     </button>
@@ -1397,9 +1544,17 @@ export function Settings({
                       className="p-4 bg-white border border-[#E0E0E0] rounded-xl flex items-center justify-between shadow-sm"
                     >
                       <div className="flex items-center gap-3">
-                        <span className="w-8 h-8 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-xs uppercase">
-                          {item.avatarUrl ||
-                            item.name.substring(0, 2).toUpperCase()}
+                        <span className="w-8 h-8 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-xs uppercase overflow-hidden shrink-0">
+                          {item.avatarUrl && (item.avatarUrl.startsWith("http") || item.avatarUrl.startsWith("data:")) ? (
+                            <img
+                              src={item.avatarUrl}
+                              alt={item.name}
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            item.avatarUrl || item.name.substring(0, 2).toUpperCase()
+                          )}
                         </span>
                         <div>
                           <p className="text-xs font-bold text-[#1A1A1A] font-sans">
