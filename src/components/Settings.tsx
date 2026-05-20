@@ -183,6 +183,159 @@ export function Settings({
 
   const [filterText, setFilterText] = useState("");
 
+  // Track auto-filled fields
+  const [autoFilledFields, setAutoFilledFields] = useState<{
+    category?: boolean;
+    subcategory?: boolean;
+    brand?: boolean;
+    weight?: boolean;
+    isCompetitor?: boolean;
+  }>({});
+
+  const [userModifiedFields, setUserModifiedFields] = useState<{
+    category?: boolean;
+    subcategory?: boolean;
+    brand?: boolean;
+    weight?: boolean;
+    isCompetitor?: boolean;
+  }>({});
+
+  React.useEffect(() => {
+    if (productView !== "create" && productView !== "edit") return;
+    if (!newProdName.trim()) {
+      if (productView === "create") {
+        if (!userModifiedFields.weight) setNewProdWeight("");
+        if (!userModifiedFields.brand) setNewProdBrand("");
+        if (!userModifiedFields.category) setNewProdCategory("");
+        if (!userModifiedFields.subcategory) setNewProdSubcategory("");
+        if (!userModifiedFields.isCompetitor) setNewProdIsCompetitor(false);
+      }
+      setAutoFilledFields({});
+      return;
+    }
+
+    // 1. Gramatura: detectar padrões numéricos seguidos de unidade de medida
+    const weightRegex = /\b(\d+(?:[.,]\d+)?\s*(?:g|kg|ml|l|cl))\b/i;
+    const weightMatch = newProdName.match(weightRegex);
+
+    // 2. Marca: comparar as palavras com as marcas já cadastradas
+    const defaultBrands = ["Dr. Oetker", "Mavalério", "Mavalerio"];
+    const existingBrands = Array.from(new Set(products.map(p => p.brand).filter(Boolean)));
+    const allBrands = Array.from(new Set([...existingBrands, ...defaultBrands]));
+    allBrands.sort((a, b) => b.length - a.length);
+
+    let foundBrand = "";
+    const nameLower = newProdName.toLowerCase();
+    for (const b of allBrands) {
+      if (nameLower.includes(b.toLowerCase())) {
+        foundBrand = b;
+        break;
+      }
+    }
+
+    // 3. Categoria e Subcategoria
+    const existingCategories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
+    const existingSubcategories = Array.from(new Set(products.map(p => p.subcategory || "").filter(Boolean)));
+
+    const findBestLocalMatch = (typedName: string, items: string[]) => {
+      if (!typedName) return "";
+      const typedLower = typedName.toLowerCase();
+      
+      // Direct substring match
+      const sortedItems = [...items].sort((a, b) => b.length - a.length);
+      for (const item of sortedItems) {
+        if (typedLower.includes(item.toLowerCase())) {
+          return item;
+        }
+      }
+      
+      // Word overlap score
+      const typedWords = typedLower.split(/\s+/).filter(w => w.length > 2);
+      let bestItem = "";
+      let maxScore = 0;
+      
+      for (const item of items) {
+        const itemWords = item.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        let score = 0;
+        for (const w of itemWords) {
+          if (typedWords.includes(w)) {
+            score += 1;
+          }
+        }
+        if (score > maxScore) {
+          maxScore = score;
+          bestItem = item;
+        }
+      }
+      return bestItem;
+    };
+
+    const foundCategory = findBestLocalMatch(newProdName, existingCategories);
+    const foundSubcategory = findBestLocalMatch(newProdName, existingSubcategories);
+
+    setAutoFilledFields(prev => {
+      const next = { ...prev };
+
+      // Weight
+      if (!userModifiedFields.weight) {
+        if (weightMatch) {
+          setNewProdWeight(weightMatch[1]);
+          next.weight = true;
+        } else if (prev.weight) {
+          setNewProdWeight("");
+          next.weight = false;
+        }
+      }
+
+      // Brand & Competitor
+      if (!userModifiedFields.brand) {
+        if (foundBrand) {
+          setNewProdBrand(foundBrand);
+          next.brand = true;
+
+          // Competitor (only if user hasn't modified it manually)
+          if (!userModifiedFields.isCompetitor) {
+            const lowerB = foundBrand.toLowerCase();
+            const isUsBrand = lowerB.includes("oetker") || lowerB.includes("mavalerio") || lowerB.includes("mavalério");
+            setNewProdIsCompetitor(!isUsBrand);
+            next.isCompetitor = true;
+          }
+        } else if (prev.brand) {
+          setNewProdBrand("");
+          next.brand = false;
+          if (!userModifiedFields.isCompetitor) {
+            setNewProdIsCompetitor(false);
+            next.isCompetitor = false;
+          }
+        }
+      }
+
+      // Category
+      if (!userModifiedFields.category) {
+        if (foundCategory) {
+          setNewProdCategory(foundCategory);
+          next.category = true;
+        } else if (prev.category) {
+          setNewProdCategory("");
+          next.category = false;
+        }
+      }
+
+      // Subcategory
+      if (!userModifiedFields.subcategory) {
+        if (foundSubcategory) {
+          setNewProdSubcategory(foundSubcategory);
+          next.subcategory = true;
+        } else if (prev.subcategory) {
+          setNewProdSubcategory("");
+          next.subcategory = false;
+        }
+      }
+
+      return next;
+    });
+  }, [newProdName, productView]);
+
   const filteredProducts = products.filter((p) => {
     const searchTerms = filterText.toLowerCase().trim().split(/\s+/).filter(Boolean);
     return searchTerms.every((term) => {
@@ -532,14 +685,16 @@ export function Settings({
                       onClick={() => {
                         setProductView("create");
                         setNewProdName("");
-                        setNewProdCategory("Geral Retail");
-                        setNewProdSubcategory("Regular");
-                        setNewProdWeight("100g");
+                        setNewProdCategory("");
+                        setNewProdSubcategory("");
+                        setNewProdWeight("");
                         setNewProdImageUrl("");
                         setNewProdBasePrice("0.00");
                         setNewProdIsCompetitor(false);
-                        setNewProdBrand("Dr. Oetker");
+                        setNewProdBrand("");
                         setFormFeedback(null);
+                        setAutoFilledFields({});
+                        setUserModifiedFields({});
                       }}
                       className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition whitespace-nowrap cursor-pointer"
                     >
@@ -592,13 +747,15 @@ export function Settings({
                                   setProductView("edit");
                                   setNewProdName(prod.name);
                                   setNewProdCategory(prod.category);
-                                  setNewProdSubcategory(prod.subcategory || "Regular");
-                                  setNewProdWeight(prod.weight || "100g");
+                                  setNewProdSubcategory(prod.subcategory || "");
+                                  setNewProdWeight(prod.weight || "");
                                   setNewProdImageUrl(prod.imageUrl || "");
                                   setNewProdBasePrice(prod.basePrice.toString());
                                   setNewProdIsCompetitor(prod.isCompetitor || false);
-                                  setNewProdBrand(prod.brand || "Dr. Oetker");
+                                  setNewProdBrand(prod.brand || "");
                                   setFormFeedback(null);
+                                  setAutoFilledFields({});
+                                  setUserModifiedFields({});
                                 }}
                                 className="text-gray-400 hover:text-[#1A1A1A] p-1.5 rounded transition-colors cursor-pointer"
                                 title="Editar produto"
@@ -670,63 +827,94 @@ export function Settings({
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">
-                          CATEGORIA
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-700">
+                            CATEGORIA
+                          </label>
+                          {autoFilledFields.category && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                              Preenchido automaticamente
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="text"
                           required
                           value={newProdCategory}
-                          onChange={(e) => setNewProdCategory(e.target.value)}
+                          onChange={(e) => {
+                            setNewProdCategory(e.target.value);
+                            setUserModifiedFields((prev) => ({ ...prev, category: true }));
+                            setAutoFilledFields((prev) => ({ ...prev, category: false }));
+                          }}
                           className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">
-                          SUBCATEGORIA
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-700">
+                            SUBCATEGORIA
+                          </label>
+                          {autoFilledFields.subcategory && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                              Preenchido automaticamente
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="text"
                           value={newProdSubcategory}
-                          onChange={(e) => setNewProdSubcategory(e.target.value)}
+                          onChange={(e) => {
+                            setNewProdSubcategory(e.target.value);
+                            setUserModifiedFields((prev) => ({ ...prev, subcategory: true }));
+                            setAutoFilledFields((prev) => ({ ...prev, subcategory: false }));
+                          }}
                           className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">
-                          MARCA
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-700">
+                            MARCA
+                          </label>
+                          {autoFilledFields.brand && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                              Preenchido automaticamente
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="text"
                           required
                           value={newProdBrand}
-                          onChange={(e) => setNewProdBrand(e.target.value)}
+                          onChange={(e) => {
+                            setNewProdBrand(e.target.value);
+                            setUserModifiedFields((prev) => ({ ...prev, brand: true }));
+                            setAutoFilledFields((prev) => ({ ...prev, brand: false }));
+                          }}
                           className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
                         />
                       </div>
                       <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">
-                          GRAMATURA
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-700">
+                            GRAMATURA
+                          </label>
+                          {autoFilledFields.weight && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                              Preenchido automaticamente
+                            </span>
+                          )}
+                        </div>
                         <input
                           type="text"
                           value={newProdWeight}
-                          onChange={(e) => setNewProdWeight(e.target.value)}
+                          onChange={(e) => {
+                            setNewProdWeight(e.target.value);
+                            setUserModifiedFields((prev) => ({ ...prev, weight: true }));
+                            setAutoFilledFields((prev) => ({ ...prev, weight: false }));
+                          }}
                           className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
                           placeholder="Ex: 100g"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-xs font-bold text-gray-700">
-                          PREÇO BASE REFERÊNCIA (R$)
-                        </label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          required
-                          value={newProdBasePrice}
-                          onChange={(e) => setNewProdBasePrice(e.target.value)}
-                          className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
                         />
                       </div>
                       <div className="space-y-2 md:col-span-2 border-t border-[#E0E0E0] pt-4">
@@ -799,15 +987,26 @@ export function Settings({
                         </div>
                       </div>
                       <div className="flex flex-col gap-2 pt-4">
-                        <label className="text-xs font-bold text-gray-700">
-                          É UM CONCORRENTE?
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-700">
+                            É UM CONCORRENTE?
+                          </label>
+                          {autoFilledFields.isCompetitor && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-violet-100 text-violet-800 border border-violet-200">
+                              Preenchido automaticamente
+                            </span>
+                          )}
+                        </div>
                         <label className="relative inline-flex items-center cursor-pointer max-w-max">
                           <input
                             type="checkbox"
                             className="sr-only peer"
                             checked={newProdIsCompetitor}
-                            onChange={(e) => setNewProdIsCompetitor(e.target.checked)}
+                            onChange={(e) => {
+                              setNewProdIsCompetitor(e.target.checked);
+                              setUserModifiedFields((prev) => ({ ...prev, isCompetitor: true }));
+                              setAutoFilledFields((prev) => ({ ...prev, isCompetitor: false }));
+                            }}
                           />
                           <div className="w-11 h-6 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-[#D40511]"></div>
                           <span className="ml-3 text-sm font-medium text-gray-700">

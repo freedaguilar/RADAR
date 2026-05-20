@@ -2094,30 +2094,30 @@ export function Products({
                   }
 
                   // Retrieve latest price for peers across all retail chains and calculate averages & minimum prices
-                  const peerCalculatedData = peers.map((p) => {
-                    const productRecords = records.filter((r) => {
-                      if (r.productId !== p.id) return false;
-                      if (competitorCompareChainId !== "Todas" && r.chainId !== competitorCompareChainId) return false;
-                      return true;
-                    });
-                    
-                    const latestByChain: Record<string, PriceRecord> = {};
-                    productRecords.forEach((r) => {
-                      const current = latestByChain[r.chainId];
-                      if (!current || new Date(r.date).getTime() > new Date(current.date).getTime()) {
-                        latestByChain[r.chainId] = r;
+                  const peerCalculatedData = peers
+                    .map((p) => {
+                      const productRecords = records.filter((r) => {
+                        if (r.productId !== p.id) return false;
+                        if (competitorCompareChainId !== "Todas" && r.chainId !== competitorCompareChainId) return false;
+                        return true;
+                      });
+                      
+                      const latestByChain: Record<string, PriceRecord> = {};
+                      productRecords.forEach((r) => {
+                        const current = latestByChain[r.chainId];
+                        if (!current || new Date(r.date).getTime() > new Date(current.date).getTime()) {
+                          latestByChain[r.chainId] = r;
+                        }
+                      });
+                      
+                      const latestRecordsList = Object.values(latestByChain).filter((r) => r.price > 0);
+                      
+                      if (latestRecordsList.length === 0) {
+                        return null; // Exclude products with no registered price or zero price
                       }
-                    });
-                    
-                    const latestRecordsList = Object.values(latestByChain);
-                    
-                    let averagePrice = 0;
-                    let minPrice = p.basePrice;
-                    let minPriceChainId = "";
-                    
-                    if (latestRecordsList.length > 0) {
+                      
                       const sum = latestRecordsList.reduce((acc, r) => acc + r.price, 0);
-                      averagePrice = sum / latestRecordsList.length;
+                      const averagePrice = sum / latestRecordsList.length;
                       
                       let minRec = latestRecordsList[0];
                       latestRecordsList.forEach((r) => {
@@ -2125,32 +2125,44 @@ export function Products({
                           minRec = r;
                         }
                       });
-                      minPrice = minRec.price;
-                      minPriceChainId = minRec.chainId;
-                    } else {
-                      averagePrice = p.basePrice;
-                      minPrice = p.basePrice;
-                    }
-                    
-                    const minChain = chains.find((c) => c.id === minPriceChainId);
-                    const minChainName = minChain
-                      ? minChain.name
-                      : competitorCompareChainId !== "Todas"
-                        ? `${chains.find((c) => c.id === competitorCompareChainId)?.name || ""}`
-                        : "Preço de tabela";
-                    
-                    return {
-                      product: p,
-                      averagePrice,
-                      minPrice,
-                      minChainName,
-                      isSelf: p.id === selectedProduct.id,
-                    };
-                  });
+                      const minPrice = minRec.price;
+                      const minPriceChainId = minRec.chainId;
+                      
+                      const minChain = chains.find((c) => c.id === minPriceChainId);
+                      const minChainName = minChain
+                        ? minChain.name
+                        : competitorCompareChainId !== "Todas"
+                          ? `${chains.find((c) => c.id === competitorCompareChainId)?.name || ""}`
+                          : "Preço de tabela";
+                      
+                      return {
+                        product: p,
+                        averagePrice,
+                        minPrice,
+                        minChainName,
+                        isSelf: p.id === selectedProduct.id,
+                      };
+                    })
+                    .filter(Boolean) as {
+                      product: Product;
+                      averagePrice: number;
+                      minPrice: number;
+                      minChainName: string;
+                      isSelf: boolean;
+                    }[];
 
                   // Sort from lowest average price to highest
                   const sortedPeers = [...peerCalculatedData].sort((a, b) => a.averagePrice - b.averagePrice);
-                  const maxAveragePrice = sortedPeers.length > 0 ? Math.max(...sortedPeers.map(p => p.averagePrice)) : 10;
+
+                  if (sortedPeers.length === 0) {
+                    return (
+                      <div className="p-6 bg-gray-50 rounded-xl text-center text-gray-400 text-xs italic">
+                        Nenhum produto concorrente com preço válido registrado para comparação.
+                      </div>
+                    );
+                  }
+
+                  const maxAveragePrice = Math.max(...sortedPeers.map(p => p.averagePrice), 10);
 
                   return (
                     <div className="space-y-4">
