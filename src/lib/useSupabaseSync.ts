@@ -35,6 +35,7 @@ export function useSupabaseSync() {
       id: c.id,
       name: c.name,
       logoColor: c.logo_color,
+      logoUrl: c.logo_url,
       active: c.active
     })) as Chain[];
 

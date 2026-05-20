@@ -21,6 +21,7 @@ CREATE TABLE chains (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   logo_color TEXT NOT NULL,
+  logo_url TEXT,
   active BOOLEAN DEFAULT true,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

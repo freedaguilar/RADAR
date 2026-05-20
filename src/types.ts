@@ -16,6 +16,7 @@ export interface Chain {
   name: string;
   logoColor: string; // Tailwinds background color code for logo accent
   active: boolean;
+  logoUrl?: string;
 }
 
 export interface PriceRecord {

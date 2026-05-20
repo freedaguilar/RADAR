@@ -12,8 +12,58 @@ import {
   Edit,
   LayoutGrid,
   List,
+  ChevronDown,
+  ChevronUp,
+  TrendingDown,
+  TrendingUp,
+  Clock,
+  Package,
 } from "lucide-react";
 import { Product, Chain, PriceRecord } from "../types";
+
+function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md" }) {
+  const getInitialsAndColors = (name: string) => {
+    const uppercase = name.toUpperCase();
+    if (uppercase.includes("CARREFOUR")) return { text: "C", bg: "bg-blue-600", border: "border-blue-700/50", textCol: "text-white" };
+    if (uppercase.includes("PÃO DE AÇÚCAR") || uppercase.includes("PAO DE ACUCAR") || uppercase.includes("GPA")) {
+      return { text: "PA", bg: "bg-emerald-700", border: "border-emerald-800/50", textCol: "text-white" };
+    }
+    if (uppercase.includes("SONDA")) return { text: "SD", bg: "bg-red-500", border: "border-red-600/50", textCol: "text-white" };
+    if (uppercase.includes("MAMBO")) return { text: "MB", bg: "bg-amber-500", border: "border-amber-600/50", textCol: "text-amber-950" };
+    if (uppercase.includes("HIROTA")) return { text: "HR", bg: "bg-orange-600", border: "border-orange-700/50", textCol: "text-white" };
+    if (uppercase.includes("BH") || uppercase.includes("BELO HORIZONTE")) return { text: "BH", bg: "bg-amber-400", border: "border-amber-500/50", textCol: "text-blue-900" };
+    if (uppercase.includes("ASSAÍ") || uppercase.includes("ASSAI")) return { text: "AS", bg: "bg-orange-500", border: "border-orange-600/50", textCol: "text-white" };
+    if (uppercase.includes("ATACADÃO") || uppercase.includes("ATACADAO")) return { text: "AT", bg: "bg-red-600", border: "border-red-750", textCol: "text-white" };
+    if (uppercase.includes("VILLEFORT")) return { text: "VF", bg: "bg-sky-600", border: "border-sky-700", textCol: "text-white" };
+
+    // fallback using initials of the name
+    const parts = name.split(" ").filter(Boolean);
+    const initials = parts.slice(0, 2).map((p) => p[0]).join("").toUpperCase();
+    return {
+      text: initials || "?",
+      bg: chain.logoColor || "bg-gray-600",
+      border: "border-gray-500/20",
+      textCol: "text-white",
+    };
+  };
+
+  const { text, bg, border, textCol } = getInitialsAndColors(chain.name);
+  const sizeClasses = size === "sm" ? "w-5 h-5 text-[8px] font-bold rounded" : "w-7 h-7 text-xs font-black rounded-lg";
+
+  if (chain.logoUrl) {
+    return (
+      <div className={`overflow-hidden border border-gray-200 shrink-0 bg-white flex items-center justify-center ${sizeClasses}`}>
+        <img src={chain.logoUrl} alt={chain.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center justify-center shrink-0 border select-none font-bold uppercase ${bg} ${border} ${textCol} ${sizeClasses} font-mono`} title={chain.name}>
+      {text}
+    </div>
+  );
+}
 
 interface ProductsProps {
   products: Product[];
@@ -59,6 +109,45 @@ export function Products({
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [compareChainId, setCompareChainId] = useState<string>("");
   const [compareWeight, setCompareWeight] = useState<string>("Todas");
+  const [compareByCategory, setCompareByCategory] = useState(true);
+  const [compareBySubcategory, setCompareBySubcategory] = useState(true);
+  const [competitorCompareChainId, setCompetitorCompareChainId] = useState<string>("Todas");
+
+  // Chart-specific states (filtering networks and hover points)
+  const [selectedChartChains, setSelectedChartChains] = useState<string[]>([]);
+  const [showChartChainSelector, setShowChartChainSelector] = useState(false);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    chainId: string;
+    chainName: string;
+    date: string;
+    price: number;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const getChainColor = (chainId: string) => {
+    const chain = chains.find((c) => c.id === chainId);
+    if (chain && chain.logoColor) {
+      if (chain.logoColor.startsWith("#")) {
+        return chain.logoColor;
+      }
+      if (chain.logoColor === "bg-blue-600") return "#2563eb";
+      if (chain.logoColor === "bg-emerald-700") return "#047857";
+      if (chain.logoColor === "bg-red-500") return "#ef4444";
+      if (chain.logoColor === "bg-amber-600") return "#d97706";
+      if (chain.logoColor === "bg-purple-600") return "#7c3aed";
+    }
+    const idx = chains.findIndex((c) => c.id === chainId);
+    return idx === 0
+      ? "#D40511"
+      : idx === 1
+        ? "#0284c7"
+        : idx === 2
+          ? "#16a34a"
+          : idx === 3
+            ? "#ea580c"
+            : "#4b5563";
+  };
 
   // Form states for creating a new product
   const [newProdName, setNewProdName] = useState("");
@@ -100,6 +189,30 @@ export function Products({
       setActiveView("list");
     }
   }, [pageParams, products]);
+
+  // Initialize selectedChartChains with the top 3 chains containing most records for the selected product
+  useEffect(() => {
+    if (selectedProductId) {
+      const counts: Record<string, number> = {};
+      const productRecords = records.filter((r) => r.productId === selectedProductId);
+      productRecords.forEach((r) => {
+        counts[r.chainId] = (counts[r.chainId] || 0) + 1;
+      });
+
+      const chainsWithRecords = chains
+        .filter((c) => (counts[c.id] || 0) > 0)
+        .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0));
+
+      let initialChains: string[] = [];
+      if (chainsWithRecords.length > 0) {
+        initialChains = chainsWithRecords.slice(0, 3).map((c) => c.id);
+      } else {
+        initialChains = chains.slice(0, 3).map((c) => c.id);
+      }
+      setSelectedChartChains(initialChains);
+      setHoveredPoint(null); // Clear tooltips
+    }
+  }, [selectedProductId, records, chains]);
 
   const selectedProduct = useMemo(() => {
     return products.find((p) => p.id === selectedProductId) || null;
@@ -648,7 +761,7 @@ export function Products({
 
           {displayMode === "grid" ? (
             <div
-              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4"
               id="products-grid"
             >
               {filteredProducts.map((prod) => {
@@ -663,6 +776,12 @@ export function Products({
                   priceValues.length > 0 ? Math.min(...priceValues) : null;
                 const maxPrice =
                   priceValues.length > 0 ? Math.max(...priceValues) : null;
+
+                // Find overall average price
+                const averagePrice =
+                  priceValues.length > 0
+                    ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
+                    : prod.basePrice;
 
                 // Find the latest price record for this product based on selectedChainId
                 const productRecords = records.filter(
@@ -688,180 +807,208 @@ export function Products({
                     id={`product-card-${prod.id}`}
                     key={prod.id}
                     onClick={() => handleProductClick(prod.id)}
-                    className="bg-white rounded-2xl border border-[#E0E0E0] shadow-sm hover:border-[#D40511] hover:shadow-md transition-all cursor-pointer overflow-hidden flex flex-col justify-between group"
+                    className="bg-white rounded-xl border border-gray-200 hover:border-[#D40511] hover:shadow-md transition-all duration-200 cursor-pointer overflow-hidden flex flex-col justify-between group h-full relative"
                   >
-                    <div className="p-5">
-                      {/* Header */}
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="w-16 h-16 rounded-xl border border-[#E0E0E0] flex-shrink-0 overflow-hidden bg-[#F5F5F5] flex items-center justify-center p-1">
-                          <img
-                            src={prod.imageUrl}
-                            alt=""
-                            referrerPolicy="no-referrer"
-                            className="w-full h-full object-contain transition-transform group-hover:scale-105"
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap gap-1 mb-1.5 bg-opacity-0">
-                            <span className="inline-block text-[9px] font-bold text-gray-500 bg-gray-100 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono">
-                              {prod.category}
-                            </span>
-                            {prod.subcategory && (
-                              <span className="inline-block text-[9px] font-bold text-slate-700 bg-slate-100 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono">
-                                {prod.subcategory}
-                              </span>
-                            )}
-                            {prod.weight && (
-                              <span className="inline-block text-[9px] font-bold text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono">
-                                {prod.weight}
-                              </span>
-                            )}
-                            {prod.isCompetitor ? (
-                              <span className="inline-block text-[9px] font-extrabold text-blue-700 bg-blue-50 border border-blue-250 border-blue-200/50 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono">
-                                Competidor: {prod.brand || "Concorrente"}
-                              </span>
-                            ) : (
+                    {/* Card Content */}
+                    <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
+                      {/* Top Part: Image, Badges & Brand */}
+                      <div>
+                        <div className="flex items-start gap-2.5">
+                          <div className="w-12 h-12 rounded-lg flex-shrink-0 overflow-hidden bg-gray-50/50 flex items-center justify-center p-1.5 relative shadow-2xs">
+                            <img
+                              src={prod.imageUrl}
+                              alt=""
+                              referrerPolicy="no-referrer"
+                              className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
+                            />
+                          </div>
+                          
+                          <div className="flex-1 min-w-0">
+                            {/* Brand & Indicators */}
+                            <div className="flex flex-wrap items-center gap-1 mb-1 bg-opacity-0">
                               <span
-                                className={`inline-block text-[9px] font-extrabold border rounded px-1.5 py-0.5 tracking-wider uppercase font-mono ${
-                                  prod.brand
-                                    ?.toLowerCase()
-                                    .includes("mavalerio") ||
-                                  prod.brand
-                                    ?.toLowerCase()
-                                    .includes("mavalério")
-                                    ? "text-violet-850 text-violet-800 bg-violet-50 border-violet-200/50"
-                                    : "text-emerald-800 bg-emerald-50 border-emerald-250 border-emerald-200/50"
+                                className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                  prod.isCompetitor
+                                    ? "text-slate-600 bg-slate-50 border-slate-200"
+                                    : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
+                                      ? "text-violet-750 bg-violet-50 border-violet-150"
+                                      : "text-emerald-850 bg-emerald-50 border-emerald-150"
                                 }`}
                               >
-                                Nossa Marca: {prod.brand || "Dr. Oetker"}
+                                {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
                               </span>
-                            )}
-                          </div>
-                          <h3 className="text-sm font-bold text-[#1A1A1A] line-clamp-2 leading-snug group-hover:text-[#D40511] transition-colors font-sans">
-                            {prod.name}
-                          </h3>
-                        </div>
-                      </div>
+                              <span className="text-[9px] font-mono text-gray-400 bg-gray-50 border border-gray-150/50 rounded px-1 py-0.5 select-none shrink-0" title="Gramatura">
+                                {prod.weight || "N/A"}
+                              </span>
+                            </div>
 
-                      {/* Destaque do Preço Atual */}
-                      <div
-                        className={`mt-4 border rounded-xl p-3.5 flex items-center justify-between shadow-2xs ${
-                          prod.isCompetitor
-                            ? "bg-blue-50/40 border-blue-100/50"
-                            : prod.brand?.toLowerCase().includes("mavalerio") ||
-                                prod.brand?.toLowerCase().includes("mavalério")
-                              ? "bg-violet-50/40 border-violet-100/60"
-                              : "bg-[#FFF5F5]/85 border-red-100/60"
-                        }`}
-                      >
-                        <div>
-                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block font-sans">
-                            {selectedChainId !== "Todas"
-                              ? "Preço na Rede Selecionada"
-                              : "Último Preço Auditado"}
+                            <h3 className="text-xs font-bold text-[#1A1A1A] line-clamp-2 leading-tight group-hover:text-[#D40511] transition-colors font-sans" title={prod.name}>
+                              {prod.name}
+                            </h3>
+                          </div>
+                        </div>
+
+                        {/* Category/Subcategory Small Badges Row */}
+                        <div className="flex flex-wrap gap-1 mt-2">
+                          <span className="inline-block text-[8px] font-bold text-gray-400 bg-gray-50 border border-gray-100 rounded px-1.5 py-0.2 uppercase tracking-wide">
+                            {prod.category}
                           </span>
-                          {latestRecord ? (
-                            <span
-                              className="text-[10px] text-gray-400 font-sans block mt-0.5 truncate max-w-[130px]"
-                              title={
-                                chains.find(
-                                  (c) => c.id === latestRecord.chainId,
-                                )?.name
-                              }
-                            >
-                              {
-                                chains
-                                  .find((c) => c.id === latestRecord.chainId)
-                                  ?.name.split(" ")[0]
-                              }{" "}
-                              • {formatDateBR(latestRecord.date)}
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-gray-400 font-sans block mt-0.5">
-                              Preço Base Sem Histórico
+                          {prod.subcategory && (
+                            <span className="inline-block text-[8px] font-bold text-slate-500 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.2 uppercase tracking-wide">
+                              {prod.subcategory}
                             </span>
                           )}
                         </div>
-                        <div className="text-right flex flex-col items-end">
-                          <span
-                            className={`text-2xl font-black font-mono leading-none ${
-                              prod.isCompetitor
-                                ? "text-blue-700"
-                                : prod.brand
-                                      ?.toLowerCase()
-                                      .includes("mavalerio") ||
-                                    prod.brand
-                                      ?.toLowerCase()
-                                      .includes("mavalério")
-                                  ? "text-violet-750"
-                                  : "text-[#D40511]"
-                            }`}
-                          >
-                            R$ {currentPrice.toFixed(2)}
-                          </span>
-                          <span
-                            className={`text-[8px] uppercase tracking-widest font-bold mt-1 ${
-                              prod.isCompetitor
-                                ? "text-blue-700/70"
-                                : prod.brand
-                                      ?.toLowerCase()
-                                      .includes("mavalerio") ||
-                                    prod.brand
-                                      ?.toLowerCase()
-                                      .includes("mavalério")
-                                  ? "text-violet-700/70"
-                                  : "text-[#D40511]/70"
-                            }`}
-                          >
-                            VALOR ATUAL
-                          </span>
+                                   {/* Center Part: Price & last audit */}
+                      <div className="border-t border-gray-100 pt-2.5 flex flex-col justify-between">
+                        <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block font-sans select-none mb-1">
+                          {selectedChainId === "Todas" ? "ÚLTIMO PREÇO REGISTRADO" : "PREÇO ATUAL"}
+                        </span>
+                        
+                        <div className="flex items-center justify-between gap-2.5">
+                          {/* Left Logo + Price */}
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {(() => {
+                              const recordChain = latestRecord 
+                                ? chains.find((c) => c.id === latestRecord.chainId) 
+                                : selectedChainId !== "Todas" 
+                                  ? chains.find((c) => c.id === selectedChainId)
+                                  : null;
+                              return recordChain ? (
+                                <div className="shrink-0" title={recordChain.name}>
+                                  <RetailerLogo chain={recordChain} size="sm" />
+                                </div>
+                              ) : null;
+                            })()}
+                            
+                            <span className="text-xl font-extrabold text-[#1A1A1A] font-mono tracking-tight group-hover:text-[#D40511] transition-colors whitespace-nowrap leading-none">
+                              R$ {currentPrice.toFixed(2)}
+                            </span>
+                          </div>
+
+                          {/* Right: Deviation Badges */}
+                          <div className="shrink-0">
+                            {(() => {
+                              if (priceValues.length === 0) return <span className="text-[8px] font-bold text-gray-400 bg-gray-50 border border-gray-100 rounded px-1">Sem dados</span>;
+                              const deviationStatus = currentPrice > averagePrice + 0.01 
+                                ? "above" 
+                                : currentPrice < averagePrice - 0.01 
+                                  ? "below" 
+                                  : "average";
+
+                              if (deviationStatus === "below") {
+                                return (
+                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-extrabold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-100 shrink-0 select-none" title="Abaixo da Média">
+                                    <TrendingDown className="w-2.5 h-2.5" />
+                                    Média
+                                  </span>
+                                );
+                              } else if (deviationStatus === "above") {
+                                return (
+                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-extrabold text-red-700 bg-red-50 px-1 rounded border border-red-100 shrink-0 select-none" title="Acima da Média">
+                                    <TrendingUp className="w-2.5 h-2.5" />
+                                    Média
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-extrabold text-slate-650 bg-slate-50 px-1 rounded border border-slate-150 shrink-0 select-none" title="Na Média">
+                                    Na média
+                                  </span>
+                                );
+                              }
+                            })()}
+                          </div>
+                        </div>
+
+                        {/* Audit Details */}
+                        <div className="text-[10px] text-gray-400 mt-1 flex items-center justify-between font-sans">
+                          {latestRecord ? (
+                            <span className="truncate block max-w-[140px]" title={formatDateBR(latestRecord.date)}>
+                              Auditado: {formatDateBR(latestRecord.date)}
+                            </span>
+                          ) : (
+                            <span>Base (sem audit.)</span>
+                          )}
+                          {latestRecord && selectedChainId === "Todas" && (
+                            <span className="text-[9px] text-gray-450 font-semibold uppercase font-sans">
+                              {chains.find(c => c.id === latestRecord.chainId)?.name.split(" ")[0]}
+                            </span>
+                          )}
                         </div>
                       </div>
 
-                      {/* Compare Quick View */}
-                      <div className="mt-4 pt-3 border-t border-[#F5F5F5] space-y-2">
-                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block font-sans">
-                          Comparativo de Preços ({pricesCount} Redes)
-                        </span>
-
+                      {/* Bottom: Retailers Competitor Pricing Horizontal view */}
+                      <div className="border-t border-gray-100 pt-2.5">
+                        <div className="flex items-center justify-between text-[9px] text-gray-400 uppercase tracking-wider font-semibold mb-1.5 select-none">
+                          <span>Monitor das Redes ({pricesCount})</span>
+                          {priceValues.length > 0 && (
+                            <span className="font-mono lowercase font-normal">
+                              méd: R$ {averagePrice.toFixed(2)}
+                            </span>
+                          )}
+                        </div>
+                        
                         {pricesCount > 0 ? (
-                          <div className="grid grid-cols-2 gap-2 mt-1">
-                            <div className="bg-[#F5F5F5] p-2 rounded-lg border border-transparent">
-                              <span className="text-[9px] text-gray-400 block font-sans">
-                                Mínimo Registrado
-                              </span>
-                              <span className="text-[11px] font-mono font-black text-emerald-700">
-                                R$ {minPrice?.toFixed(2)}
-                              </span>
-                            </div>
-                            <div className="bg-[#F5F5F5] p-2 rounded-lg">
-                              <span className="text-[9px] text-gray-400 block font-sans">
-                                Máximo Registrado
-                              </span>
-                              <span className="text-[11px] font-mono font-black text-red-700">
-                                R$ {maxPrice?.toFixed(2)}
-                              </span>
-                            </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(() => {
+                              // Find min price chain and max price chain
+                              let minChainId: string | null = null;
+                              let maxChainId: string | null = null;
+
+                              Object.entries(pricesMap).forEach(([chainId, price]) => {
+                                if (price === minPrice && !minChainId) {
+                                  minChainId = chainId;
+                                }
+                              });
+                              Object.entries(pricesMap).forEach(([chainId, price]) => {
+                                if (price === maxPrice && !maxChainId && chainId !== minChainId) {
+                                  maxChainId = chainId;
+                                }
+                              });
+                              if (!maxChainId && pricesCount > 1) {
+                                Object.entries(pricesMap).forEach(([chainId, price]) => {
+                                  if (price === maxPrice && !maxChainId) {
+                                    maxChainId = chainId;
+                                  }
+                                });
+                              }
+
+                              return chains.map((chain) => {
+                                if (chain.id !== minChainId && chain.id !== maxChainId) return null;
+                                const price = pricesMap[chain.id];
+                                if (price === undefined) return null;
+                                const isMin = chain.id === minChainId;
+                                const isMax = chain.id === maxChainId;
+                                const badgeLabel = isMin && isMax ? "único" : isMin ? "min" : "max";
+
+                                return (
+                                  <div 
+                                    key={chain.id}
+                                    className={`inline-flex items-center gap-1 bg-gray-50/70 border hover:border-gray-300 transition-colors rounded-md p-1 pl-1 pr-1.5 select-none ${
+                                      isMin && isMax 
+                                        ? "border-gray-150" 
+                                        : isMin 
+                                          ? "border-emerald-250 bg-emerald-50/20" 
+                                          : "border-red-250 bg-red-50/20"
+                                    }`}
+                                    title={`${chain.name}: R$ ${price.toFixed(2)} (${badgeLabel})`}
+                                  >
+                                    <RetailerLogo chain={chain} size="sm" />
+                                    <span className={`font-mono text-[10px] font-bold ${isMin && isMax ? "text-gray-700" : isMin ? "text-emerald-700" : "text-red-750"}`}>
+                                      R${price.toFixed(2)}
+                                      <span className="text-[8px] font-sans font-medium text-gray-400 ml-0.5">({badgeLabel})</span>
+                                    </span>
+                                  </div>
+                                );
+                              });
+                            })()}
                           </div>
                         ) : (
-                          <div className="p-3 bg-[#F5F5F5] rounded-xl flex items-center gap-1.5 text-gray-400">
-                            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                            <span className="text-[11px] font-sans">
-                              Sem histórico de preços ainda
-                            </span>
-                          </div>
+                          <div className="text-[10px] text-gray-350 italic py-1">Sem comparação ativa</div>
                         )}
                       </div>
-                    </div>
-
-                    {/* Footer metadata */}
-                    <div className="bg-[#F5F5F5] px-5 py-3 border-t border-[#E0E0E0] flex items-center justify-between text-[11px] text-gray-500">
-                      <span className="font-sans font-medium text-gray-400">
-                        Preço Base: R$ {prod.basePrice.toFixed(2)}
-                      </span>
-                      <span className="text-[#D40511] font-bold group-hover:translate-x-1 transition-transform inline-flex items-center gap-0.5">
-                        Análise detalhada &rarr;
-                      </span>
+                      </div>
                     </div>
                   </div>
                 );
@@ -903,6 +1050,12 @@ export function Products({
                 const maxPrice =
                   priceValues.length > 0 ? Math.max(...priceValues) : null;
 
+                // Find overall average price
+                const averagePrice =
+                  priceValues.length > 0
+                    ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
+                    : prod.basePrice;
+
                 // Find the latest price record for this product based on selectedChainId
                 const productRecords = records.filter(
                   (r) =>
@@ -927,125 +1080,219 @@ export function Products({
                     id={`product-list-row-${prod.id}`}
                     key={prod.id}
                     onClick={() => handleProductClick(prod.id)}
-                    className="bg-white rounded-xl border border-[#E0E0E0]/80 shadow-xs hover:border-[#D40511] hover:shadow-sm transition-all cursor-pointer p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
+                    className="bg-white rounded-xl border border-gray-200 hover:border-[#D40511] hover:shadow-sm transition-all duration-200 cursor-pointer p-3 flex flex-col md:grid md:grid-cols-12 md:items-center gap-4 group h-full relative"
                   >
-                    {/* Left Column: Image & Basic Names */}
-                    <div className="flex items-center gap-3.5 min-w-0 flex-1">
-                      <div className="w-12 h-12 rounded-lg border border-[#E0E0E0] flex-shrink-0 overflow-hidden bg-[#F5F5F5] flex items-center justify-center p-1">
+                    {/* Column 1: Image, Brand badge, Product info (span 4) */}
+                    <div className="flex items-center gap-3 min-w-0 md:col-span-4">
+                      {/* Product Image */}
+                      <div className="w-11 h-11 rounded-lg flex-shrink-0 bg-gray-50/50 flex items-center justify-center p-1 shadow-2xs relative">
                         <img
                           src={prod.imageUrl}
                           alt=""
                           referrerPolicy="no-referrer"
-                          className="w-full h-full object-contain transition-transform group-hover:scale-105"
+                          className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
                         />
                       </div>
+
+                      {/* Basic details */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                          <span className="inline-block text-[8px] font-extrabold text-gray-500 bg-gray-100 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono">
-                            {prod.category}
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1 bg-opacity-0">
+                          <span
+                            className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border ${
+                              prod.isCompetitor
+                                ? "text-slate-600 bg-slate-50 border-slate-200"
+                                : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
+                                  ? "text-violet-750 bg-violet-50 border-violet-150"
+                                  : "text-emerald-800 bg-emerald-50 border-emerald-150"
+                            }`}
+                          >
+                            {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
                           </span>
-                          {prod.subcategory && (
-                            <span className="inline-block text-[8px] font-extrabold text-slate-700 bg-slate-100 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono">
-                              {prod.subcategory}
-                            </span>
-                          )}
                           {prod.weight && (
-                            <span className="inline-block text-[8px] font-bold text-amber-700 bg-amber-50 rounded px-1.5 py-0.5 tracking-wider uppercase font-mono border border-amber-100/60">
+                            <span className="text-[9px] font-mono text-gray-500 bg-gray-50 border border-gray-150/55 rounded px-1 select-none">
                               {prod.weight}
                             </span>
                           )}
-                          <span
-                            className={`inline-block text-[8px] font-black border rounded px-1.5 py-0.5 tracking-wider uppercase font-mono ${
-                              prod.isCompetitor
-                                ? "text-blue-700 bg-blue-50 border-blue-200/50"
-                                : prod.brand
-                                      ?.toLowerCase()
-                                      .includes("mavalerio") ||
-                                    prod.brand
-                                      ?.toLowerCase()
-                                      .includes("mavalério")
-                                  ? "text-violet-750 bg-violet-50 border-violet-200/50"
-                                  : "text-emerald-800 bg-emerald-50 border-emerald-250 border-emerald-200/50"
-                            }`}
-                          >
-                            {prod.isCompetitor
-                              ? `Competidor: ${prod.brand || "Concorrente"}`
-                              : `Nossa Marca: ${prod.brand || "Dr. Oetker"}`}
+                          <span className="text-[8px] font-bold text-gray-400 bg-gray-50/50 rounded px-1.5 border border-transparent">
+                            {prod.category}
                           </span>
                         </div>
-                        <h3 className="text-xs sm:text-sm font-bold text-[#1A1A1A] group-hover:text-[#D40511] transition-colors truncate font-sans">
+
+                        <h3 className="text-xs font-bold text-[#1A1A1A] group-hover:text-[#D40511] transition-colors truncate font-sans" title={prod.name}>
                           {prod.name}
                         </h3>
                       </div>
                     </div>
 
-                    {/* Middle Column: Price comparison stats strip */}
-                    <div className="flex items-center gap-4 shrink-0">
-                      <div className="text-left font-sans hidden md:block">
-                        <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block">
-                          Comparativos ({pricesCount} Redes)
-                        </span>
-                        {pricesCount > 0 ? (
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span className="text-[10px] text-emerald-700 font-mono font-bold">
-                              Mín: R$ {minPrice?.toFixed(2)}
-                            </span>
-                            <span className="text-[10px] text-gray-300">|</span>
-                            <span className="text-[10px] text-red-700 font-mono font-bold">
-                              Máx: R$ {maxPrice?.toFixed(2)}
-                            </span>
+                    {/* Column 2: Market Comparatives (mín, máx, méd) (span 2) */}
+                    <div className="md:col-span-2 text-left font-sans">
+                      <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block">
+                        Comparativo Mercado
+                      </span>
+                      {pricesCount > 0 ? (
+                        <div className="space-y-0.5 mt-0.5">
+                          <div className="flex items-center gap-2 max-w-[150px] text-[10.5px]">
+                            <span className="text-gray-400 min-w-[24px]">Min:</span> 
+                            <span className="font-mono font-bold text-emerald-700">R$ {minPrice?.toFixed(2)}</span>
                           </div>
-                        ) : (
-                          <span className="text-[10px] text-gray-400">
-                            Sem registros
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Right Column: price tag */}
-                      <div
-                        className={`px-4 py-2 rounded-xl flex items-center gap-3 border ${
-                          prod.isCompetitor
-                            ? "bg-blue-50/40 border-blue-100/50"
-                            : prod.brand?.toLowerCase().includes("mavalerio") ||
-                                prod.brand?.toLowerCase().includes("mavalério")
-                              ? "bg-violet-50/40 border-violet-100/60"
-                              : "bg-[#FFF5F5]/85 border-red-100/60"
-                        }`}
-                      >
-                        <div className="text-right">
-                          <span className="text-[8px] text-gray-400 font-bold uppercase tracking-wider block font-sans">
-                            {selectedChainId !== "Todas"
-                              ? "Nesta Rede"
-                              : "Atual"}
-                          </span>
-                          <span className="text-[9px] text-gray-400 font-mono block">
-                            {latestRecord
-                              ? formatDateBR(latestRecord.date)
-                              : "Base"}
-                          </span>
+                          <div className="flex items-center gap-2 max-w-[150px] text-[10.5px]">
+                            <span className="text-gray-400 min-w-[24px]">Méd:</span> 
+                            <span className="font-mono font-bold text-slate-700">R$ {averagePrice.toFixed(2)}</span>
+                          </div>
+                          <div className="flex items-center gap-2 max-w-[150px] text-[10.5px]">
+                            <span className="text-gray-400 min-w-[24px]">Max:</span> 
+                            <span className="font-mono font-bold text-red-700">R$ {maxPrice?.toFixed(2)}</span>
+                          </div>
                         </div>
-                        <span
-                          className={`text-base sm:text-lg font-black font-mono leading-none ${
-                            prod.isCompetitor
-                              ? "text-blue-700"
-                              : prod.brand
-                                    ?.toLowerCase()
-                                    .includes("mavalerio") ||
-                                  prod.brand
-                                    ?.toLowerCase()
-                                    .includes("mavalério")
-                                ? "text-violet-750"
-                                : "text-[#D40511]"
-                          }`}
-                        >
-                          R$ {currentPrice.toFixed(2)}
-                        </span>
-                      </div>
+                      ) : (
+                        <span className="text-[10px] text-gray-300 italic">Sem dados ativos</span>
+                      )}
+                    </div>
 
-                      <div className="text-gray-300 group-hover:text-[#D40511] transition-transform">
-                        <ChevronLeft className="w-4 h-4 rotate-180" />
+                    {/* Column 3: Last Audited Price Highlight (span 3) */}
+                    <div className="md:col-span-3 flex flex-col justify-center">
+                      <div>
+                        <span className="text-[9.5px] text-gray-400 font-bold uppercase tracking-wider select-none">
+                          {selectedChainId === "Todas" ? "ÚLTIMO PREÇO REGISTRADO" : "PREÇO ATUAL"}
+                        </span>
+                        <div className="flex items-center gap-1.5 mt-1 bg-opacity-0">
+                          {(() => {
+                            const recordChain = latestRecord 
+                              ? chains.find((c) => c.id === latestRecord.chainId) 
+                              : selectedChainId !== "Todas" 
+                                ? chains.find((c) => c.id === selectedChainId)
+                                : null;
+                            return recordChain ? (
+                              <div className="shrink-0" title={recordChain.name}>
+                                <RetailerLogo chain={recordChain} size="sm" />
+                              </div>
+                            ) : null;
+                          })()}
+                          <span
+                            className={`text-base font-black font-mono leading-none ${
+                              prod.isCompetitor
+                                ? "text-blue-700"
+                                : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
+                                  ? "text-violet-750"
+                                  : "text-[#D40511]"
+                            }`}
+                          >
+                            R$ {currentPrice.toFixed(2)}
+                          </span>
+                          
+                          {(() => {
+                            if (priceValues.length === 0) return null;
+                            const status = currentPrice > averagePrice + 0.01 
+                              ? "above" 
+                              : currentPrice < averagePrice - 0.01 
+                                ? "below" 
+                                : "average";
+
+                            if (status === "below") {
+                              return (
+                                <span className="inline-flex items-center text-[8px] font-extrabold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-100 shrink-0 select-none" title="Abaixo da Média">
+                                  <TrendingDown className="w-2.5 h-2.5 shrink-0" />
+                                </span>
+                              );
+                            } else if (status === "above") {
+                              return (
+                                <span className="inline-flex items-center text-[8px] font-extrabold text-red-700 bg-red-50 px-1 rounded border border-red-150 shrink-0 select-none" title="Acima da Média">
+                                  <TrendingUp className="w-2.5 h-2.5 shrink-0" />
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                        </div>
+                        <div className="text-[9.5px] text-gray-400 whitespace-nowrap overflow-hidden text-ellipsis mt-0.5">
+                          {latestRecord ? (
+                            <span title={formatDateBR(latestRecord.date)}>
+                              Auditado em: {formatDateBR(latestRecord.date)} {selectedChainId === "Todas" && `(${chains.find(c => c.id === latestRecord.chainId)?.name.split(" ")[0]})`}
+                            </span>
+                          ) : (
+                            <span>Base (sem audit.)</span>
+                          )}
+                        </div>
                       </div>
+                    </div>
+
+                    {/* Column 4: Competitors logos & prices (span 2) */}
+                    <div className="md:col-span-2">
+                      <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1">
+                        Monitor Redes
+                      </span>
+                      {pricesCount > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {(() => {
+                            // Find the chain(s) for min and max prices
+                            let minChainId: string | null = null;
+                            let maxChainId: string | null = null;
+
+                            // Find min price chain id
+                            Object.entries(pricesMap).forEach(([chainId, price]) => {
+                              if (price === minPrice && !minChainId) {
+                                minChainId = chainId;
+                              }
+                            });
+
+                            // Find max price chain id (ensure it is different from minChainId if there's more than 1 option)
+                            Object.entries(pricesMap).forEach(([chainId, price]) => {
+                              if (price === maxPrice && !maxChainId && chainId !== minChainId) {
+                                maxChainId = chainId;
+                              }
+                            });
+
+                            // If we couldn't find a different maxChainId, but maxPrice exists and pricesCount > 1, allow same or any other matching
+                            if (!maxChainId && pricesCount > 1) {
+                              Object.entries(pricesMap).forEach(([chainId, price]) => {
+                                if (price === maxPrice && !maxChainId) {
+                                  maxChainId = chainId;
+                                }
+                              });
+                            }
+
+                            return chains.map((chain) => {
+                              if (chain.id !== minChainId && chain.id !== maxChainId) return null;
+                              const price = pricesMap[chain.id];
+                              if (price === undefined) return null;
+                              const isMin = chain.id === minChainId;
+                              const isMax = chain.id === maxChainId;
+                              const badgeLabel = isMin && isMax ? "único" : isMin ? "min" : "max";
+
+                              return (
+                                <div 
+                                  key={chain.id}
+                                  className={`inline-flex items-center gap-0.5 bg-gray-50/70 border rounded-md p-1 px-1.5 hover:border-gray-300 transition-colors select-none ${
+                                    isMin && isMax 
+                                      ? "border-gray-150" 
+                                      : isMin 
+                                        ? "border-emerald-250 bg-emerald-50/15" 
+                                        : "border-red-250 bg-red-50/15"
+                                  }`}
+                                  title={`${chain.name}: R$ ${price.toFixed(2)} (${badgeLabel})`}
+                                >
+                                  <RetailerLogo chain={chain} size="sm" />
+                                  <span className={`font-mono text-[9px] font-bold ${isMin && isMax ? "text-gray-650" : isMin ? "text-emerald-700" : "text-red-700"}`}>
+                                    R${price.toFixed(2)}
+                                  </span>
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-gray-350 italic">Sem amostras</div>
+                      )}
+                    </div>
+
+                    {/* Column 5: Expand Details Chevron icon (span 1) */}
+                    <div className="md:col-span-1 flex items-center md:justify-end">
+                      <button
+                        type="button"
+                        className="w-7 h-7 rounded-lg bg-gray-50/55 hover:bg-red-50 hover:text-[#D40511] border border-gray-200 hover:border-red-150 flex items-center justify-center text-gray-400 transition-all select-none group-hover:scale-105 active:scale-95"
+                      >
+                        <ChevronLeft className="w-4 h-4 rotate-180" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -1109,7 +1356,7 @@ export function Products({
                   className="md:col-span-1 flex flex-col items-center text-center p-4 border border-[#E0E0E0] rounded-xl self-start bg-white"
                   id="detail-product-sidebar"
                 >
-                  <div className="w-24 h-24 rounded-2xl border border-[#E0E0E0] overflow-hidden bg-[#F5F5F5] flex items-center justify-center p-1">
+                  <div className="w-24 h-24 rounded-2xl overflow-hidden bg-gray-50 flex items-center justify-center p-1.5 shadow-2xs">
                     <img
                       src={selectedProduct.imageUrl}
                       alt={selectedProduct.name}
@@ -1135,8 +1382,8 @@ export function Products({
                       </span>
                     )}
                     {selectedProduct.isCompetitor ? (
-                      <span className="inline-block text-[10px] bg-blue-50 text-blue-700 border border-blue-200 font-extrabold rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider">
-                        Competidor: {selectedProduct.brand}
+                      <span className="inline-block text-[10px] bg-blue-50 text-slate-700 border border-slate-200 font-extrabold rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider">
+                        {selectedProduct.brand}
                       </span>
                     ) : (
                       <span
@@ -1147,11 +1394,11 @@ export function Products({
                           selectedProduct.brand
                             ?.toLowerCase()
                             .includes("mavalério")
-                            ? "bg-violet-50 text-violet-800 border-violet-200"
+                            ? "bg-violet-50 text-violet-805 text-violet-750 border-violet-200"
                             : "bg-emerald-50 text-emerald-800 border-emerald-200"
                         }`}
                       >
-                        {selectedProduct.brand || "Dr. Oetker"} (Nossa Marca)
+                        {selectedProduct.brand || "Dr. Oetker"}
                       </span>
                     )}
                   </div>
@@ -1190,201 +1437,311 @@ export function Products({
                   </h3>
 
                   {chartData && chartData.uniqueDates.length > 0 ? (
-                    <div className="relative" id="line-chart-container">
-                      {/* Interactive Custom SVG Line Chart */}
-                      <svg
-                        viewBox="0 0 500 240"
-                        className="w-full h-60"
-                        fill="none"
-                        id="line-chart-svg"
-                      >
-                        {/* Grid lines */}
-                        {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-                          const y = 30 + ratio * 160;
-                          const priceVal =
-                            chartData.maxPrice -
-                            ratio * (chartData.maxPrice - chartData.minPrice);
-                          return (
-                            <g key={i}>
-                              <line
-                                x1="40"
-                                y1={y}
-                                x2="480"
-                                y2={y}
-                                stroke="#F0F0F0"
-                                strokeWidth="1"
+                    <div className="space-y-4">
+                      {/* Compact Collapsible Network Selector */}
+                      <div className="flex items-center justify-between gap-3 p-1 bg-gray-50/10" id="network-selectors-compact-container">
+                        <div className="relative inline-block text-left" id="chain-filter-dropdown-container">
+                          <button
+                            type="button"
+                            onClick={() => setShowChartChainSelector(!showChartChainSelector)}
+                            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-gray-55 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-semibold text-gray-800 shadow-xs transition duration-150 cursor-pointer"
+                          >
+                            <Filter className="w-3.5 h-3.5 text-gray-550" />
+                            <span>Filtrar Redes ({selectedChartChains.length} selecionadas)</span>
+                            {showChartChainSelector ? <ChevronUp className="w-3.5 h-3.5 text-gray-450" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-455" />}
+                          </button>
+
+                          {showChartChainSelector && (
+                            <>
+                              <div
+                                className="fixed inset-0 z-40"
+                                onClick={() => setShowChartChainSelector(false)}
                               />
-                              <text
-                                x="35"
-                                y={y + 3}
-                                fill="#9ca3af"
-                                fontSize="8"
-                                fontFamily="monospace"
-                                textAnchor="end"
-                              >
-                                {priceVal.toFixed(2)}
-                              </text>
-                            </g>
-                          );
-                        })}
-
-                        {/* Date x-axis ticks */}
-                        {chartData.uniqueDates.map((date, idx, arr) => {
-                          const spacing =
-                            arr.length > 1 ? 440 / (arr.length - 1) : 440;
-                          const x = 40 + idx * spacing;
-                          return (
-                            <g key={idx}>
-                              <line
-                                x1={x}
-                                y1="30"
-                                x2={x}
-                                y2="195"
-                                stroke="#F5F5F5"
-                                strokeWidth="1"
-                              />
-                              <text
-                                x={x}
-                                y="210"
-                                fill="#9ca3af"
-                                fontSize="7"
-                                fontFamily="sans-serif"
-                                textAnchor="middle"
-                              >
-                                {formatDateBR(date).substring(0, 5)}
-                              </text>
-                            </g>
-                          );
-                        })}
-
-                        {/* Draw Line for each chain */}
-                        {chains.map((chain, chainIdx) => {
-                          const series = chartData.chainSeries[chain.id] || [];
-                          if (series.length === 0) return null;
-
-                          // Map dates to points
-                          const points = series.map((pt) => {
-                            const dateIdx = chartData.uniqueDates.indexOf(
-                              pt.date,
-                            );
-                            const spacing =
-                              chartData.uniqueDates.length > 1
-                                ? 440 / (chartData.uniqueDates.length - 1)
-                                : 440;
-                            const x = 40 + dateIdx * spacing;
-
-                            // Map price value to grid coordinate [30, 190]
-                            const priceRatio =
-                              (pt.price - chartData.minPrice) /
-                              (chartData.maxPrice - chartData.minPrice);
-                            const y = 190 - priceRatio * 160;
-
-                            return { x, y, price: pt.price };
-                          });
-
-                          // Generate SVG path description
-                          const pathD = points.reduce((acc, pt, idx) => {
-                            return (
-                              acc + `${idx === 0 ? "M" : "L"} ${pt.x} ${pt.y} `
-                            );
-                          }, "");
-
-                          // Select line stroke color
-                          const strokeColor =
-                            chainIdx === 0
-                              ? "#D40511"
-                              : chainIdx === 1
-                                ? "#0284c7"
-                                : chainIdx === 2
-                                  ? "#16a34a"
-                                  : chainIdx === 3
-                                    ? "#ea580c"
-                                    : "#4b5563";
-
-                          return (
-                            <g key={chain.id}>
-                              {/* Glowing background line */}
-                              <path
-                                d={pathD}
-                                stroke={strokeColor}
-                                strokeWidth="3"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                opacity="0.9"
-                              />
-
-                              {/* Interactive dots */}
-                              {points.map((pt, pIdx) => (
-                                <g key={pIdx}>
-                                  <circle
-                                    cx={pt.x}
-                                    cy={pt.y}
-                                    r="3"
-                                    fill="#ffffff"
-                                    stroke={strokeColor}
-                                    strokeWidth="2"
-                                  />
-                                  <rect
-                                    x={pt.x - 20}
-                                    y={pt.y - 12}
-                                    width="40"
-                                    height="9"
-                                    rx="2"
-                                    fill={strokeColor}
-                                    opacity="0.1"
-                                  />
-                                  <text
-                                    x={pt.x}
-                                    y={pt.y - 15}
-                                    fill="#1a1a1a"
-                                    fontSize="7"
-                                    fontWeight="bold"
-                                    fontFamily="monospace"
-                                    textAnchor="middle"
+                              <div className="absolute left-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-55 p-4 space-y-3" id="chain-filter-panel">
+                                <div className="flex items-center justify-between border-b border-gray-100 pb-2">
+                                  <span className="text-xs font-bold text-gray-700 uppercase tracking-wider font-sans">
+                                    Configurar Visualização
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowChartChainSelector(false)}
+                                    className="text-[10px] bg-gray-150 hover:bg-gray-200 text-gray-700 font-bold px-2 py-1 rounded cursor-pointer"
                                   >
-                                    {pt.price.toFixed(2)}
-                                  </text>
-                                </g>
-                              ))}
-                            </g>
-                          );
-                        })}
-                      </svg>
+                                    Confirmar
+                                  </button>
+                                </div>
 
-                      {/* Legend below the SVG */}
-                      <div
-                        className="flex flex-wrap items-center justify-center gap-4 mt-2"
-                        id="chart-legend-grid"
-                      >
-                        {chains.map((chain, chainIdx) => {
-                          const strokeColor =
-                            chainIdx === 0
-                              ? "bg-[#D40511]"
-                              : chainIdx === 1
-                                ? "bg-sky-600"
-                                : chainIdx === 2
-                                  ? "bg-emerald-600"
-                                  : chainIdx === 3
-                                    ? "bg-orange-600"
-                                    : "bg-gray-600";
+                                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedChartChains(chains.map((c) => c.id))}
+                                    className="flex-1 text-[10px] font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 py-1.5 rounded-lg transition text-center cursor-pointer"
+                                  >
+                                    Selecionar todas
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedChartChains([])}
+                                    className="flex-1 text-[10px] font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-red-50 hover:text-[#D40511] hover:border-red-200 py-1.5 rounded-lg transition text-center cursor-pointer"
+                                  >
+                                    Limpar seleção
+                                  </button>
+                                </div>
 
-                          const series = chartData.chainSeries[chain.id] || [];
-                          if (series.length === 0) return null;
+                                <div className="grid grid-cols-1 gap-1 max-h-56 overflow-y-auto pr-1">
+                                  {chains.map((chain, chainIdx) => {
+                                    const isActive = selectedChartChains.includes(chain.id);
+                                    const recordCount = selectedProductHistory.filter((r) => r.chainId === chain.id).length;
+                                    const strokeColor = getChainColor(chain.id);
 
-                          return (
-                            <div
-                              key={chain.id}
-                              className="flex items-center gap-1.5 text-[10px]"
-                            >
+                                    return (
+                                      <button
+                                        key={chain.id}
+                                        type="button"
+                                        onClick={() => {
+                                          if (isActive) {
+                                            setSelectedChartChains(selectedChartChains.filter((id) => id !== chain.id));
+                                          } else {
+                                            setSelectedChartChains([...selectedChartChains, chain.id]);
+                                          }
+                                        }}
+                                        className={`flex items-center justify-between px-3 py-1.5 rounded-lg border text-xs font-semibold transition select-none cursor-pointer ${
+                                          isActive
+                                            ? "border-amber-250 bg-amber-50/20 text-amber-900"
+                                            : "border-gray-100 bg-white hover:bg-gray-55 text-gray-400 hover:text-gray-700"
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-2 min-w-0">
+                                          <span
+                                            className="w-2 h-2 rounded-full shrink-0"
+                                            style={{ backgroundColor: isActive ? strokeColor : "#cbd5e1" }}
+                                          />
+                                          <span className="truncate">{chain.name}</span>
+                                        </div>
+                                        <span className="text-[9px] px-1.5 py-0.5 rounded-md font-mono bg-black/5 text-gray-500 font-bold shrink-0">
+                                          {recordCount} pts
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Line Chart Workspace */}
+                      <div className="relative border border-gray-100 rounded-xl p-3 bg-[#FCFCFC]" id="line-chart-container">
+                        {/* Interactive Custom SVG Line Chart */}
+                        <svg
+                          viewBox="0 0 500 240"
+                          className="w-full h-60"
+                          fill="none"
+                          id="line-chart-svg"
+                        >
+                          {/* Grid lines */}
+                          {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
+                            const y = 30 + ratio * 160;
+                            const priceVal =
+                              chartData.maxPrice -
+                              ratio * (chartData.maxPrice - chartData.minPrice);
+                            return (
+                              <g key={i}>
+                                <line
+                                  x1="40"
+                                  y1={y}
+                                  x2="480"
+                                  y2={y}
+                                  stroke="#F2F2F2"
+                                  strokeWidth="1"
+                                />
+                                <text
+                                  x="35"
+                                  y={y + 3}
+                                  fill="#9ca3af"
+                                  fontSize="8"
+                                  fontFamily="monospace"
+                                  textAnchor="end"
+                                >
+                                  {priceVal.toFixed(2)}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* Date x-axis ticks */}
+                          {chartData.uniqueDates.map((date, idx, arr) => {
+                            const spacing =
+                              arr.length > 1 ? 440 / (arr.length - 1) : 440;
+                            const x = 40 + idx * spacing;
+                            return (
+                              <g key={idx}>
+                                <line
+                                  x1={x}
+                                  y1="30"
+                                  x2={x}
+                                  y2="195"
+                                  stroke="#FDFDFD"
+                                  strokeWidth="1"
+                                />
+                                <text
+                                  x={x}
+                                  y="212"
+                                  fill="#9ca3af"
+                                  fontSize="7.5"
+                                  fontFamily="sans-serif"
+                                  textAnchor="middle"
+                                >
+                                  {formatDateBR(date).substring(0, 5)}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* Draw Line for each selected chain */}
+                          {chains.map((chain, chainIdx) => {
+                            // Filter out unselected chains
+                            if (!selectedChartChains.includes(chain.id)) return null;
+
+                            const series = chartData.chainSeries[chain.id] || [];
+                            if (series.length === 0) return null;
+
+                            // Map dates to points
+                            const points = series.map((pt) => {
+                              const dateIdx = chartData.uniqueDates.indexOf(pt.date);
+                              const spacing =
+                                chartData.uniqueDates.length > 1
+                                  ? 440 / (chartData.uniqueDates.length - 1)
+                                  : 440;
+                              const x = 40 + dateIdx * spacing;
+
+                              // Map price value to grid coordinate [30, 190]
+                              const priceRatio =
+                                (pt.price - chartData.minPrice) /
+                                (chartData.maxPrice - chartData.minPrice || 1);
+                              const y = 190 - priceRatio * 160;
+
+                              return { x, y, price: pt.price, date: pt.date };
+                            });
+
+                            // Generate SVG path description
+                            const pathD = points.reduce((acc, pt, idx) => {
+                              return acc + `${idx === 0 ? "M" : "L"} ${pt.x} ${pt.y} `;
+                            }, "");
+
+                            const strokeColor = getChainColor(chain.id);
+
+                            return (
+                              <g key={chain.id}>
+                                {/* Sleeker line layout */}
+                                <path
+                                  d={pathD}
+                                  stroke={strokeColor}
+                                  strokeWidth="3.5"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  opacity="0.95"
+                                />
+
+                                {/* Interactive dots */}
+                                {points.map((pt, pIdx) => (
+                                  <g key={pIdx}>
+                                    <circle
+                                      cx={pt.x}
+                                      cy={pt.y}
+                                      r="2.2"
+                                      fill="#ffffff"
+                                      stroke={strokeColor}
+                                      strokeWidth="2"
+                                    />
+                                    {/* Large invisible interactive hover overlay zone */}
+                                    <circle
+                                      cx={pt.x}
+                                      cy={pt.y}
+                                      r="14"
+                                      fill="transparent"
+                                      className="cursor-pointer"
+                                      onMouseEnter={() => {
+                                        setHoveredPoint({
+                                          chainId: chain.id,
+                                          chainName: chain.name,
+                                          date: pt.date,
+                                          price: pt.price,
+                                          x: pt.x,
+                                          y: pt.y,
+                                        });
+                                      }}
+                                      onMouseLeave={() => {
+                                        setHoveredPoint(null);
+                                      }}
+                                      onClick={() => {
+                                        setHoveredPoint({
+                                          chainId: chain.id,
+                                          chainName: chain.name,
+                                          date: pt.date,
+                                          price: pt.price,
+                                          x: pt.x,
+                                          y: pt.y,
+                                        });
+                                      }}
+                                    />
+                                  </g>
+                                ))}
+                              </g>
+                            );
+                          })}
+                        </svg>
+
+                        {/* Interactive Tooltip Overlay */}
+                        {hoveredPoint && (
+                          <div
+                            className="absolute z-10 bg-white/95 backdrop-blur-xs border border-gray-150 rounded-lg p-2.5 shadow-md pointer-events-none transform -translate-x-1/2 -translate-y-[105%] transition-all duration-75 ease-out min-w-[130px] text-left"
+                            style={{
+                              left: `${(hoveredPoint.x / 500) * 100}%`,
+                              top: `${(hoveredPoint.y / 240) * 100}%`,
+                            }}
+                          >
+                            <div className="flex items-center gap-1.5 leading-none">
                               <span
-                                className={`w-3 h-1 rounded ${strokeColor}`}
-                              ></span>
-                              <span className="text-gray-600 font-sans font-medium">
-                                {chain.name}
+                                className="w-2 rounded-full h-2 shrink-0 animate-pulse"
+                                style={{ backgroundColor: getChainColor(hoveredPoint.chainId) }}
+                              />
+                              <span className="text-[10px] font-black text-gray-800 font-sans truncate">
+                                {hoveredPoint.chainName}
                               </span>
                             </div>
-                          );
-                        })}
+                            <div className="mt-1.5 text-xs font-black font-mono text-gray-900">
+                              R$ {hoveredPoint.price.toFixed(2)}
+                            </div>
+                            <div className="text-[9px] text-gray-400 font-mono mt-0.5 leading-none">
+                              {formatDateBR(hoveredPoint.date)}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Clickable colored sub-legend */}
+                        <div className="flex flex-wrap items-center justify-center gap-2 mt-3 pt-3 border-t border-gray-100" id="chart-active-legend">
+                          {chains.filter(c => selectedChartChains.includes(c.id)).map((chain) => {
+                            const strokeColor = getChainColor(chain.id);
+                            return (
+                              <button
+                                key={chain.id}
+                                type="button"
+                                onClick={() => setSelectedChartChains(selectedChartChains.filter((id) => id !== chain.id))}
+                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-white hover:border-gray-300 text-[10px] font-semibold text-gray-700 transition cursor-pointer hover:bg-gray-50"
+                                title="Clique para remover do gráfico"
+                              >
+                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: strokeColor }} />
+                                <span className="truncate max-w-[100px]">{chain.name}</span>
+                                <span className="text-[8px] text-gray-400 font-bold">&times;</span>
+                              </button>
+                            );
+                          })}
+                          {selectedChartChains.length === 0 && (
+                            <span className="text-[10px] text-gray-400 italic">Nenhuma rede selecionada. Ative no botão de filtro.</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -1403,45 +1760,122 @@ export function Products({
             )}
 
             {/* Pricing Comparisons Box */}
-            <div
-              className="border border-[#E0E0E0] rounded-xl p-5"
-              id="detail-comparison-block"
-            >
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">
-                Tabela Comparativa de Preços Atuais
-              </h3>
-              <div className="overflow-x-auto">
-                <table
-                  className="w-full text-left text-xs border-collapse"
-                  id="comparison-details-table"
+            {(() => {
+              const currentPricesList = chains.map((chain) => {
+                const chainRecords = selectedProductHistory.filter((r) => r.chainId === chain.id);
+                const latestRecord = chainRecords[chainRecords.length - 1];
+                return { chain, latestRecord };
+              });
+
+              const pricedRecords = currentPricesList.filter((item) => item.latestRecord !== undefined);
+              
+              let averagePrice = 0;
+              let minPriceItem: typeof currentPricesList[number] | null = null;
+              let maxPriceItem: typeof currentPricesList[number] | null = null;
+
+              if (pricedRecords.length > 0) {
+                const sum = pricedRecords.reduce((acc, r) => acc + r.latestRecord!.price, 0);
+                averagePrice = sum / pricedRecords.length;
+                
+                minPriceItem = pricedRecords[0];
+                maxPriceItem = pricedRecords[0];
+                
+                pricedRecords.forEach((item) => {
+                  if (item.latestRecord!.price < minPriceItem!.latestRecord!.price) {
+                    minPriceItem = item;
+                  }
+                  if (item.latestRecord!.price > maxPriceItem!.latestRecord!.price) {
+                    maxPriceItem = item;
+                  }
+                });
+              }
+
+              return (
+                <div
+                  className="border border-[#E0E0E0] rounded-xl p-5 bg-white space-y-4"
+                  id="detail-comparison-block"
                 >
-                  <thead>
-                    <tr className="border-b border-[#E0E0E0] text-[10px] uppercase text-gray-400">
-                      <th className="pb-2 font-bold select-none">
-                        Bandeira / Rede
-                      </th>
-                      <th className="pb-2 font-bold select-none text-center">
-                        Último Preço
-                      </th>
-                      <th className="pb-2 font-bold select-none text-center">
-                        Data do Registro
-                      </th>
-                      <th className="pb-2 font-bold select-none">
-                        Registrado por
-                      </th>
-                      <th className="pb-2 font-bold select-none text-right">
-                        Comparativo c/ Base
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#F5F5F5]">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-[#F5F5F5] pb-3">
+                    <div>
+                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block font-sans">
+                        Visão Geral de Pontos de Venda
+                      </span>
+                      <h3 className="text-sm font-black text-[#1A1A1A] font-sans mt-0.5">
+                        Comparativo de Preços Atuais
+                      </h3>
+                    </div>
+                  </div>
+
+                  {/* Highlights Summary KPI (KPI Superior Compacto) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" id="current-prices-highlights">
+                    {/* Média Geral */}
+                    <div className="bg-gray-50/50 border border-gray-200 rounded-xl p-3 flex items-center justify-between" id="highlight-avg-price">
+                      <div className="min-w-0">
+                        <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider font-sans">
+                          📊 Média Geral
+                        </span>
+                        <div className="text-base font-black font-mono text-gray-900 mt-0.5">
+                          {pricedRecords.length > 0 ? `R$ ${averagePrice.toFixed(2)}` : "Sem dados"}
+                        </div>
+                        <p className="text-[10px] text-gray-400 font-sans truncate mt-0.5">
+                          {pricedRecords.length > 0 ? `Cálculo sobre ${pricedRecords.length} redes` : "Nenhum preço coletado"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Menor Preço */}
+                    <div className="bg-emerald-50/30 border border-emerald-250/60 rounded-xl p-3 flex items-center justify-between" id="highlight-min-price">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                          <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
+                            🟢 Menor Preço
+                          </span>
+                        </div>
+                        <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
+                          {minPriceItem ? `R$ ${minPriceItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
+                        </div>
+                        <p className="text-[10px] text-emerald-700 font-medium truncate mt-0.5 font-sans">
+                          {minPriceItem ? minPriceItem.chain.name : "Nenhum canal ativo"}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-emerald-100/50 rounded-lg text-emerald-700 shrink-0">
+                        <TrendingDown className="w-4 h-4" />
+                      </div>
+                    </div>
+
+                    {/* Maior Preço */}
+                    <div className="bg-red-50/30 border border-red-200/60 rounded-xl p-3 flex items-center justify-between" id="highlight-max-price">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                          <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
+                            🔴 Maior Preço
+                          </span>
+                        </div>
+                        <div className="text-base font-black font-mono text-red-950 mt-0.5">
+                          {maxPriceItem ? `R$ ${maxPriceItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
+                        </div>
+                        <p className="text-[10px] text-red-700 font-medium truncate mt-0.5 font-sans">
+                          {maxPriceItem ? maxPriceItem.chain.name : "Nenhum canal ativo"}
+                        </p>
+                      </div>
+                      <div className="p-2 bg-red-100/50 rounded-lg text-red-700 shrink-0">
+                        <TrendingUp className="w-4 h-4" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Compact Grid of Cards (Visual BI) */}
+                  <div 
+                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3" 
+                    id="current-prices-cards-grid"
+                  >
                     {chains.map((chain) => {
-                      // Find latest record for this product in this chain
                       const chainRecords = selectedProductHistory.filter(
                         (r) => r.chainId === chain.id,
                       );
-                      const latestRecord =
-                        chainRecords[chainRecords.length - 1];
+                      const latestRecord = chainRecords[chainRecords.length - 1];
 
                       const calculatedPercent =
                         latestRecord && selectedProduct
@@ -1450,116 +1884,183 @@ export function Products({
                             100
                           : null;
 
+                      // Redesign comparison indicators & colors as instructed
+                      let borderStyle = "border-l-4 border-l-gray-300";
+                      let bgStyle = "bg-white border-y border-r border-[#E0E0E0] text-gray-700 hover:border-gray-300";
+                      let indicatorText = "Na Média";
+                      let indicatorColorClass = "text-blue-600 bg-blue-50 border-blue-150";
+
+                      if (latestRecord && pricedRecords.length > 1) {
+                        const diff = latestRecord.price - averagePrice;
+                        if (diff < -0.01) {
+                          borderStyle = "border-l-4 border-l-emerald-500";
+                          bgStyle = "bg-gradient-to-r from-emerald-50/10 to-white/90 border-y border-r border-emerald-200/70 text-emerald-950 hover:bg-emerald-50/20 hover:border-emerald-300/80";
+                          indicatorText = "- Média";
+                          indicatorColorClass = "text-emerald-700 bg-emerald-50 border-emerald-150";
+                        } else if (diff > 0.01) {
+                          borderStyle = "border-l-4 border-l-red-500";
+                          bgStyle = "bg-gradient-to-r from-red-50/10 to-white/90 border-y border-r border-red-150/70 text-red-950 hover:bg-red-50/20 hover:border-red-250/80";
+                          indicatorText = "+ Média";
+                          indicatorColorClass = "text-red-700 bg-red-50 border-red-150";
+                        } else {
+                          borderStyle = "border-l-4 border-l-gray-350";
+                          bgStyle = "bg-gradient-to-r from-gray-50/10 to-white/90 border-y border-r border-gray-200 text-gray-800 hover:bg-gray-50/20 hover:border-gray-350";
+                          indicatorText = "No Preço";
+                          indicatorColorClass = "text-gray-650 bg-gray-50 border-gray-200";
+                        }
+                      } else if (!latestRecord) {
+                        borderStyle = "border-l-4 border-l-gray-200";
+                        bgStyle = "bg-gray-50/30 border-y border-r border-gray-150 text-gray-400";
+                        indicatorText = "Sem dados";
+                        indicatorColorClass = "text-gray-400 bg-gray-100 border-gray-200";
+                      }
+
+                      const tooltipText = latestRecord
+                        ? `Registrado por: ${latestRecord.userName || "N/A"} • Preço Base: R$ ${selectedProduct.basePrice.toFixed(2)} (${calculatedPercent !== null ? `${calculatedPercent > 0 ? "+" : ""}${calculatedPercent.toFixed(1)}%` : "0%"})`
+                        : "Nenhum histórico nesta rede";
+
                       return (
-                        <tr
+                        <div
                           key={chain.id}
-                          className="hover:bg-gray-50/50 transition-colors"
+                          title={tooltipText}
+                          className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-sm min-h-[110px] ${borderStyle} ${bgStyle}`}
+                          id={`current-price-card-${chain.id}`}
                         >
-                          <td className="py-3 font-medium text-[#1A1A1A]">
-                            {chain.name}
-                          </td>
-                          <td className="py-3 text-center font-mono font-bold">
+                          {/* Top Row: Logo larger (increased to w-7 h-7) & Chain Name smaller/discrete */}
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
+                              className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-[10px] shrink-0 overflow-hidden border border-gray-100 shadow-xs ${
+                                chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
+                              }`}
+                            >
+                              {chain.logoUrl ? (
+                                <img
+                                  src={chain.logoUrl}
+                                  alt={chain.name}
+                                  className="w-full h-full object-contain p-0.5 bg-white"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <span>{chain.name.substring(0, 2).toUpperCase()}</span>
+                              )}
+                            </span>
+                            <span className="text-[9px] font-black text-gray-400 uppercase tracking-tight truncate block leading-none flex-1">
+                              {chain.name}
+                            </span>
+                          </div>
+
+                          {/* Price in maximum prominence (Display typography style) */}
+                          <div className="my-2.5 text-left">
                             {latestRecord ? (
-                              `R$ ${latestRecord.price.toFixed(2)}`
+                              <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline">
+                                <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
+                                {latestRecord.price.toFixed(2)}
+                              </div>
                             ) : (
-                              <span className="text-gray-300">-</span>
+                              <div className="text-[10px] font-bold text-gray-350 italic">
+                                ————
+                              </div>
                             )}
-                          </td>
-                          <td className="py-3 text-center text-gray-500 font-sans">
-                            {latestRecord ? (
-                              formatDateBR(latestRecord.date)
-                            ) : (
-                              <span className="text-gray-300">-</span>
-                            )}
-                          </td>
-                          <td className="py-3 text-gray-600 font-sans">
-                            {latestRecord ? (
-                              latestRecord.userName
-                            ) : (
-                              <span className="text-gray-300">-</span>
-                            )}
-                          </td>
-                          <td className="py-3 text-right">
-                            {calculatedPercent !== null ? (
-                              <span
-                                className={`inline-flex items-center gap-0.5 text-[10px] font-bold font-mono px-1.5 py-0.5 rounded ${
-                                  calculatedPercent > 0
-                                    ? "bg-red-50 text-[#D40511]"
-                                    : "bg-emerald-50 text-emerald-700"
-                                }`}
-                              >
-                                {calculatedPercent > 0 ? "+" : ""}
-                                {calculatedPercent.toFixed(1)}%
-                              </span>
-                            ) : (
-                              <span className="text-gray-300">-</span>
-                            )}
-                          </td>
-                        </tr>
+                          </div>
+
+                          {/* Footer Row: Date & Small Pill Status Info */}
+                          <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
+                            <span className="text-[8px] text-gray-400 font-mono flex items-center gap-0.5 min-w-0">
+                              {latestRecord ? (
+                                <>
+                                  <Clock className="w-2 h-2 text-gray-300 shrink-0" />
+                                  <span className="truncate">{formatDateBR(latestRecord.date).substring(0, 5)}</span>
+                                </>
+                              ) : (
+                                "-"
+                              )}
+                            </span>
+                            
+                            <span className={`text-[8px] font-bold uppercase px-1 py-0.2 rounded border tracking-tight truncate shrink-0 ${indicatorColorClass}`}>
+                              {indicatorText}
+                            </span>
+                          </div>
+                        </div>
                       );
                     })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  </div>
+                </div>
+              );
+            })()}
 
-            {/* Price Evolution Comparison in a Specific Retail Chain */}
-            {selectedProduct && chains.length > 0 && (
+            {/* Comparar com Concorrentes */}
+            {selectedProduct && (
               <div
-                className="border border-[#E0E0E0] rounded-xl p-5 bg-white space-y-4"
-                id="detail-chain-comparison-segment"
+                className="border border-[#E0E0E0] rounded-xl p-5 bg-white space-y-5"
+                id="detail-competitor-comparison-segment"
               >
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-[#F5F5F5] pb-4">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-[#F5F5F5] pb-4">
                   <div>
                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block font-sans">
-                      Análise de Evolução por Rede (Subcategoria:{" "}
-                      {selectedProduct.subcategory || "Sem Subcategoria"})
+                      Posicionamento de Mercado
                     </span>
-                    <h3 className="text-sm font-black text-[#1A1A1A] font-sans mt-0.5">
-                      Comparativo de Variação de Preços na Bandeira
-                    </h3>
+                    <h2 className="text-base font-black text-[#1A1A1A] font-sans mt-0.5">
+                      Comparar com Concorrentes
+                    </h2>
                   </div>
 
                   <div className="flex flex-wrap items-center gap-3">
-                    {/* Weight Filter dropdown */}
-                    <div className="flex items-center gap-1.5">
-                      <label
-                        htmlFor="compare-weight-select"
-                        className="text-xs text-gray-500 font-sans font-semibold"
+                    {/* Filter Toggles Side-by-Side */}
+                    <div className="flex items-center gap-1.5 bg-gray-50 p-1 border border-gray-200 rounded-xl" id="comparer-toggles-box">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (compareByCategory && !compareBySubcategory) {
+                            setCompareBySubcategory(true);
+                            setCompareByCategory(false);
+                          } else {
+                            setCompareByCategory(!compareByCategory);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
+                          compareByCategory
+                            ? "bg-white text-gray-800 shadow-xs border border-gray-200"
+                            : "text-gray-400 hover:text-gray-600 border border-transparent"
+                        }`}
                       >
-                        Gramatura:
-                      </label>
-                      <select
-                        id="compare-weight-select"
-                        value={compareWeight}
-                        onChange={(e) => setCompareWeight(e.target.value)}
-                        className="bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-bold focus:outline-none focus:border-[#D40511]"
+                        Categoria: {selectedProduct.category || "Indefinida"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (compareBySubcategory && !compareByCategory) {
+                            setCompareByCategory(true);
+                            setCompareBySubcategory(false);
+                          } else {
+                            setCompareBySubcategory(!compareBySubcategory);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
+                          compareBySubcategory
+                            ? "bg-white text-gray-800 shadow-xs border border-gray-200"
+                            : "text-gray-400 hover:text-gray-600 border border-transparent"
+                        }`}
                       >
-                        <option value="Todas">
-                          Todas ({availableWeightsForSelected.length})
-                        </option>
-                        {availableWeightsForSelected.map((w) => (
-                          <option key={w} value={w}>
-                            {w}
-                          </option>
-                        ))}
-                      </select>
+                        Subcategoria: {selectedProduct.subcategory || "Indefinida"}
+                      </button>
                     </div>
 
-                    {/* Chain Dropdown selector */}
+                    {/* Selector de Redes para comparar */}
                     <div className="flex items-center gap-1.5">
                       <label
-                        htmlFor="compare-chain-select"
-                        className="text-xs text-gray-500 font-sans font-semibold"
+                        htmlFor="competitor-compare-chain"
+                        className="text-xs text-gray-500 font-sans font-semibold shrink-0"
                       >
                         Rede:
                       </label>
                       <select
-                        id="compare-chain-select"
-                        value={compareChainId || chains[0]?.id || ""}
-                        onChange={(e) => setCompareChainId(e.target.value)}
-                        className="bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-bold focus:outline-none focus:border-[#D40511]"
+                        id="competitor-compare-chain"
+                        value={competitorCompareChainId}
+                        onChange={(e) => setCompetitorCompareChainId(e.target.value)}
+                        className="bg-white border border-gray-250 hover:border-gray-350 rounded-xl px-3 py-1.5 text-xs text-gray-800 font-bold focus:outline-none focus:border-[#D40511] cursor-pointer shadow-xs transition duration-150"
                       >
+                        <option value="Todas">Todas as Redes</option>
                         {chains.map((chain) => (
                           <option key={chain.id} value={chain.id}>
                             {chain.name}
@@ -1571,474 +2072,192 @@ export function Products({
                 </div>
 
                 {(() => {
-                  const activeCompareChainId =
-                    compareChainId || chains[0]?.id || "";
-                  const activeChain = chains.find(
-                    (c) => c.id === activeCompareChainId,
-                  );
-
-                  // Get products in same category and either same subcategory or matching the selected weight (always keep selectedProduct)
-                  const peers = products.filter(
-                    (p) =>
-                      p.category === selectedProduct.category &&
-                      p.active &&
-                      (p.id === selectedProduct.id ||
-                        (compareWeight === "Todas"
-                          ? p.subcategory === selectedProduct.subcategory
-                          : p.weight === compareWeight)),
-                  );
-
-                  // Retrieve history for peers in this supermarket
-                  const peerHistories = peers.map((p) => {
-                    const historyInChain = records
-                      .filter(
-                        (r) =>
-                          r.productId === p.id &&
-                          r.chainId === activeCompareChainId,
-                      )
-                      .sort(
-                        (a, b) =>
-                          new Date(a.date).getTime() -
-                          new Date(b.date).getTime(),
-                      );
-                    return {
-                      product: p,
-                      history: historyInChain,
-                      latestPrice:
-                        historyInChain.length > 0
-                          ? historyInChain[historyInChain.length - 1].price
-                          : p.basePrice,
-                      minPrice:
-                        historyInChain.length > 0
-                          ? Math.min(...historyInChain.map((h) => h.price))
-                          : p.basePrice,
-                      maxPrice:
-                        historyInChain.length > 0
-                          ? Math.max(...historyInChain.map((h) => h.price))
-                          : p.basePrice,
-                    };
+                  // Find peer products matching comparison toggles
+                  const peers = products.filter((p) => {
+                    if (!p.active) return false;
+                    
+                    if (compareByCategory && compareBySubcategory) {
+                      return p.category === selectedProduct.category && p.subcategory === selectedProduct.subcategory;
+                    } else if (compareByCategory) {
+                      return p.category === selectedProduct.category;
+                    } else if (compareBySubcategory) {
+                      return p.subcategory === selectedProduct.subcategory;
+                    }
+                    return true;
                   });
 
-                  // Extract all distinct dates across these products inside this chain
-                  const allDatesInChain = Array.from(
-                    new Set(
-                      records
-                        .filter(
-                          (r) =>
-                            r.chainId === activeCompareChainId &&
-                            peers.some((p) => p.id === r.productId),
-                        )
-                        .map((r) => r.date),
-                    ),
-                  ).sort();
-
-                  const hasEnoughData =
-                    allDatesInChain.length > 0 &&
-                    peerHistories.some((ph) => ph.history.length > 0);
-
-                  if (!hasEnoughData) {
+                  if (peers.length === 0) {
                     return (
-                      <div className="p-6 bg-[#F9F9F9] rounded-xl text-center text-gray-500 text-xs italic">
-                        Não existem registros de auditoria salvos para a
-                        subcategoria "
-                        {selectedProduct.subcategory || "Sem Subcategoria"}"{" "}
-                        {compareWeight !== "Todas"
-                          ? `com gramatura "${compareWeight}" `
-                          : ""}
-                        na rede selecionada ({activeChain?.name}).
-                        <p className="text-[11px] text-gray-400 mt-1 font-sans">
-                          Cadastre preços na página de Auditoria para alimentar
-                          a análise comparativa por estabelecimento.
-                        </p>
+                      <div className="p-6 bg-gray-50 rounded-xl text-center text-gray-400 text-xs italic">
+                        Nenhum produto correspondente aos filtros selecionados para comparação.
                       </div>
                     );
                   }
 
-                  // Determine Y-Axis scale limits for plot
-                  const allPoints = records
-                    .filter(
-                      (r) =>
-                        r.chainId === activeCompareChainId &&
-                        peers.some((p) => p.id === r.productId),
-                    )
-                    .map((r) => r.price);
-                  if (allPoints.length === 0)
-                    allPoints.push(selectedProduct.basePrice);
+                  // Retrieve latest price for peers across all retail chains and calculate averages & minimum prices
+                  const peerCalculatedData = peers.map((p) => {
+                    const productRecords = records.filter((r) => {
+                      if (r.productId !== p.id) return false;
+                      if (competitorCompareChainId !== "Todas" && r.chainId !== competitorCompareChainId) return false;
+                      return true;
+                    });
+                    
+                    const latestByChain: Record<string, PriceRecord> = {};
+                    productRecords.forEach((r) => {
+                      const current = latestByChain[r.chainId];
+                      if (!current || new Date(r.date).getTime() > new Date(current.date).getTime()) {
+                        latestByChain[r.chainId] = r;
+                      }
+                    });
+                    
+                    const latestRecordsList = Object.values(latestByChain);
+                    
+                    let averagePrice = 0;
+                    let minPrice = p.basePrice;
+                    let minPriceChainId = "";
+                    
+                    if (latestRecordsList.length > 0) {
+                      const sum = latestRecordsList.reduce((acc, r) => acc + r.price, 0);
+                      averagePrice = sum / latestRecordsList.length;
+                      
+                      let minRec = latestRecordsList[0];
+                      latestRecordsList.forEach((r) => {
+                        if (r.price < minRec.price) {
+                          minRec = r;
+                        }
+                      });
+                      minPrice = minRec.price;
+                      minPriceChainId = minRec.chainId;
+                    } else {
+                      averagePrice = p.basePrice;
+                      minPrice = p.basePrice;
+                    }
+                    
+                    const minChain = chains.find((c) => c.id === minPriceChainId);
+                    const minChainName = minChain
+                      ? minChain.name
+                      : competitorCompareChainId !== "Todas"
+                        ? `${chains.find((c) => c.id === competitorCompareChainId)?.name || ""}`
+                        : "Preço de tabela";
+                    
+                    return {
+                      product: p,
+                      averagePrice,
+                      minPrice,
+                      minChainName,
+                      isSelf: p.id === selectedProduct.id,
+                    };
+                  });
 
-                  const peakPrice = Math.max(...allPoints, 3) * 1.15;
-                  const floorPrice = Math.max(
-                    0,
-                    Math.min(...allPoints, 1) * 0.85,
-                  );
+                  // Sort from lowest average price to highest
+                  const sortedPeers = [...peerCalculatedData].sort((a, b) => a.averagePrice - b.averagePrice);
+                  const maxAveragePrice = sortedPeers.length > 0 ? Math.max(...sortedPeers.map(p => p.averagePrice)) : 10;
 
                   return (
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                        {/* SVG Comparison Timeline Chart */}
-                        <div className="lg:col-span-2 border border-[#E0E0E0]/80 rounded-xl p-4 bg-[#FDFDFD]">
-                          <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block font-sans mb-3">
-                            Evolução Temporal de Preços - {activeChain?.name}
-                          </span>
+                    <div className="space-y-4">
+                      <div className="text-xs text-gray-500 font-sans">
+                        Mostrando {sortedPeers.length} produtos correspondentes ordenados pelo menor preço médio mais recente:
+                      </div>
 
-                          <div className="relative">
-                            <svg
-                              viewBox="0 0 500 220"
-                              className="w-full h-56"
-                              fill="none"
+                      <div className="space-y-3" id="comparer-peers-list font-sans">
+                        {sortedPeers.map((item) => {
+                          const barWidth = Math.max(10, (item.averagePrice / maxAveragePrice) * 100);
+                          const isSelf = item.isSelf;
+                          
+                          return (
+                            <div
+                              key={item.product.id}
+                              className={`p-3.5 rounded-xl border transition-all duration-150 ${
+                                isSelf
+                                  ? "bg-amber-50/20 border-amber-300 shadow-xs animate-pulse"
+                                  : "bg-white border-gray-150 hover:border-gray-250 hover:bg-gray-50/30"
+                              }`}
+                              id={`peer-row-${item.product.id}`}
                             >
-                              {/* Horizontal axis grid */}
-                              {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-                                const y = 25 + ratio * 150;
-                                const val =
-                                  peakPrice - ratio * (peakPrice - floorPrice);
-                                return (
-                                  <g key={i}>
-                                    <line
-                                      x1="45"
-                                      y1={y}
-                                      x2="480"
-                                      y2={y}
-                                      stroke="#F0F0F0"
-                                      strokeWidth="1"
-                                      strokeDasharray="2,2"
+                              <div className="flex items-start sm:items-center gap-3">
+                                {/* Product Image Thumbnail */}
+                                <div className="w-12 h-12 rounded-lg border border-gray-200 overflow-hidden shrink-0 bg-gray-50 flex items-center justify-center relative">
+                                  {item.product.imageUrl ? (
+                                    <img
+                                      src={item.product.imageUrl}
+                                      alt={item.product.name}
+                                      className="w-full h-full object-cover"
+                                      referrerPolicy="no-referrer"
                                     />
-                                    <text
-                                      x="38"
-                                      y={y + 3}
-                                      fill="#9ca3af"
-                                      fontSize="8"
-                                      fontFamily="monospace"
-                                      textAnchor="end"
-                                    >
-                                      R$ {val.toFixed(2)}
-                                    </text>
-                                  </g>
-                                );
-                              })}
-
-                              {/* Vertical date ticks */}
-                              {allDatesInChain.map((date, idx, arr) => {
-                                const spacing =
-                                  arr.length > 1 ? 425 / (arr.length - 1) : 425;
-                                const x = 45 + idx * spacing;
-                                return (
-                                  <g key={idx}>
-                                    <line
-                                      x1={x}
-                                      y1="25"
-                                      x2={x}
-                                      y2="180"
-                                      stroke="#EFEFEF"
-                                      strokeWidth="1"
-                                    />
-                                    <text
-                                      x={x}
-                                      y="195"
-                                      fill="#6B7280"
-                                      fontSize="7"
-                                      fontWeight="bold"
-                                      fontFamily="sans-serif"
-                                      textAnchor="middle"
-                                    >
-                                      {formatDateBR(date).substring(0, 5)}
-                                    </text>
-                                  </g>
-                                );
-                              })}
-
-                              {/* Plots for products */}
-                              {peerHistories.map((ph, idx) => {
-                                if (ph.history.length === 0) return null;
-
-                                // Generate sequence of coordinates
-                                const points = ph.history.map((h) => {
-                                  const dateIdx = allDatesInChain.indexOf(
-                                    h.date,
-                                  );
-                                  const spacing =
-                                    allDatesInChain.length > 1
-                                      ? 425 / (allDatesInChain.length - 1)
-                                      : 425;
-                                  const x = 45 + dateIdx * spacing;
-
-                                  const ratio =
-                                    (h.price - floorPrice) /
-                                    (peakPrice - floorPrice);
-                                  const y = 175 - ratio * 150;
-                                  return { x, y, price: h.price };
-                                });
-
-                                const pathD = points.reduce((acc, pt, pIdx) => {
-                                  return (
-                                    acc +
-                                    `${pIdx === 0 ? "M" : "L"} ${pt.x} ${pt.y} `
-                                  );
-                                }, "");
-
-                                // Custom distinct solid palette for peers
-                                const isSelf =
-                                  ph.product.id === selectedProduct.id;
-                                const colors = [
-                                  "#0284C7", // Sky Blue
-                                  "#059669", // Emerald
-                                  "#7C3AED", // Violet
-                                  "#EA580C", // Orange
-                                  "#DB2777", // Pink
-                                  "#0891B2", // Cyan
-                                  "#4F46E5", // Indigo
-                                  "#2563EB", // Blue
-                                ];
-
-                                let strokeColor = "#D40511"; // Our product
-                                if (!isSelf) {
-                                  const nonSelfPeers = peers.filter(
-                                    (p) => p.id !== selectedProduct.id,
-                                  );
-                                  const pIdx = nonSelfPeers.findIndex(
-                                    (p) => p.id === ph.product.id,
-                                  );
-                                  strokeColor =
-                                    colors[pIdx % colors.length] || "#4B5563";
-                                }
-
-                                return (
-                                  <g key={ph.product.id}>
-                                    <path
-                                      d={pathD}
-                                      stroke={strokeColor}
-                                      strokeWidth={isSelf ? "3.5" : "2.2"}
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                      opacity="1"
-                                    />
-                                    {points.map((pt, pIdx) => (
-                                      <g key={pIdx}>
-                                        <circle
-                                          cx={pt.x}
-                                          cy={pt.y}
-                                          r={isSelf ? "4.5" : "3.5"}
-                                          fill={isSelf ? "#D40511" : "#FFFFFF"}
-                                          stroke={strokeColor}
-                                          strokeWidth="2"
-                                        />
-                                        {isSelf && (
-                                          <text
-                                            x={pt.x}
-                                            y={pt.y - 10}
-                                            fill="#111827"
-                                            fontSize="8"
-                                            fontWeight="bold"
-                                            fontFamily="monospace"
-                                            textAnchor="middle"
-                                          >
-                                            R${pt.price.toFixed(2)}
-                                          </text>
-                                        )}
-                                      </g>
-                                    ))}
-                                  </g>
-                                );
-                              })}
-                            </svg>
-                          </div>
-
-                          {/* Chart sub-legend */}
-                          <div className="flex flex-wrap items-center justify-center gap-3.5 mt-3 pt-3 border-t border-[#F5F5F5]">
-                            {peerHistories.map((ph) => {
-                              if (ph.history.length === 0) return null;
-
-                              const isSelf =
-                                ph.product.id === selectedProduct.id;
-                              const colors = [
-                                "#0284C7", // Sky Blue
-                                "#059669", // Emerald
-                                "#7C3AED", // Violet
-                                "#EA580C", // Orange
-                                "#DB2777", // Pink
-                                "#0891B2", // Cyan
-                                "#4F46E5", // Indigo
-                                "#2563EB", // Blue
-                              ];
-
-                              let dotColor = "#D40511";
-                              if (!isSelf) {
-                                const nonSelfPeers = peers.filter(
-                                  (p) => p.id !== selectedProduct.id,
-                                );
-                                const pIdx = nonSelfPeers.findIndex(
-                                  (p) => p.id === ph.product.id,
-                                );
-                                dotColor =
-                                  colors[pIdx % colors.length] || "#4B5563";
-                              }
-
-                              return (
-                                <div
-                                  key={ph.product.id}
-                                  className="flex items-center gap-1.5 text-[10px]"
-                                >
-                                  <span
-                                    className={`w-2.5 h-2.5 rounded-full ${isSelf ? "ring-2 ring-red-200" : ""}`}
-                                    style={{ backgroundColor: dotColor }}
-                                  />
-                                  <span
-                                    className={`font-sans font-medium ${isSelf ? "text-gray-950 font-black" : "text-gray-500"}`}
-                                  >
-                                    {ph.product.name
-                                      .split(" ")
-                                      .slice(0, 4)
-                                      .join(" ")}{" "}
-                                    {isSelf ? "(Aqui)" : ""}
-                                  </span>
+                                  ) : (
+                                    <div className="w-full h-full bg-gray-50 flex flex-col items-center justify-center p-1">
+                                      <Package className="w-4 h-4 text-gray-300" />
+                                      <span className="text-[7px] text-gray-400 font-mono scale-90">Sem Foto</span>
+                                    </div>
+                                  )}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        </div>
 
-                        {/* Benchmark Analysis and variation indicators */}
-                        <div className="flex flex-col gap-4">
-                          <div className="border border-[#E0E0E0]/80 rounded-xl p-4 bg-[#FDFDFD] flex-1 flex flex-col justify-between">
-                            <div>
-                              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block font-sans mb-3">
-                                Desempenho de Flutuação (Subcategoria)
-                              </span>
-
-                              <div className="space-y-3">
-                                {(() => {
-                                  const selectedPH = peerHistories.find(
-                                    (ph) =>
-                                      ph.product.id === selectedProduct.id,
-                                  );
-                                  const selectedLatestPrice = selectedPH
-                                    ? selectedPH.latestPrice
-                                    : selectedProduct.basePrice;
-
-                                  return peerHistories.map((ph) => {
-                                    const historyLen = ph.history.length;
-                                    if (historyLen === 0) return null;
-
-                                    const firstPriceInChain =
-                                      ph.history[0].price;
-                                    const latestPriceInChain = ph.latestPrice;
-                                    const variationVal =
-                                      latestPriceInChain - firstPriceInChain;
-                                    const variationPercent =
-                                      firstPriceInChain > 0
-                                        ? (variationVal / firstPriceInChain) *
-                                          100
-                                        : 0;
-                                    const isSelf =
-                                      ph.product.id === selectedProduct.id;
-
-                                    // Calc comparison against chosen product
-                                    const diffVal =
-                                      latestPriceInChain - selectedLatestPrice;
-                                    const diffPercent =
-                                      selectedLatestPrice > 0
-                                        ? (diffVal / selectedLatestPrice) * 100
-                                        : 0;
-
-                                    return (
-                                      <div
-                                        key={ph.product.id}
-                                        className={`p-3 rounded-lg border flex flex-col gap-2 transition-all ${
-                                          isSelf
-                                            ? "bg-red-50/50 border-red-200"
-                                            : "bg-white border-gray-100"
+                                <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span
+                                        className={`font-sans text-sm ${
+                                          isSelf ? "text-amber-950 font-black" : "text-gray-900 font-bold"
                                         }`}
                                       >
-                                        <div className="flex items-start justify-between gap-1">
-                                          <div className="min-w-0 pr-1 flex-1">
-                                            <div className="flex items-center gap-1.5 flex-wrap">
-                                              <p
-                                                className={`text-xs font-black truncate max-w-[140px] ${isSelf ? "text-[#D40511]" : "text-gray-950"}`}
-                                              >
-                                                {ph.product.name}
-                                              </p>
-                                              <span
-                                                className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                                  isSelf
-                                                    ? "bg-red-100 text-[#D40511]"
-                                                    : ph.product.isCompetitor
-                                                      ? "bg-blue-100 text-blue-800"
-                                                      : "bg-gray-100 text-gray-650"
-                                                }`}
-                                              >
-                                                {ph.product.brand ||
-                                                  "Dr. Oetker"}
-                                              </span>
-                                            </div>
-                                            <span className="text-[9px] text-gray-400 block font-mono mt-0.5">
-                                              Inicial: R${" "}
-                                              {firstPriceInChain.toFixed(2)}{" "}
-                                              &rarr; R${" "}
-                                              {latestPriceInChain.toFixed(2)}
-                                            </span>
-                                          </div>
-
-                                          <div className="text-right shrink-0">
-                                            <span className="text-xs font-extrabold text-[#1A1A1A] font-mono block">
-                                              R$ {latestPriceInChain.toFixed(2)}
-                                            </span>
-                                            <span
-                                              className={`inline-flex items-center gap-0.5 text-[8px] font-bold font-mono px-1 rounded mt-0.5 ${
-                                                variationVal > 0
-                                                  ? "bg-red-50 text-red-700"
-                                                  : variationVal < 0
-                                                    ? "bg-emerald-50 text-emerald-700"
-                                                    : "bg-gray-100 text-gray-500"
-                                              }`}
-                                            >
-                                              Variação:{" "}
-                                              {variationVal > 0
-                                                ? "▲"
-                                                : variationVal < 0
-                                                  ? "▼"
-                                                  : "●"}{" "}
-                                              {variationPercent.toFixed(1)}%
-                                            </span>
-                                          </div>
-                                        </div>
-
-                                        {/* Difference vs the Selected Product */}
-                                        {!isSelf && (
-                                          <div className="flex items-center justify-between text-[10px] bg-[#F9F9F9] border border-gray-100/60 rounded px-2 py-1">
-                                            <span className="text-gray-450 text-xs shrink-0 font-sans">
-                                              Diferença vs Nós:
-                                            </span>
-                                            <span
-                                              className={`font-bold font-mono px-1 rounded ${
-                                                diffVal > 0
-                                                  ? "text-red-750 bg-red-50"
-                                                  : diffVal < 0
-                                                    ? "text-emerald-750 bg-emerald-50"
-                                                    : "text-gray-500 bg-gray-100"
-                                              }`}
-                                            >
-                                              {diffVal > 0 ? "+" : ""}R${" "}
-                                              {diffVal.toFixed(2)} (
-                                              {diffVal > 0 ? "+" : ""}
-                                              {diffPercent.toFixed(1)}%)
-                                            </span>
-                                          </div>
-                                        )}
-                                      </div>
-                                    );
-                                  });
-                                })()}
+                                        {item.product.name}
+                                      </span>
+                                      <span
+                                        className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                                          isSelf
+                                            ? "bg-amber-100 text-amber-900 border border-amber-200"
+                                            : item.product.isCompetitor
+                                              ? "bg-blue-50 text-blue-800 border border-blue-100"
+                                              : "bg-emerald-50 text-emerald-800 border border-emerald-100"
+                                        }`}
+                                      >
+                                        {item.product.brand || "Dr. Oetker"}
+                                      </span>
+                                      {isSelf && (
+                                        <span className="bg-[#D40511] text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                                          Este Produto
+                                        </span>
+                                      )}
+                                    </div>
+                                    
+                                    <div className="flex items-center gap-1.5 text-[11px] text-gray-500 font-sans mt-1 flex-wrap">
+                                      <span className="font-medium text-gray-400">Menor oferta em:</span>
+                                      <span className="font-extrabold text-gray-700">{item.minChainName}</span>
+                                      <span className="text-gray-200 font-normal">|</span>
+                                      <span className="font-medium text-gray-400">Menor preço:</span>
+                                      <span className="font-mono font-black text-emerald-650 bg-emerald-50 px-1 py-0.2 rounded">
+                                        R$ {item.minPrice.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  
+                                  <div className="text-left sm:text-right shrink-0 mt-1 sm:mt-0">
+                                    <span className="block text-[9px] uppercase font-bold text-gray-400 font-sans tracking-wider">
+                                      Preço Médio
+                                    </span>
+                                    <span className={`text-sm font-black font-mono leading-none ${isSelf ? "text-amber-900 animate-none" : "text-gray-900"}`}>
+                                      R$ {item.averagePrice.toFixed(2)}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              
+                              {/* Sleek Horizontal Bar graph indicator */}
+                              <div className="mt-2.5 w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-150 relative">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-300 ${
+                                    isSelf
+                                      ? "bg-gradient-to-r from-amber-500 to-amber-350 shadow-xs"
+                                      : item.product.isCompetitor
+                                        ? "bg-gradient-to-r from-blue-500 to-blue-350"
+                                        : "bg-gradient-to-r from-emerald-500 to-emerald-350"
+                                  }`}
+                                  style={{ width: `${barWidth}%` }}
+                                />
                               </div>
                             </div>
-
-                            <div className="mt-4 pt-3 border-t border-gray-100 text-[10px] text-gray-400 flex items-center gap-1.5 font-sans">
-                              <AlertCircle className="w-3.5 h-3.5 text-gray-300" />
-                              <span>
-                                Calculado com base na diferença entre o primeiro
-                                e o último registro de auditoria nesta rede.
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );

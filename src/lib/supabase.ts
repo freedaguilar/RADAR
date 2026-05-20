@@ -12,7 +12,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
  */
 export async function uploadToSupabaseStorage(
   fileOrBase64: File | string,
-  bucketName: string = 'images'
+  bucketName: string = 'images',
+  folderName: string = 'uploads'
 ): Promise<string> {
   const isConfigured = !!(supabaseUrl && supabaseAnonKey);
 
@@ -81,7 +82,7 @@ export async function uploadToSupabaseStorage(
 
   const timestamp = Date.now();
   const randomStr = Math.random().toString(36).substring(2, 7);
-  const finalPath = `uploads/${timestamp}-${randomStr}.${ext}`;
+  const finalPath = `${folderName}/${timestamp}-${randomStr}.${ext}`;
 
   try {
     const { error } = await supabase.storage

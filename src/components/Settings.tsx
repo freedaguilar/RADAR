@@ -19,6 +19,93 @@ import {
 import { Product, Chain, User } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
 
+function extractDominantColor(fileOrUrl: File | string): Promise<string> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "Anonymous";
+    
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve("#4b5563");
+          return;
+        }
+        canvas.width = 32;
+        canvas.height = 32;
+        ctx.drawImage(img, 0, 0, 32, 32);
+        
+        const imgData = ctx.getImageData(0, 0, 32, 32);
+        const data = imgData.data;
+        
+        const colors: { [key: string]: number } = {};
+        
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const a = data[i + 3];
+          
+          if (a < 50) continue;
+          if (r > 240 && g > 240 && b > 240) continue;
+          if (r < 15 && g < 15 && b < 15) continue;
+          
+          const qr = Math.round(r / 15) * 15;
+          const qg = Math.round(g / 15) * 15;
+          const qb = Math.round(b / 15) * 15;
+          
+          const rgbStr = `rgb(${qr},${qg},${qb})`;
+          colors[rgbStr] = (colors[rgbStr] || 0) + 1;
+        }
+        
+        let maxCount = 0;
+        let dominantRgb = "rgb(75,85,99)";
+        
+        Object.entries(colors).forEach(([rgb, count]) => {
+          if (count > maxCount) {
+            maxCount = count;
+            dominantRgb = rgb;
+          }
+        });
+        
+        const match = dominantRgb.match(/rgb\((\d+),(\d+),(\d+)\)/);
+        if (match) {
+          const r = parseInt(match[1]);
+          const g = parseInt(match[2]);
+          const b = parseInt(match[3]);
+          const hex = "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+          resolve(hex);
+        } else {
+          resolve("#4b5563");
+        }
+      } catch (err) {
+        console.error("Failed to extract dominant color:", err);
+        resolve("#4b5563");
+      }
+    };
+    
+    img.onerror = () => {
+      resolve("#4b5563");
+    };
+    
+    if (typeof fileOrUrl === "string") {
+      img.src = fileOrUrl;
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          img.src = e.target.result as string;
+        } else {
+          resolve("#4b5563");
+        }
+      };
+      reader.onerror = () => resolve("#4b5563");
+      reader.readAsDataURL(fileOrUrl);
+    }
+  });
+}
+
 interface SettingsProps {
   products: Product[];
   chains: Chain[];
@@ -27,6 +114,7 @@ interface SettingsProps {
   onEditProduct: (product: Product) => void;
   onDeleteProduct: (id: string) => void;
   onAddChain: (newChain: Chain) => void;
+  onEditChain: (chain: Chain) => void;
   onDeleteChain: (id: string) => void;
   onAddUser: (newUser: User) => void;
   onDeleteUser: (id: string) => void;
@@ -41,6 +129,7 @@ export function Settings({
   onEditProduct,
   onDeleteProduct,
   onAddChain,
+  onEditChain,
   onDeleteChain,
   onAddUser,
   onDeleteUser,
@@ -74,9 +163,13 @@ export function Settings({
     name: string;
   } | null>(null);
 
-  // Input states for Chains creator
+  // Input states for Chains creator/editor
+  const [editingChainId, setEditingChainId] = useState<string | null>(null);
   const [newChainName, setNewChainName] = useState("");
   const [newChainLogoColor, setNewChainLogoColor] = useState("bg-blue-600");
+  const [newChainLogoUrl, setNewChainLogoUrl] = useState("");
+  const [isUploadingChainLogo, setIsUploadingChainLogo] = useState(false);
+  const [chainLogoDragActive, setChainLogoDragActive] = useState(false);
   const [chainFormError, setChainFormError] = useState("");
 
   // Input states for Users creator
@@ -183,6 +276,52 @@ export function Settings({
     }
   };
 
+  const handleChainLogoFileChange = async (file: File) => {
+    if (!file) return;
+    
+    const validTypes = ["image/png", "image/jpeg", "image/jpg", "image/svg+xml"];
+    if (!validTypes.includes(file.type)) {
+      setChainFormError("Formato de arquivo inválido. Apenas PNG, JPG e SVG são aceitos.");
+      return;
+    }
+    
+    setIsUploadingChainLogo(true);
+    setChainFormError("");
+    
+    try {
+      const url = await uploadToSupabaseStorage(file, "images", "logos/redes");
+      setNewChainLogoUrl(url);
+      
+      const domColor = await extractDominantColor(file);
+      setNewChainLogoColor(domColor);
+    } catch (err) {
+      console.error("Error uploading logo:", err);
+      setChainFormError("Erro ao enviar imagem do logo. Tente novamente.");
+    } finally {
+      setIsUploadingChainLogo(false);
+    }
+  };
+
+  const handleChainLogoDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setChainLogoDragActive(true);
+    } else if (e.type === "dragleave" || e.type === "drop") {
+      setChainLogoDragActive(false);
+    }
+  };
+
+  const handleChainLogoDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setChainLogoDragActive(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      handleChainLogoFileChange(e.dataTransfer.files[0]);
+    }
+  };
+
   const handleCreateChainSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setChainFormError("");
@@ -192,26 +331,45 @@ export function Settings({
       return;
     }
 
-    if (
-      chains.some(
-        (c) => c.name.toLowerCase() === newChainName.trim().toLowerCase(),
-      )
-    ) {
+    const nameExists = chains.some(
+      (c) => c.id !== editingChainId && c.name.toLowerCase() === newChainName.trim().toLowerCase()
+    );
+    if (nameExists) {
       setChainFormError("Esta rede já está cadastrada no sistema.");
       return;
     }
 
-    const uniqueId = `chain-add-${Date.now()}`;
-    const newChain: Chain = {
-      id: uniqueId,
-      name: newChainName,
-      logoColor: newChainLogoColor,
-      active: true,
-    };
+    if (editingChainId) {
+      const updatedChain: Chain = {
+        id: editingChainId,
+        name: newChainName.trim(),
+        logoColor: newChainLogoColor,
+        logoUrl: newChainLogoUrl || undefined,
+        active: true,
+      };
 
-    onAddChain(newChain);
-    setNewChainName("");
-    triggerSuccessMsg("Rede/Bandeira cadastrada com sucesso!");
+      onEditChain(updatedChain);
+      setEditingChainId(null);
+      setNewChainName("");
+      setNewChainLogoColor("bg-blue-600");
+      setNewChainLogoUrl("");
+      triggerSuccessMsg("Rede/Bandeira editada com sucesso!");
+    } else {
+      const uniqueId = `chain-add-${Date.now()}`;
+      const newChain: Chain = {
+        id: uniqueId,
+        name: newChainName.trim(),
+        logoColor: newChainLogoColor,
+        logoUrl: newChainLogoUrl || undefined,
+        active: true,
+      };
+
+      onAddChain(newChain);
+      setNewChainName("");
+      setNewChainLogoColor("bg-blue-600");
+      setNewChainLogoUrl("");
+      triggerSuccessMsg("Rede/Bandeira cadastrada com sucesso!");
+    }
   };
 
   const handleCreateUserSubmit = (e: React.FormEvent) => {
@@ -680,7 +838,7 @@ export function Settings({
               {/* Creator form */}
               <div className="border border-[#E0E0E0] rounded-xl p-4 bg-[#F5F5F5]/50">
                 <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">
-                  Cadastrar Nova Loja / Rede
+                  {editingChainId ? `Editar Rede: ${newChainName}` : "Cadastrar Nova Loja / Rede"}
                 </h4>
                 <form
                   onSubmit={handleCreateChainSubmit}
@@ -702,23 +860,118 @@ export function Settings({
                     />
                   </div>
 
-                  {/* Accented color selector for mock visualization */}
+                  {/* Manual / Preset Color Selector */}
                   <div>
                     <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
                       Cor Identificadora
                     </label>
-                    <select
-                      id="new-chain-color-input"
-                      value={newChainLogoColor}
-                      onChange={(e) => setNewChainLogoColor(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
-                    >
-                      <option value="bg-blue-600">Azul Corporativo</option>
-                      <option value="bg-emerald-700">Verde Orgânico</option>
-                      <option value="bg-red-500">Vermelho Destacado</option>
-                      <option value="bg-amber-600">Laranja/Premium</option>
-                      <option value="bg-purple-600">Roxo/Focado</option>
-                    </select>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={newChainLogoColor.startsWith("#") ? newChainLogoColor : ""}
+                        onChange={(e) => setNewChainLogoColor(e.target.value || "bg-blue-600")}
+                        placeholder="#FF0000"
+                        className="px-2 py-1.5 border border-[#E0E0E0] rounded-lg text-xs font-mono w-20 uppercase text-center focus:border-[#D40511] focus:outline-none bg-white"
+                        title="Hexadecimal da cor predominante"
+                      />
+                      <div className="flex gap-1">
+                        {["bg-blue-600", "bg-emerald-700", "bg-red-500", "bg-amber-600", "bg-purple-600"].map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => setNewChainLogoColor(preset)}
+                            className={`w-4 h-4 rounded-full border transition ${preset} ${
+                              newChainLogoColor === preset ? "border-gray-800 scale-110" : "border-transparent"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Upload Area for Chain Logo */}
+                  <div className="col-span-full mt-2">
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">
+                      Logotipo da Rede (Formatos: PNG, JPG ou SVG)
+                    </label>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
+                      {/* Logo Preview */}
+                      <div className="flex flex-col items-center justify-center p-3 border border-[#E0E0E0] rounded-xl bg-white min-h-[105px]">
+                        {newChainLogoUrl ? (
+                          <div className="relative group">
+                            <img
+                              src={newChainLogoUrl}
+                              alt="Logo"
+                              className="max-h-[60px] max-w-[125px] object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setNewChainLogoUrl("");
+                                setNewChainLogoColor("bg-blue-600");
+                              }}
+                              className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-4 h-4 text-[8px] hover:bg-red-700 font-bold transition shadow flex items-center justify-center"
+                              title="Remover logotipo"
+                            >
+                              X
+                            </button>
+                          </div>
+                        ) : (
+                          <div
+                            style={newChainLogoColor.startsWith("#") ? { backgroundColor: newChainLogoColor } : {}}
+                            className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-white text-base shadow-sm ${
+                              newChainLogoColor.startsWith("#") ? "" : (newChainLogoColor || "bg-gray-400")
+                            }`}
+                          >
+                            {newChainName ? newChainName.substring(0, 2).toUpperCase() : "RD"}
+                          </div>
+                        )}
+                        <span className="text-[8px] text-gray-400 mt-2 font-mono uppercase tracking-wider text-center">
+                          {newChainLogoColor.startsWith("#") ? `COR: ${newChainLogoColor}` : "Iniciais"}
+                        </span>
+                      </div>
+
+                      {/* Drag & Drop Select Zone */}
+                      <div className="md:col-span-3">
+                        <div
+                          onDragEnter={handleChainLogoDrag}
+                          onDragOver={handleChainLogoDrag}
+                          onDragLeave={handleChainLogoDrag}
+                          onDrop={handleChainLogoDrop}
+                          className={`w-full border-2 border-dashed rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer transition relative bg-white min-h-[105px] ${
+                            chainLogoDragActive
+                              ? "border-[#D40511] bg-red-50/20"
+                              : "border-[#E0E0E0] hover:border-gray-400 hover:bg-gray-50/30"
+                          }`}
+                        >
+                          <input
+                            type="file"
+                            accept=".png,.jpg,.jpeg,.svg,image/png,image/jpeg,image/jpg,image/svg+xml"
+                            disabled={isUploadingChainLogo}
+                            onChange={(e) => {
+                              if (e.target.files && e.target.files[0]) {
+                                handleChainLogoFileChange(e.target.files[0]);
+                              }
+                            }}
+                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          />
+                          <Upload
+                            className={`w-5 h-5 mb-1 ${
+                              isUploadingChainLogo ? "text-[#D40511] animate-spin" : "text-gray-400"
+                            }`}
+                          />
+                          <span className="text-[11px] font-bold text-gray-700 text-center">
+                            {isUploadingChainLogo
+                              ? "Identificando e salvando logo..."
+                              : "Arraste ou clique para enviar logotipo"}
+                          </span>
+                          <span className="text-[9px] text-gray-400 mt-0.5">
+                            PNG, JPG, SVG | Cor predominante automática
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   {chainFormError && (
@@ -728,13 +981,28 @@ export function Settings({
                     </div>
                   )}
 
-                  <div className="col-span-full pt-2 flex justify-end">
+                  <div className="col-span-full pt-2 flex justify-end gap-2">
+                    {editingChainId && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingChainId(null);
+                          setNewChainName("");
+                          setNewChainLogoColor("bg-blue-600");
+                          setNewChainLogoUrl("");
+                        }}
+                        className="px-4 py-2 hover:bg-gray-100 text-gray-700 rounded-lg text-xs font-bold transition border border-gray-350"
+                      >
+                        Cancelar
+                      </button>
+                    )}
                     <button
                       id="submit-chain-form-btn"
                       type="submit"
-                      className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition"
+                      disabled={isUploadingChainLogo}
+                      className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition cursor-pointer disabled:bg-gray-400 disabled:cursor-not-allowed"
                     >
-                      Adicionar Loja / Rede
+                      {editingChainId ? "Salvar Alterações" : "Adicionar Loja / Rede"}
                     </button>
                   </div>
                 </form>
@@ -752,37 +1020,82 @@ export function Settings({
                   {chains.map((chain) => (
                     <div
                       key={chain.id}
-                      className="p-4 bg-white border border-[#E0E0E0] rounded-xl flex items-center justify-between shadow-sm"
+                      className="p-4 bg-white border border-[#E0E0E0] rounded-xl flex items-center justify-between shadow-sm hover:border-gray-300 transition-colors"
                     >
                       <div className="flex items-center gap-3">
                         <span
-                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-white text-xs ${chain.logoColor || "bg-gray-400"}`}
+                          style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
+                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-white text-xs overflow-hidden ${
+                            chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
+                          }`}
                         >
-                          {chain.name.substring(0, 2).toUpperCase()}
+                          {chain.logoUrl ? (
+                            <img
+                              src={chain.logoUrl}
+                              alt={chain.name}
+                              className="w-full h-full object-contain p-1 bg-white"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span>{chain.name.substring(0, 2).toUpperCase()}</span>
+                          )}
                         </span>
                         <div>
                           <p className="text-xs font-bold text-[#1A1A1A] font-sans">
                             {chain.name}
                           </p>
-                          <p className="text-[10px] text-gray-400 font-mono">
-                            Bandeira Varejo
+                          <p className="text-[10px] text-gray-400 font-mono flex items-center gap-1.5">
+                            <span
+                              className="w-2 h-2 rounded-full inline-block"
+                              style={{
+                                backgroundColor: chain.logoColor?.startsWith("#")
+                                  ? chain.logoColor
+                                  : chain.logoColor === "bg-blue-600"
+                                    ? "#2563eb"
+                                    : chain.logoColor === "bg-emerald-700"
+                                      ? "#047857"
+                                      : chain.logoColor === "bg-red-500"
+                                        ? "#ef4444"
+                                        : chain.logoColor === "bg-amber-600"
+                                          ? "#d97706"
+                                          : "#7c3aed",
+                              }}
+                            />
+                            {chain.logoColor?.startsWith("#") ? "Cor Extraída" : "Cor Predefinida"}
                           </p>
                         </div>
                       </div>
-                      <button
-                        id={`delete-chain-btn-${chain.id}`}
-                        onClick={() => {
-                          setDeleteConfirm({
-                            type: "chain",
-                            id: chain.id,
-                            name: chain.name,
-                          });
-                        }}
-                        className="text-gray-400 hover:text-[#D40511] p-1 rounded hover:bg-red-50 transition cursor-pointer"
-                        title="Remover Rede"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            setEditingChainId(chain.id);
+                            setNewChainName(chain.name);
+                            setNewChainLogoColor(chain.logoColor || "bg-blue-600");
+                            setNewChainLogoUrl(chain.logoUrl || "");
+                            document
+                              .getElementById("settings-tab-chains-panel")
+                              ?.scrollIntoView({ behavior: "smooth" });
+                          }}
+                          className="text-gray-400 hover:text-blue-600 p-1 rounded hover:bg-blue-50 transition cursor-pointer"
+                          title="Editar Rede"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          id={`delete-chain-btn-${chain.id}`}
+                          onClick={() => {
+                            setDeleteConfirm({
+                              type: "chain",
+                              id: chain.id,
+                              name: chain.name,
+                            });
+                          }}
+                          className="text-gray-400 hover:text-[#D40511] p-1 rounded hover:bg-red-50 transition cursor-pointer"
+                          title="Remover Rede"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>

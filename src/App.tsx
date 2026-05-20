@@ -239,9 +239,33 @@ export default function App() {
           id: newChain.id,
           name: newChain.name,
           logo_color: newChain.logoColor,
+          logo_url: newChain.logoUrl,
           active: newChain.active,
         });
         if (error) console.error("Error inserting chain:", error);
+      }
+    },
+    [isConfigured],
+  );
+
+  const handleEditChain = useCallback(
+    async (updatedChain: Chain) => {
+      setState((prev) => ({
+        ...prev,
+        chains: prev.chains.map((c) => (c.id === updatedChain.id ? updatedChain : c)),
+      }));
+
+      if (isConfigured) {
+        const { error } = await supabase
+          .from("chains")
+          .update({
+            name: updatedChain.name,
+            logo_color: updatedChain.logoColor,
+            logo_url: updatedChain.logoUrl,
+            active: updatedChain.active,
+          })
+          .eq("id", updatedChain.id);
+        if (error) console.error("Error updating chain:", error);
       }
     },
     [isConfigured],
@@ -379,12 +403,12 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-[#F5F5F5] font-sans antialiased text-[#1A1A1A] flex flex-col md:flex-row pb-20 md:pb-0"
+      className="min-h-screen bg-[#F5F5F5] font-sans antialiased text-[#1A1A1A] flex flex-col lg:flex-row pb-20 lg:pb-0"
       id="app-viewport"
     >
       {/* 1. DESKTOP NAVIGATION SIDEBAR MENU */}
       <aside
-        className="hidden md:flex md:w-64 bg-white border-r border-[#E0E0E0] flex-col justify-between shrink-0 h-screen sticky top-0"
+        className="hidden lg:flex lg:w-64 bg-white border-r border-[#E0E0E0] flex-col justify-between shrink-0 h-screen sticky top-0"
         id="desktop-sidebar"
       >
         <div>
@@ -479,7 +503,7 @@ export default function App() {
 
       {/* 2. MOBILE TOP ACTION BAR HEADER (Phone Layout) */}
       <header
-        className="md:hidden bg-white border-b border-[#E0E0E0] px-4 py-3 h-14 flex items-center justify-between sticky top-0 z-40"
+        className="lg:hidden bg-white border-b border-[#E0E0E0] px-4 py-3 h-14 flex items-center justify-between sticky top-0 z-40"
         id="mobile-top-header"
       >
         <div className="flex items-center gap-2.5">
@@ -514,7 +538,7 @@ export default function App() {
 
       {/* 3. DYNAMIC WORKING AREA / WRAPPER ZONE */}
       <main
-        className="flex-1 p-4 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full font-sans"
+        className="flex-1 p-4 lg:p-8 overflow-y-auto max-w-7xl mx-auto w-full font-sans"
         id="app-main-content"
       >
         {activeTab === "dashboard" && (
@@ -565,6 +589,7 @@ export default function App() {
             onDeleteProduct={handleDeleteProduct}
             onAddChain={handleAddChain}
             onDeleteChain={handleDeleteChain}
+            onEditChain={handleEditChain}
             onAddUser={handleAddUser}
             onDeleteUser={handleDeleteUser}
             onEditProduct={handleEditProduct}
@@ -575,7 +600,7 @@ export default function App() {
 
       {/* 4. MOBILE BOTTOM TAB NAVIGATION MENU */}
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-[#E0E0E0] px-2 flex items-center justify-around z-35 shadow-lg"
+        className="lg:hidden fixed bottom-0 left-0 right-0 h-16 bg-white border-t border-[#E0E0E0] px-2 flex items-center justify-around z-35 shadow-lg"
         id="mobile-bottom-tabs"
       >
         {menuItems.map((item) => {
