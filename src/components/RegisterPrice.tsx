@@ -216,8 +216,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       let data: any = null;
 
       // [GITHUB COMENTÁRIO]: Suporta dinamicamente as duas formas de retorno JSON:
-      // 1. Resposta em formato de array de conteúdo direto do Claude (Anthropic Messages API)
-      // 2. Resposta formatada direta retornada pelo backend tradicional (Gemini)
+      // 1. Resposta em formato de array de conteúdo direto da Inteligência Artificial
+      // 2. Resposta formatada direta retornada pelo backend tradicional
       if (responseData.content && Array.isArray(responseData.content)) {
         const textContent = responseData.content[0]?.text || '';
         try {
@@ -228,7 +228,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             data = JSON.parse(textContent);
           }
         } catch (e) {
-          console.error('Falha ao desfragmentar JSON retornado pela Claude API:', e);
+          console.error('Falha ao desfragmentar JSON retornado pela API da IA:', e);
         }
       } else {
         data = responseData;
@@ -272,17 +272,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         }
 
         if (priceSet && productMatched) {
-          setAiAnalysisMessage(`✨ Claude detectou: R$ ${String(rawPreco).replace('.', ',')} para "${finalMatchedName}". ${data.observacao ? `Obs: ${data.observacao}` : ''}`);
+          setAiAnalysisMessage(`✨ A IA detectou: R$ ${String(rawPreco).replace('.', ',')} para "${finalMatchedName}". ${data.observacao ? `Obs: ${data.observacao}` : ''}`);
         } else if (priceSet) {
-          setAiAnalysisMessage(`✨ Claude detectou o Preço (R$ ${String(rawPreco).replace('.', ',')}), mas não identificou com precisão o produto no catálogo. Produto lido: "${data.produto || ''}"`);
+          setAiAnalysisMessage(`✨ A IA detectou o Preço (R$ ${String(rawPreco).replace('.', ',')}), mas não identificou com precisão o produto no catálogo. Produto lido: "${data.produto || ''}"`);
         } else if (productMatched) {
-          setAiAnalysisMessage(`✨ Claude identificou o Produto "${finalMatchedName}", mas não conseguiu ler o preço.`);
+          setAiAnalysisMessage(`✨ A IA identificou o Produto "${finalMatchedName}", mas não conseguiu ler o preço.`);
         } else {
-          setAiAnalysisMessage(`⚠️ Claude leu: "${data.produto || 'Sem correspondência'}". Não pôde preencher automaticamente.`);
+          setAiAnalysisMessage(`⚠️ A IA leu: "${data.produto || 'Sem correspondência'}". Não pôde preencher automaticamente.`);
         }
       }
     } catch (err: any) {
-      console.error('Erro na análise automática via Anthropic Claude:', err);
+      console.error('Erro na análise automática via Inteligência Artificial:', err);
       // Se chave faltar, exibe ajuda mais amigável
       if (err.message && err.message.includes('VITE_ANTHROPIC_API_KEY')) {
         setAiAnalysisMessage('⚠️ A chave VITE_ANTHROPIC_API_KEY não foi configurada no seu ambiente. Insira os dados manualmente.');
@@ -521,13 +521,13 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           const confidence: 'high' | 'low' = (priceSet && productMatched) ? 'high' : 'low';
 
           if (priceSet && productMatched) {
-            msg = `Claude detectou: R$ ${detectedPrice} para "${matchedProdName}".`;
+            msg = `A IA detectou: R$ ${detectedPrice} para "${matchedProdName}".`;
           } else if (priceSet) {
-            msg = `Claude detectou R$ ${detectedPrice}, mas sem localizar produto no catálogo local.`;
+            msg = `A IA detectou R$ ${detectedPrice}, mas sem localizar produto no catálogo local.`;
           } else if (productMatched) {
-            msg = `Claude detectou "${matchedProdName}", mas sem preço legível.`;
+            msg = `A IA detectou "${matchedProdName}", mas sem preço legível.`;
           } else {
-            msg = `Claude leu produto: "${data.produto || 'Não identificado'}" sem correspondência.`;
+            msg = `A IA leu produto: "${data.produto || 'Não identificado'}" sem correspondência.`;
           }
 
           setBatchItems(prev => prev.map(i => i.id === item.id ? {
@@ -1402,7 +1402,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                     <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3">
                       <Layers className="w-10 h-10 text-slate-300 animate-pulse" />
                       <p className="font-bold text-slate-500 text-sm">Nenhuma foto adicionada ao lote</p>
-                      <p className="max-w-sm text-[11px] text-slate-400 font-medium font-sans">Adicione até 10 fotos de gôndola. O sistema reduzirá automaticamente a resolução de cada imagem para 800x800 antes da leitura do Claude.</p>
+                      <p className="max-w-sm text-[11px] text-slate-400 font-medium font-sans">Adicione até 10 fotos de gôndola. O sistema reduzirá automaticamente a resolução de cada imagem para 800x800 antes da análise inteligente.</p>
                     </div>
                   )}
                 </div>
@@ -1461,7 +1461,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                     {batchItems.map((item, idx) => (
                       <div key={item.id} className="flex items-center justify-between text-[11px] border-b border-slate-100/50 pb-1.5 last:border-0 last:pb-0">
                         <span className="font-bold text-slate-600">Foto #{idx + 1}</span>
-                        {item.status === 'analyzing' && <span className="text-violet-600 font-extrabold uppercase animate-pulse">Iniciando Claude...</span>}
+                        {item.status === 'analyzing' && <span className="text-violet-600 font-extrabold uppercase animate-pulse">Iniciando análise...</span>}
                         {item.status === 'success' && <span className="text-emerald-600 font-extrabold uppercase">Completo!</span>}
                         {item.status === 'failed' && <span className="text-rose-600 font-extrabold uppercase">Falhou</span>}
                         {item.status === 'pending' && <span className="text-slate-400 font-medium">Aguardando...</span>}
@@ -1518,7 +1518,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 <div>
                   <h4 className="text-xs font-extrabold text-violet-950 uppercase tracking-wider font-sans">Scanner do Lote Ativo</h4>
                   <p className="text-[11px] text-violet-700/90 mt-1 leading-relaxed font-sans">
-                    Claude analyzed {batchItems.length} photos in parallel. Identify or map the correct cataloged item below and verify the prices detected.
+                    A Inteligência Artificial analisou as {batchItems.length} fotos em paralelo. Identifique ou vincule o produto correto do catálogo abaixo e verifique os preços detectados.
                   </p>
                 </div>
               </div>
@@ -1637,30 +1637,65 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                             {/* Dropdown elements filter list */}
                             {batchShowSearchDropdowns[item.id] && (
                               <div className="absolute z-30 w-full left-0 mt-1.5 bg-white border border-slate-250 rounded-xl shadow-xl max-h-40 overflow-y-auto" id={`dropdown-batch-item-${item.id}`}>
-                                {getBatchFilteredProducts(batchProductSearches[item.id] || '').map((p) => (
-                                  <div 
-                                    key={p.id}
-                                    onClick={() => handleBatchItemProductSelect(item.id, p)}
-                                    className="px-3.5 py-2.5 hover:bg-slate-50 text-xs text-slate-800 cursor-pointer flex justify-between items-center border-b border-slate-105 pointer-events-auto"
-                                  >
-                                    <div className="min-w-0 pr-3 flex-1">
-                                      <p className="font-extrabold text-slate-850 truncate">
-                                        <span>{p.name}</span>
-                                        {(() => {
-                                          const bChainId = item.selectedChainId || selectedChainId;
-                                          const latest = bChainId ? getLatestPrice(p.id, bChainId) : null;
-                                          return latest ? (
-                                            <span className="text-[10px] text-slate-400 font-normal ml-2 font-sans select-none">
-                                              Último: R$ {latest.toFixed(2).replace('.', ',')}
+                                {getBatchFilteredProducts(batchProductSearches[item.id] || '').map((p) => {
+                                  const bChainId = item.selectedChainId || selectedChainId;
+                                  const latestPrice = bChainId ? getLatestPrice(p.id, bChainId) : null;
+
+                                  return (
+                                    <div 
+                                      key={p.id}
+                                      onClick={() => handleBatchItemProductSelect(item.id, p)}
+                                      className="px-3.5 py-2.5 hover:bg-slate-50 text-xs text-slate-800 cursor-pointer flex justify-between items-center border-b border-slate-100 pointer-events-auto"
+                                    >
+                                      <div className="flex items-center gap-3 min-w-0 pr-2 flex-1">
+                                        {/* Auto-suggest product image preview */}
+                                        <div className="w-9 h-9 rounded-md bg-white overflow-hidden flex items-center justify-center border border-slate-150 shrink-0">
+                                          {p.imageUrl ? (
+                                            <img
+                                              src={p.imageUrl}
+                                              alt={p.name}
+                                              className="w-full h-full object-contain"
+                                              referrerPolicy="no-referrer"
+                                            />
+                                          ) : (
+                                            <span className="text-[9px] text-slate-300 font-bold uppercase font-sans">SF</span>
+                                          )}
+                                        </div>
+                                        <div className="flex flex-col min-w-0">
+                                          <span className="font-extrabold text-slate-850 truncate">{p.name}</span>
+                                          <span className="text-[10px] text-slate-400 mt-0.5 font-sans block">
+                                            {p.category} {p.subcategory ? `• ${p.subcategory}` : ''} {p.weight ? `• ${p.weight}` : ''}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-col items-end gap-1 shrink-0 text-right min-w-[85px]">
+                                        {latestPrice ? (
+                                          <span className="font-mono text-[10px] text-emerald-700 font-extrabold">
+                                            Último: R$ {latestPrice.toFixed(2).replace('.', ',')}
+                                          </span>
+                                        ) : (
+                                          <span className="text-[9px] text-slate-400 italic">Sem registro</span>
+                                        )}
+                                        <div className="flex items-center gap-1.5">
+                                          {p.isCompetitor ? (
+                                            <span className="text-[8px] font-extrabold bg-rose-50 text-rose-700 border border-rose-100 rounded px-1.5 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide">
+                                              {p.brand}
                                             </span>
-                                          ) : null;
-                                        })()}
-                                      </p>
-                                      <span className="text-[10px] text-slate-400 font-sans mt-0.5 block">{p.category} • {p.weight}</span>
+                                          ) : (
+                                            <span className={`text-[8px] font-extrabold border rounded px-1.5 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide ${
+                                              (p.brand?.toLowerCase().includes('mavalerio') || p.brand?.toLowerCase().includes('mavalério'))
+                                                ? 'bg-violet-50 text-violet-800 border-violet-100'
+                                                : 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                                            }`}>
+                                              {p.brand || 'Dr. Oetker'}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
                                     </div>
-                                    <span className="text-[9px] font-mono font-extrabold uppercase bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 shrink-0">{p.brand}</span>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                                 {getBatchFilteredProducts(batchProductSearches[item.id] || '').length === 0 && (
                                   <div className="p-4 text-center text-xs text-slate-400 italic">Nenhum produto correspondente cadastrado no PriceHub.</div>
                                 )}
@@ -1765,11 +1800,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                             />
                           </div>
 
-                          {/* Claude prompt detected details */}
+                          {/* IA prompt detected details */}
                           {item.aiAnalysisMessage && item.status === 'success' && (
                             <div className="p-3 bg-violet-50/25 rounded-xl border border-violet-100 text-[10px] text-violet-700 flex items-start gap-1.5 leading-relaxed font-sans">
                               <Sparkles className="w-3.5 h-3.5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
-                              <span><strong>Retorno Cognitivo Claude:</strong> {item.aiAnalysisMessage}</span>
+                              <span><strong>Retorno Cognitivo da IA:</strong> {item.aiAnalysisMessage}</span>
                             </div>
                           )}
 
