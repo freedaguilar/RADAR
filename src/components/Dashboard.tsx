@@ -254,7 +254,7 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
             Painel Executivo de Inteligência
           </span>
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 font-sans">
-            PriceHub Dashboard
+            <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span> Dashboard
           </h1>
           <p className="text-sm text-slate-500 mt-1.5 font-medium leading-relaxed">
             Acompanhe preços, concorrência e oportunidades de mercado em um só lugar.

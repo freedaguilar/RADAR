@@ -64,8 +64,8 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
               referrerPolicy="no-referrer"
             />
           </div>
-          <h1 className="text-3xl font-bold tracking-tight text-[#1A1A1A] font-sans">
-            PriceHub
+          <h1 className="text-3xl font-extrabold tracking-tight font-sans">
+            <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
           </h1>
           <p className="text-xs text-gray-500 mt-1 uppercase font-mono tracking-wider">
             Pesquisa & Auditoria de Preços
@@ -175,10 +175,10 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
       {/* Footer with version beta and credits */}
       <footer className="py-6 text-center border-t border-[#E0E0E0]" id="login-footer">
         <p className="text-xs text-gray-500 font-sans">
-          PriceHub - Sistema de Monitoria de Preços <span className="font-mono text-[10px] bg-red-100 text-[#D40511] px-1.5 py-0.5 rounded ml-1 font-bold">BETA v1.4</span>
+          PriceHub - Sistema de Monitoria de Preços <span className="font-mono text-[10px] bg-red-100 text-[#D40511] px-1.5 py-0.5 rounded ml-1 font-bold">BETA v0.1</span>
         </p>
         <p className="text-[10px] text-gray-400 mt-1 font-sans">
-          Inspirado na identidade de prestígio Dr. Oetker. Desenvolvido para auditoria rápida em campo.
+          Desenvolvido por Jessé A. Santos para pesquisa e auditoria de preços em campo.
         </p>
       </footer>
     </div>

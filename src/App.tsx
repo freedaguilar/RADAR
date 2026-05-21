@@ -427,8 +427,8 @@ export default function App() {
                 />
               </div>
               <div>
-                <h1 className="text-md font-bold tracking-tight text-[#1A1A1A] font-sans">
-                  PriceHub
+                <h1 className="text-md font-extrabold tracking-tight font-sans">
+                  <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
                 </h1>
                 <span className="text-[9px] text-gray-400 font-mono tracking-wider block uppercase">
                   MONITORIA DE PREÇOS
@@ -530,8 +530,8 @@ export default function App() {
             />
           </div>
           <div>
-            <h1 className="text-sm font-black text-[#1A1A1A] leading-none">
-              PriceHub
+            <h1 className="text-sm font-black leading-none">
+              <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
             </h1>
             <span className="text-[8px] text-gray-400 uppercase font-mono tracking-wider">
               Dr.Oetker Brasil
