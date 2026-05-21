@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
@@ -14,24 +15,19 @@ async function startServer() {
   app.use(express.json({ limit: "15mb" }));
 
   // CORS middleware to allow external sites (like Vercel) to call the API
-  app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (origin) {
-      res.setHeader("Access-Control-Allow-Origin", origin);
-    } else {
-      res.setHeader("Access-Control-Allow-Origin", "*");
-    }
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Authorization");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-    
-    // Handle preflight OPTIONS request
-    if (req.method === "OPTIONS") {
-      res.setHeader("Content-Length", "0");
-      return res.status(204).end();
-    }
-    next();
-  });
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Permitir qualquer origem dinamicamente (necessário para credentials: true)
+        callback(null, true);
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
+    })
+  );
 
   // API Client Setup
   let geminiClient: GoogleGenAI | null = null;
