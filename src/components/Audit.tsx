@@ -65,7 +65,16 @@ export function Audit({ records, products, chains, initialSelectedRecordId }: Au
 
         return matchesProduct && matchesChain && matchesSearch && matchesPeriod;
       })
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()); // descending by date
+      .sort((a, b) => {
+        const timeA = new Date(a.date).getTime();
+        const timeB = new Date(b.date).getTime();
+        if (timeA !== timeB) {
+          return timeB - timeA;
+        }
+        const indexA = records.indexOf(a);
+        const indexB = records.indexOf(b);
+        return indexB - indexA;
+      }); // descending by date & insertion order
   }, [records, selectedProductId, selectedChainId, searchNotes, filterPeriodDays]);
 
   return (

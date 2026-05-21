@@ -95,6 +95,43 @@ export function Products({
   );
   const [displayMode, setDisplayMode] = useState<"grid" | "list">("grid");
 
+  // O(1) map of record.id to its index in the original records list to determine insertion order
+  const recordIndexMap = useMemo(() => {
+    const map = new Map<string, number>();
+    records.forEach((r, idx) => {
+      map.set(r.id, idx);
+    });
+    return map;
+  }, [records]);
+
+  // Compare records: youngest/most recent date & index first (descending chronological order)
+  const compareRecordsDesc = useMemo(() => {
+    return (a: PriceRecord, b: PriceRecord) => {
+      const tA = new Date(a.date).getTime();
+      const tB = new Date(b.date).getTime();
+      if (tA !== tB) {
+        return tB - tA;
+      }
+      const idxA = recordIndexMap.get(a.id) ?? -1;
+      const idxB = recordIndexMap.get(b.id) ?? -1;
+      return idxB - idxA;
+    };
+  }, [recordIndexMap]);
+
+  // Compare records: oldest date & index first (ascending chronological order)
+  const compareRecordsAsc = useMemo(() => {
+    return (a: PriceRecord, b: PriceRecord) => {
+      const tA = new Date(a.date).getTime();
+      const tB = new Date(b.date).getTime();
+      if (tA !== tB) {
+        return tA - tB;
+      }
+      const idxA = recordIndexMap.get(a.id) ?? -1;
+      const idxB = recordIndexMap.get(b.id) ?? -1;
+      return idxA - idxB;
+    };
+  }, [recordIndexMap]);
+
   // Filters state
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todas");
@@ -157,6 +194,7 @@ export function Products({
   const [compareWeight, setCompareWeight] = useState<string>("Todas");
   const [compareByCategory, setCompareByCategory] = useState(true);
   const [compareBySubcategory, setCompareBySubcategory] = useState(true);
+  const [compareByWeight, setCompareByWeight] = useState(false);
   const [competitorCompareChainId, setCompetitorCompareChainId] = useState<string>("Todas");
 
   // Chart-specific states (filtering networks and hover points)
@@ -239,29 +277,37 @@ export function Products({
     }
   }, [pageParams, products]);
 
-  // Initialize selectedChartChains with the top 3 chains containing most records for the selected product
+  // Initialize selectedChartChains with the top 5 chains with most recent records for the selected product
   useEffect(() => {
     if (selectedProductId) {
-      const counts: Record<string, number> = {};
       const productRecords = records.filter((r) => r.productId === selectedProductId);
+      
+      const latestRecordOfChain: Record<string, PriceRecord> = {};
       productRecords.forEach((r) => {
-        counts[r.chainId] = (counts[r.chainId] || 0) + 1;
+        const existing = latestRecordOfChain[r.chainId];
+        if (!existing || compareRecordsDesc(r, existing) < 0) {
+          latestRecordOfChain[r.chainId] = r;
+        }
       });
 
       const chainsWithRecords = chains
-        .filter((c) => (counts[c.id] || 0) > 0)
-        .sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0));
+        .filter((c) => latestRecordOfChain[c.id] !== undefined)
+        .sort((a, b) => {
+          const recordA = latestRecordOfChain[a.id];
+          const recordB = latestRecordOfChain[b.id];
+          return compareRecordsDesc(recordA, recordB);
+        });
 
       let initialChains: string[] = [];
       if (chainsWithRecords.length > 0) {
-        initialChains = chainsWithRecords.slice(0, 3).map((c) => c.id);
+        initialChains = chainsWithRecords.slice(0, 5).map((c) => c.id);
       } else {
-        initialChains = chains.slice(0, 3).map((c) => c.id);
+        initialChains = chains.slice(0, 5).map((c) => c.id);
       }
       setSelectedChartChains(initialChains);
       setHoveredPoint(null); // Clear tooltips
     }
-  }, [selectedProductId, records, chains]);
+  }, [selectedProductId, records, chains, compareRecordsDesc]);
 
   const selectedProduct = useMemo(() => {
     return products.find((p) => p.id === selectedProductId) || null;
@@ -347,17 +393,15 @@ export function Products({
     if (!selectedProductId) return [];
     return records
       .filter((r) => r.productId === selectedProductId)
-      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-  }, [records, selectedProductId]);
+      .sort(compareRecordsAsc);
+  }, [records, selectedProductId, compareRecordsAsc]);
 
   // Dynamic calculated latest price per retail chain for each product or specific product
   const latestPricePerChainMap = useMemo(() => {
     const productChainPrices: Record<string, Record<string, number>> = {};
 
     // Sort all records chronologically
-    const sortedRecords = [...records].sort(
-      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-    );
+    const sortedRecords = [...records].sort(compareRecordsAsc);
 
     sortedRecords.forEach((r) => {
       if (!productChainPrices[r.productId]) {
@@ -367,7 +411,7 @@ export function Products({
     });
 
     return productChainPrices;
-  }, [records]);
+  }, [records, compareRecordsAsc]);
 
   // Filtered products list
   const filteredProducts = useMemo(() => {
@@ -447,12 +491,13 @@ export function Products({
 
   // Sort mappings
   const productLatestRecordMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    records.forEach((r) => {
+    const map: Record<string, { time: number; index: number }> = {};
+    records.forEach((r, idx) => {
       if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
       const t = new Date(r.date).getTime();
-      if (!map[r.productId] || t > map[r.productId]) {
-        map[r.productId] = t;
+      const existing = map[r.productId];
+      if (!existing || t > existing.time || (t === existing.time && idx > existing.index)) {
+        map[r.productId] = { time: t, index: idx };
       }
     });
     return map;
@@ -510,10 +555,17 @@ export function Products({
     list.sort((a, b) => {
       switch (sortBy) {
         case "ultimo-preco": {
-          const timeA = productLatestRecordMap[a.id] || 0;
-          const timeB = productLatestRecordMap[b.id] || 0;
+          const valA = productLatestRecordMap[a.id];
+          const valB = productLatestRecordMap[b.id];
+          const timeA = valA ? valA.time : 0;
+          const timeB = valB ? valB.time : 0;
           if (timeA !== timeB) {
             return timeB - timeA; // Descending
+          }
+          const idxA = valA ? valA.index : -1;
+          const idxB = valB ? valB.index : -1;
+          if (idxA !== idxB) {
+            return idxB - idxA; // Descending
           }
           return a.name.localeCompare(b.name, "pt-BR");
         }
@@ -848,37 +900,59 @@ export function Products({
               </button>
             </div>
 
-            {/* View Mode Switcher: Grid vs List */}
-            <div
-              className="flex bg-[#F5F5F5] p-1 rounded-xl border border-[#E0E0E0] gap-1 shrink-0 w-full sm:w-auto select-none shadow-2xs animate-fade-in"
-              id="view-mode-toggle"
-            >
-              <button
-                id="toggle-grid-mode"
-                type="button"
-                onClick={() => setDisplayMode("grid")}
-                className={`flex-1 sm:flex-none justify-center px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
-                  displayMode === "grid"
-                    ? "bg-white text-[#D40511] shadow-xs border border-[#E0E0E0]/50"
-                    : "text-gray-500 hover:text-[#1A1A1A]"
-                }`}
+            {/* View Mode Switcher + Sorter */}
+            <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto animate-fade-in" id="sorting-and-view-toggles">
+              {/* View Mode Switcher: Grid vs List */}
+              <div
+                className="flex bg-[#F5F5F5] p-1 rounded-xl border border-[#E0E0E0] gap-1 shrink-0 w-full sm:w-auto select-none shadow-2xs"
+                id="view-mode-toggle"
               >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span>Grade</span>
-              </button>
-              <button
-                id="toggle-list-mode"
-                type="button"
-                onClick={() => setDisplayMode("list")}
-                className={`flex-1 sm:flex-none justify-center px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
-                  displayMode === "list"
-                    ? "bg-white text-[#D40511] shadow-xs border border-[#E0E0E0]/50"
-                    : "text-gray-500 hover:text-[#1A1A1A]"
-                }`}
-              >
-                <List className="w-3.5 h-3.5" />
-                <span>Lista</span>
-              </button>
+                <button
+                  id="toggle-grid-mode"
+                  type="button"
+                  onClick={() => setDisplayMode("grid")}
+                  className={`flex-1 sm:flex-none justify-center px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
+                    displayMode === "grid"
+                      ? "bg-white text-[#D40511] shadow-xs border border-[#E0E0E0]/50"
+                      : "text-gray-500 hover:text-[#1A1A1A]"
+                  }`}
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                  <span>Grade</span>
+                </button>
+                <button
+                  id="toggle-list-mode"
+                  type="button"
+                  onClick={() => setDisplayMode("list")}
+                  className={`flex-1 sm:flex-none justify-center px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
+                    displayMode === "list"
+                      ? "bg-white text-[#D40511] shadow-xs border border-[#E0E0E0]/50"
+                      : "text-gray-500 hover:text-[#1A1A1A]"
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span>Lista</span>
+                </button>
+              </div>
+
+              {/* Sorting Select Filter */}
+              <div className="flex items-center gap-2 bg-[#F5F5F5] px-3 py-1.5 rounded-xl border border-[#E0E0E0] shadow-2xs select-none w-full sm:w-auto" id="sorting-filter-wrapper">
+                <span className="text-[10px] text-gray-400 uppercase font-black whitespace-nowrap tracking-wide">
+                  Ordenar por:
+                </span>
+                <select
+                  id="product-sort-select"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="bg-transparent border-0 text-xs font-black text-[#1A1A1A] focus:outline-none cursor-pointer p-0 pr-1 w-full sm:w-auto"
+                >
+                  {sortingOptions.map((opt) => (
+                    <option key={opt.id} value={opt.id} className="font-semibold text-gray-800 bg-white">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -889,7 +963,7 @@ export function Products({
           >
             {/* Search Input */}
             <div
-              className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-2"
+              className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-4"
               id="search-input-wrapper"
             >
               <input
@@ -986,29 +1060,6 @@ export function Products({
                 ))}
               </select>
             </div>
-
-            {/* Sorting Select Filter */}
-            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="sorting-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[70px]">
-                Ordenar por:
-              </span>
-              <select
-                id="product-sort-select"
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className={`w-full flex-1 border rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-none cursor-pointer transition-colors ${
-                  sortBy === "ultimo-preco"
-                    ? "bg-[#F5F5F5] border-[#E0E0E0]/80 text-[#1A1A1A] focus:border-[#D40511]"
-                    : "bg-red-50 border-[#D40511]/40 text-[#D40511] focus:border-[#D40511]"
-                }`}
-              >
-                {sortingOptions.map((opt) => (
-                  <option key={opt.id} value={opt.id} className="font-semibold text-gray-805">
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {displayMode === "grid" ? (
@@ -1044,11 +1095,7 @@ export function Products({
                 );
                 const latestRecord =
                   productRecords.length > 0
-                    ? [...productRecords].sort(
-                        (a, b) =>
-                          new Date(b.date).getTime() -
-                          new Date(a.date).getTime(),
-                      )[0]
+                    ? [...productRecords].sort(compareRecordsDesc)[0]
                     : null;
                 const currentPrice = latestRecord
                   ? latestRecord.price
@@ -1317,11 +1364,7 @@ export function Products({
                 );
                 const latestRecord =
                   productRecords.length > 0
-                    ? [...productRecords].sort(
-                        (a, b) =>
-                          new Date(b.date).getTime() -
-                          new Date(a.date).getTime(),
-                      )[0]
+                    ? [...productRecords].sort(compareRecordsDesc)[0]
                     : null;
                 const currentPrice = latestRecord
                   ? latestRecord.price
@@ -1768,12 +1811,6 @@ export function Products({
                   </div>
 
                   <div className="w-full border-t border-[#F5F5F5] pt-4 mt-4 space-y-2 text-left text-xs text-gray-500">
-                    <div className="flex justify-between">
-                      <span>Cálculo base:</span>
-                      <span className="text-[#1A1A1A] font-bold font-mono">
-                        R$ {selectedProduct.basePrice.toFixed(2)}
-                      </span>
-                    </div>
                     {selectedProduct.weight && (
                       <div className="flex justify-between">
                         <span>Gramatura:</span>
@@ -2367,11 +2404,12 @@ export function Products({
 
                   <div className="flex flex-wrap items-center gap-3">
                     {/* Filter Toggles Side-by-Side */}
-                    <div className="flex items-center gap-1.5 bg-gray-50 p-1 border border-gray-200 rounded-xl" id="comparer-toggles-box">
+                    <div className="flex flex-wrap items-center gap-1.5 bg-gray-50 p-1 border border-gray-200 rounded-xl" id="comparer-toggles-box">
                       <button
                         type="button"
                         onClick={() => {
-                          if (compareByCategory && !compareBySubcategory) {
+                          const activeCount = (compareByCategory ? 1 : 0) + (compareBySubcategory ? 1 : 0) + (compareByWeight ? 1 : 0);
+                          if (compareByCategory && activeCount === 1) {
                             setCompareBySubcategory(true);
                             setCompareByCategory(false);
                           } else {
@@ -2389,7 +2427,8 @@ export function Products({
                       <button
                         type="button"
                         onClick={() => {
-                          if (compareBySubcategory && !compareByCategory) {
+                          const activeCount = (compareByCategory ? 1 : 0) + (compareBySubcategory ? 1 : 0) + (compareByWeight ? 1 : 0);
+                          if (compareBySubcategory && activeCount === 1) {
                             setCompareByCategory(true);
                             setCompareBySubcategory(false);
                           } else {
@@ -2403,6 +2442,25 @@ export function Products({
                         }`}
                       >
                         Subcategoria: {selectedProduct.subcategory || "Indefinida"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const activeCount = (compareByCategory ? 1 : 0) + (compareBySubcategory ? 1 : 0) + (compareByWeight ? 1 : 0);
+                          if (compareByWeight && activeCount === 1) {
+                            setCompareByCategory(true);
+                            setCompareByWeight(false);
+                          } else {
+                            setCompareByWeight(!compareByWeight);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
+                          compareByWeight
+                            ? "bg-white text-gray-800 shadow-xs border border-gray-200"
+                            : "text-gray-400 hover:text-gray-600 border border-transparent"
+                        }`}
+                      >
+                        Gramatura: {selectedProduct.weight || "Indefinida"}
                       </button>
                     </div>
 
@@ -2435,14 +2493,12 @@ export function Products({
                   // Find peer products matching comparison toggles
                   const peers = products.filter((p) => {
                     if (!p.active) return false;
+                    // Maintain selected product as reference anchor, but show only actual competitors for all other peers if selectedProduct is not a competitor
+                    if (p.id !== selectedProduct.id && !selectedProduct.isCompetitor && !p.isCompetitor) return false;
                     
-                    if (compareByCategory && compareBySubcategory) {
-                      return p.category === selectedProduct.category && p.subcategory === selectedProduct.subcategory;
-                    } else if (compareByCategory) {
-                      return p.category === selectedProduct.category;
-                    } else if (compareBySubcategory) {
-                      return p.subcategory === selectedProduct.subcategory;
-                    }
+                    if (compareByCategory && p.category !== selectedProduct.category) return false;
+                    if (compareBySubcategory && p.subcategory !== selectedProduct.subcategory) return false;
+                    if (compareByWeight && p.weight !== selectedProduct.weight) return false;
                     return true;
                   });
 
@@ -2466,8 +2522,20 @@ export function Products({
                       const latestByChain: Record<string, PriceRecord> = {};
                       productRecords.forEach((r) => {
                         const current = latestByChain[r.chainId];
-                        if (!current || new Date(r.date).getTime() > new Date(current.date).getTime()) {
+                        if (!current) {
                           latestByChain[r.chainId] = r;
+                        } else {
+                          const tR = new Date(r.date).getTime();
+                          const tC = new Date(current.date).getTime();
+                          if (tR > tC) {
+                            latestByChain[r.chainId] = r;
+                          } else if (tR === tC) {
+                            const idxR = recordIndexMap.get(r.id) ?? -1;
+                            const idxC = recordIndexMap.get(current.id) ?? -1;
+                            if (idxR > idxC) {
+                              latestByChain[r.chainId] = r;
+                            }
+                          }
                         }
                       });
                       

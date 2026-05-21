@@ -697,7 +697,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const getLatestPrice = (productId: string, chainId: string) => {
     const chainRecords = [...records].filter(r => r.productId === productId && r.chainId === chainId);
     if (chainRecords.length === 0) return null;
-    chainRecords.sort((a, b) => b.date.localeCompare(a.date));
+    chainRecords.sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return records.indexOf(b) - records.indexOf(a);
+    });
     return chainRecords[0].price;
   };
 
@@ -705,7 +709,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const getLatestPriceRecord = (productId: string, chainId: string) => {
     const chainRecords = [...records].filter(r => r.productId === productId && r.chainId === chainId);
     if (chainRecords.length === 0) return null;
-    chainRecords.sort((a, b) => b.date.localeCompare(a.date));
+    chainRecords.sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return records.indexOf(b) - records.indexOf(a);
+    });
     return chainRecords[0];
   };
 
@@ -1148,7 +1156,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 className={`flex-1 text-center py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${registrationMode === 'single' ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-700'}`}
               >
                 <Sliders className="w-3.5 h-3.5" />
-                Registrar 1 item
+                Registrar 1 preço
               </button>
               <button 
                 type="button" 
@@ -1160,7 +1168,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 className={`flex-1 text-center py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${registrationMode === 'batch' ? 'bg-white text-[#D40511] shadow-sm font-black border border-red-100' : 'text-slate-400 hover:text-slate-700'}`}
               >
                 <Layers className="w-3.5 h-3.5" />
-                Registrar vários itens ({batchItems.length}/10)
+                Registrar vários preços ({batchItems.length}/10)
               </button>
             </div>
           )}
