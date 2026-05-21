@@ -448,10 +448,10 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
       </div>
 
       {/* Main Content Dashboard Area - Replacing period counts with Highest Dispersion */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8" id="dashboard-details">
+      <div className="flex flex-col gap-8" id="dashboard-details">
         
-        {/* NEW SECTION: Maior Dispersão de Preços (lg:col-span-4) */}
-        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs lg:col-span-4 flex flex-col justify-between" id="dashboard-dispersions-col">
+        {/* NEW SECTION: Maior Dispersão de Preços (Full Width) */}
+        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between w-full" id="dashboard-dispersions-col">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-slate-50">
               <h3 className="text-xs font-extrabold text-slate-400 font-sans uppercase tracking-widest leading-none">
@@ -463,12 +463,12 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
               Diferença percentual observada entre o menor e maior preço de venda no mercado físico local.
             </p>
 
-            <div className="space-y-4" id="dispersions-rows-container">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4" id="dispersions-rows-container">
               {topDispersions.map((disp, i) => (
                 <div 
                   key={disp.product.id} 
                   className="flex items-center justify-between gap-4 p-3.5 rounded-xl border border-slate-100 hover:border-[#D40511]/20 hover:bg-slate-50/40 transition-all duration-200 cursor-pointer"
-                  onClick={() => onNavigate('produtos', { productId: disp.product.id })}
+                  onClick={() => onNavigate('produtos', { action: 'detail', productId: disp.product.id })}
                   title="Clique para ver no catálogo"
                 >
                   <div className="min-w-0 flex items-center gap-3">
@@ -500,19 +500,19 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
               ))}
 
               {topDispersions.length === 0 && (
-                <div className="text-center py-12 text-xs text-slate-400 italic font-medium">
+                <div className="text-center py-12 text-xs text-slate-400 italic font-medium col-span-1 md:col-span-2">
                   Histórico de auditorias insuficientes para traçar índices de dispersão.
                 </div>
               )}
             </div>
           </div>
 
-          <div className="mt-8 pt-5 border-t border-slate-50 space-y-3">
-            <div className="flex justify-between items-center text-xs">
+          <div className="mt-8 pt-5 border-t border-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+            <div className="flex justify-between sm:justify-start items-center gap-6 text-xs w-full sm:w-auto">
               <span className="text-slate-400 font-medium">Amostras consolidadas</span>
               <span className="font-mono font-bold text-slate-800 bg-slate-50 px-2.5 py-0.5 rounded border border-slate-100/50 text-xs">{records.length}</span>
             </div>
-            <div className="flex justify-between items-center text-xs">
+            <div className="flex justify-between sm:justify-start items-center gap-6 text-xs w-full sm:w-auto">
               <span className="text-slate-400 font-medium">Garantia comercial</span>
               <span className="font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded text-[9px] border border-emerald-100/30 uppercase tracking-widest">
                 100% Auditável
@@ -521,8 +521,8 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
           </div>
         </div>
 
-        {/* FEED DE AUDITORIA PREMIUM (lg:col-span-8) */}
-        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs lg:col-span-8 flex flex-col justify-between" id="dashboard-feed-col">
+        {/* FEED DE AUDITORIA PREMIUM (Full Width) */}
+        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between w-full" id="dashboard-feed-col">
           <div>
             <div className="flex items-center justify-between pb-3 border-b border-slate-50">
               <div>
@@ -552,14 +552,19 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
                 return (
                   <div 
                     key={act.id} 
-                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-slate-50 bg-white hover:bg-slate-50/40 hover:border-slate-200 hover:shadow-2xs transition-all duration-200"
+                    onClick={() => act.product && onNavigate('produtos', { action: 'detail', productId: act.product.id })}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-xl border border-slate-50 bg-white hover:bg-slate-50/40 hover:border-slate-200 hover:shadow-2xs transition-all duration-200 cursor-pointer"
+                    title="Clique para ver detalhes do produto"
                   >
                     {/* Item details & image */}
                     <div className="flex items-center gap-3.5 min-w-0">
                       {/* Photo Thumbnail */}
                       {act.imageUrl ? (
                         <div 
-                          onClick={() => onNavigate('auditoria', { recordId: act.id })}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onNavigate('auditoria', { recordId: act.id });
+                          }}
                           className="relative group/thumb cursor-pointer shrink-0"
                           title="Clique para ampliar auditoria comercial"
                         >
@@ -594,7 +599,7 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
                     </div>
 
                     {/* Meta information columns */}
-                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-x-6 gap-y-2 sm:shrink-0">
+                    <div className="flex flex-wrap items-center justify-between sm:justify-end gap-x-6 gap-y-2 sm:shrink-0" onClick={(e) => e.stopPropagation()}>
                       {/* Retailer Info */}
                       {act.chain ? (
                         <div className="flex items-center gap-2">
@@ -624,7 +629,7 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
                         <p className="text-base font-extrabold text-slate-900 font-mono">
                           R$ {act.price.toFixed(2)}
                         </p>
-                        <p className="text-[10px] text-slate-400 font-medium">
+                        <p className="text-[10px] text-slate-400 font-medium font-sans">
                           {formatDateBR(act.date)}
                         </p>
                       </div>

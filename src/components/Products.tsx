@@ -103,7 +103,53 @@ export function Products({
   const [selectedWeight, setSelectedWeight] = useState("Todas");
   const [selectedBrandFilters, setSelectedBrandFilters] = useState<
     ("propria-oetker" | "propria-mavalerio" | "concorrentes")[]
-  >(["propria-oetker", "propria-mavalerio"]);
+  >(["propria-oetker", "propria-mavalerio", "concorrentes"]);
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(25);
+
+  // Sorting State
+  const [sortBy, setSortBy] = useState("ultimo-preco");
+
+  // Sorting Options depends on whether we filter by a specific network (selectedChainId)
+  const sortingOptions = useMemo(() => {
+    if (selectedChainId === "Todas") {
+      return [
+        { id: "ultimo-preco", label: "Último preço cadastrado" },
+        { id: "nome-az", label: "Nome do produto (A → Z)" },
+        { id: "nome-za", label: "Nome do produto (Z → A)" },
+        { id: "menor-preco-medio", label: "Menor preço médio" },
+        { id: "maior-preco-medio", label: "Maior preço médio" },
+        { id: "maior-dispersao", label: "Maior dispersão de preços" },
+        { id: "mais-auditorias", label: "Mais registros de auditoria" },
+        { id: "cadastro-recente", label: "Cadastro mais recente" },
+      ];
+    } else {
+      return [
+        { id: "ultimo-preco", label: "Último preço cadastrado" },
+        { id: "nome-az", label: "Nome do produto (A → Z)" },
+        { id: "nome-za", label: "Nome do produto (Z → A)" },
+        { id: "menor-preco-rede", label: "Menor preço nessa rede" },
+        { id: "maior-preco-rede", label: "Maior preço nessa rede" },
+        { id: "mais-auditorias", label: "Mais registros de auditoria" },
+        { id: "cadastro-recente", label: "Cadastro mais recente" },
+      ];
+    }
+  }, [selectedChainId]);
+
+  // Validate active sorting strategy when the network selection changes
+  useEffect(() => {
+    const isValid = sortingOptions.some((opt) => opt.id === sortBy);
+    if (!isValid) {
+      setSortBy("ultimo-preco");
+    }
+  }, [selectedChainId, sortingOptions, sortBy]);
+
+  // Reset page to 1 when filters or sorting change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, selectedCategory, selectedSubcategory, selectedChainId, selectedWeight, selectedBrandFilters, sortBy]);
 
   // Audit Photo Modal / Lightbox inside Product Detail
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
@@ -399,6 +445,186 @@ export function Products({
     latestPricePerChainMap,
   ]);
 
+  // Sort mappings
+  const productLatestRecordMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    records.forEach((r) => {
+      if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
+      const t = new Date(r.date).getTime();
+      if (!map[r.productId] || t > map[r.productId]) {
+        map[r.productId] = t;
+      }
+    });
+    return map;
+  }, [records, selectedChainId]);
+
+  const productAveragePriceMap = useMemo(() => {
+    const map: Record<string, { sum: number; count: number }> = {};
+    records.forEach((r) => {
+      if (!map[r.productId]) {
+        map[r.productId] = { sum: 0, count: 0 };
+      }
+      map[r.productId].sum += r.price;
+      map[r.productId].count += 1;
+    });
+    const averages: Record<string, number> = {};
+    Object.entries(map).forEach(([prodId, val]) => {
+      averages[prodId] = val.sum / val.count;
+    });
+    return averages;
+  }, [records]);
+
+  const productDispersionMap = useMemo(() => {
+    const prodPrices: Record<string, number[]> = {};
+    records.forEach((r) => {
+      if (!prodPrices[r.productId]) {
+        prodPrices[r.productId] = [];
+      }
+      prodPrices[r.productId].push(r.price);
+    });
+    const dispersions: Record<string, number> = {};
+    Object.entries(prodPrices).forEach(([prodId, prices]) => {
+      const min = Math.min(...prices);
+      const max = Math.max(...prices);
+      if (min > 0) {
+        dispersions[prodId] = ((max - min) / min) * 100;
+      } else {
+        dispersions[prodId] = 0;
+      }
+    });
+    return dispersions;
+  }, [records]);
+
+  const productRecordCountMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    records.forEach((r) => {
+      if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
+      map[r.productId] = (map[r.productId] || 0) + 1;
+    });
+    return map;
+  }, [records, selectedChainId]);
+
+  const sortedAndFilteredProducts = useMemo(() => {
+    const list = [...filteredProducts];
+
+    list.sort((a, b) => {
+      switch (sortBy) {
+        case "ultimo-preco": {
+          const timeA = productLatestRecordMap[a.id] || 0;
+          const timeB = productLatestRecordMap[b.id] || 0;
+          if (timeA !== timeB) {
+            return timeB - timeA; // Descending
+          }
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        case "nome-az":
+          return a.name.localeCompare(b.name, "pt-BR");
+        case "nome-za":
+          return b.name.localeCompare(a.name, "pt-BR");
+        case "menor-preco-medio": {
+          const avgA = productAveragePriceMap[a.id];
+          const avgB = productAveragePriceMap[b.id];
+          if (avgA !== undefined && avgB !== undefined) {
+            return avgA - avgB;
+          }
+          if (avgA !== undefined) return -1;
+          if (avgB !== undefined) return 1;
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        case "maior-preco-medio": {
+          const avgA = productAveragePriceMap[a.id];
+          const avgB = productAveragePriceMap[b.id];
+          if (avgA !== undefined && avgB !== undefined) {
+            return avgB - avgA;
+          }
+          if (avgA !== undefined) return -1;
+          if (avgB !== undefined) return 1;
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        case "maior-dispersao": {
+          const dispA = productDispersionMap[a.id] || 0;
+          const dispB = productDispersionMap[b.id] || 0;
+          if (dispA !== dispB) {
+            return dispB - dispA;
+          }
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        case "mais-auditorias": {
+          const cntA = productRecordCountMap[a.id] || 0;
+          const cntB = productRecordCountMap[b.id] || 0;
+          if (cntA !== cntB) {
+            return cntB - cntA;
+          }
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        case "cadastro-recente": {
+          const idxA = products.findIndex((item) => item.id === a.id);
+          const idxB = products.findIndex((item) => item.id === b.id);
+          return idxA - idxB;
+        }
+        case "menor-preco-rede": {
+          const priceA = latestPricePerChainMap[a.id]?.[selectedChainId];
+          const priceB = latestPricePerChainMap[b.id]?.[selectedChainId];
+          if (priceA !== undefined && priceB !== undefined) {
+            return priceA - priceB;
+          }
+          if (priceA !== undefined) return -1;
+          if (priceB !== undefined) return 1;
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        case "maior-preco-rede": {
+          const priceA = latestPricePerChainMap[a.id]?.[selectedChainId];
+          const priceB = latestPricePerChainMap[b.id]?.[selectedChainId];
+          if (priceA !== undefined && priceB !== undefined) {
+            return priceB - priceA;
+          }
+          if (priceA !== undefined) return -1;
+          if (priceB !== undefined) return 1;
+          return a.name.localeCompare(b.name, "pt-BR");
+        }
+        default:
+          return 0;
+      }
+    });
+
+    return list;
+  }, [
+    filteredProducts,
+    sortBy,
+    productLatestRecordMap,
+    productAveragePriceMap,
+    productDispersionMap,
+    productRecordCountMap,
+    latestPricePerChainMap,
+    selectedChainId,
+    products,
+  ]);
+
+  // Paginated Products
+  const paginatedProducts = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return sortedAndFilteredProducts.slice(startIndex, endIndex);
+  }, [sortedAndFilteredProducts, currentPage, itemsPerPage]);
+
+  const totalPages = Math.ceil(sortedAndFilteredProducts.length / itemsPerPage) || 1;
+
+  const pageNumbers = useMemo(() => {
+    const list: number[] = [];
+    let startPage = Math.max(1, currentPage - 2);
+    let endPage = Math.min(totalPages, startPage + 4);
+    
+    // Adjust start page if we are near the end
+    if (endPage - startPage < 4) {
+      startPage = Math.max(1, endPage - 4);
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+      list.push(i);
+    }
+    return list;
+  }, [currentPage, totalPages]);
+
   // SVG Line Chart Drawer parameters
   const chartData = useMemo(() => {
     if (!selectedProductId || selectedProductHistory.length === 0) return null;
@@ -658,12 +884,12 @@ export function Products({
 
           {/* Filtering Widgets */}
           <div
-            className="bg-white p-4 rounded-xl border border-[#E0E0E0] shadow-sm grid grid-cols-1 md:grid-cols-2 lg:flex lg:flex-row lg:items-center gap-4"
+            className="bg-white p-5 rounded-2xl border border-[#E0E0E0]/80 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-4"
             id="filters-container"
           >
             {/* Search Input */}
             <div
-              className="relative w-full md:col-span-2 lg:col-span-1 lg:min-w-[250px] lg:flex-1"
+              className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-2"
               id="search-input-wrapper"
             >
               <input
@@ -672,14 +898,14 @@ export function Products({
                 placeholder="Pesquisar por nome ou categoria..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:border-[#D40511]"
+                className="w-full pl-9 pr-4 py-2 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:border-[#D40511] font-sans"
               />
               <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
             </div>
 
             {/* Category Select Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap">
+            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="category-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[65px]">
                 Categoria:
               </span>
               <select
@@ -690,7 +916,7 @@ export function Products({
                   setSelectedSubcategory("Todas"); // Reset subcategory when changing category
                   setSelectedWeight("Todas"); // Reset weight when changing category
                 }}
-                className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
+                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
               >
                 {categories.map((cat) => (
                   <option key={cat} value={cat}>
@@ -701,8 +927,8 @@ export function Products({
             </div>
 
             {/* Subcategory Select Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap">
+            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="subcategory-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[45px]">
                 Subcat:
               </span>
               <select
@@ -712,7 +938,7 @@ export function Products({
                   setSelectedSubcategory(e.target.value);
                   setSelectedWeight("Todas"); // Reset weight when changing subcategory
                 }}
-                className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
+                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
               >
                 {subcategories.map((sub) => (
                   <option key={sub} value={sub}>
@@ -723,15 +949,15 @@ export function Products({
             </div>
 
             {/* Weight Select Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap">
+            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="weight-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[65px]">
                 Gramatura:
               </span>
               <select
                 id="product-weight-filter-select"
                 value={selectedWeight}
                 onChange={(e) => setSelectedWeight(e.target.value)}
-                className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
+                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
               >
                 {weights.map((w) => (
                   <option key={w} value={w}>
@@ -742,20 +968,43 @@ export function Products({
             </div>
 
             {/* Retail Chain Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap">
+            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="chain-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[65px]">
                 Preço em:
               </span>
               <select
                 id="product-chain-filter-select"
                 value={selectedChainId}
                 onChange={(e) => setSelectedChainId(e.target.value)}
-                className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
+                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
               >
                 <option value="Todas">Todas as Redes</option>
                 {chains.map((chain) => (
                   <option key={chain.id} value={chain.id}>
                     {chain.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Sorting Select Filter */}
+            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="sorting-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[70px]">
+                Ordenar por:
+              </span>
+              <select
+                id="product-sort-select"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                className={`w-full flex-1 border rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-none cursor-pointer transition-colors ${
+                  sortBy === "ultimo-preco"
+                    ? "bg-[#F5F5F5] border-[#E0E0E0]/80 text-[#1A1A1A] focus:border-[#D40511]"
+                    : "bg-red-50 border-[#D40511]/40 text-[#D40511] focus:border-[#D40511]"
+                }`}
+              >
+                {sortingOptions.map((opt) => (
+                  <option key={opt.id} value={opt.id} className="font-semibold text-gray-805">
+                    {opt.label}
                   </option>
                 ))}
               </select>
@@ -767,7 +1016,7 @@ export function Products({
               className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4"
               id="products-grid"
             >
-              {filteredProducts.map((prod) => {
+              {paginatedProducts.map((prod) => {
                 // Extract prices across chains for this item
                 const pricesMap = (latestPricePerChainMap[prod.id] ||
                   {}) as Record<string, number>;
@@ -1017,7 +1266,7 @@ export function Products({
                 );
               })}
 
-              {filteredProducts.length === 0 && (
+              {sortedAndFilteredProducts.length === 0 && (
                 <div
                   className="col-span-full bg-white p-12 text-center border border-[#E0E0E0] rounded-2xl"
                   id="empty-products-view"
@@ -1040,7 +1289,7 @@ export function Products({
             </div>
           ) : (
             <div className="flex flex-col gap-3" id="products-list-layout">
-              {filteredProducts.map((prod) => {
+              {paginatedProducts.map((prod) => {
                 // Extract prices across chains for this item
                 const pricesMap = (latestPricePerChainMap[prod.id] ||
                   {}) as Record<string, number>;
@@ -1301,7 +1550,7 @@ export function Products({
                 );
               })}
 
-              {filteredProducts.length === 0 && (
+              {sortedAndFilteredProducts.length === 0 && (
                 <div
                   className="bg-white p-12 text-center border border-[#E0E0E0]/80 rounded-2xl w-full"
                   id="empty-products-view-list"
@@ -1321,6 +1570,118 @@ export function Products({
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Pagination Controls bar */}
+          {sortedAndFilteredProducts.length > 0 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 px-6 bg-white border border-[#E0E0E0] rounded-2xl shadow-xs mt-6 font-sans" id="products-pagination-bar">
+              {/* Items Per Page Selector & Textual Info */}
+              <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-gray-500">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-gray-400 uppercase tracking-wider text-[10px] font-sans">Itens por página:</span>
+                  <select
+                    id="pagination-items-per-page"
+                    value={itemsPerPage}
+                    onChange={(e) => {
+                      setItemsPerPage(Number(e.target.value));
+                      setCurrentPage(1); // Go back to first page when changing size
+                    }}
+                    className="bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2 py-1 text-xs text-[#1A1A1A] font-bold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+                <div className="text-gray-400 font-semibold font-sans">
+                  Exibindo <span className="text-[#1A1A1A] font-extrabold">{Math.min(sortedAndFilteredProducts.length, (currentPage - 1) * itemsPerPage + 1)}–{Math.min(currentPage * itemsPerPage, sortedAndFilteredProducts.length)}</span> de <span className="text-[#1A1A1A] font-extrabold">{sortedAndFilteredProducts.length}</span> produtos
+                </div>
+              </div>
+
+              {/* Navigation Button Controls */}
+              <div className="flex items-center gap-1.5">
+                {/* First Page button */}
+                <button
+                  type="button"
+                  id="pagination-first-page-btn"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(1)}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                    currentPage === 1 
+                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
+                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                  }`}
+                  title="Primeira página"
+                >
+                  ⏮
+                </button>
+
+                {/* Previous Page button */}
+                <button
+                  type="button"
+                  id="pagination-prev-page-btn"
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                    currentPage === 1 
+                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
+                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                  }`}
+                  title="Página anterior"
+                >
+                  ◀
+                </button>
+
+                {/* Page numbers pages array */}
+                {pageNumbers.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setCurrentPage(p)}
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center border font-mono text-xs font-extrabold transition-all cursor-pointer select-none ${
+                      currentPage === p 
+                        ? "bg-[#D40511] border-[#D40511] text-white shadow-xs" 
+                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300 active:scale-95"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+
+                {/* Next Page button */}
+                <button
+                  type="button"
+                  id="pagination-next-page-btn"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                    currentPage === totalPages 
+                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
+                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                  }`}
+                  title="Próxima página"
+                >
+                  ▶
+                </button>
+
+                {/* Last Page button */}
+                <button
+                  type="button"
+                  id="pagination-last-page-btn"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                    currentPage === totalPages 
+                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
+                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                  }`}
+                  title="Última página"
+                >
+                  ⏭
+                </button>
+              </div>
             </div>
           )}
         </>
