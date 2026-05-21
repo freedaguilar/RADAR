@@ -15,14 +15,20 @@ async function startServer() {
 
   // CORS middleware to allow external sites (like Vercel) to call the API
   app.use((req, res, next) => {
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+    } else {
+      res.setHeader("Access-Control-Allow-Origin", "*");
+    }
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
-    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With, Content-Type, Authorization");
     res.setHeader("Access-Control-Allow-Credentials", "true");
     
     // Handle preflight OPTIONS request
     if (req.method === "OPTIONS") {
-      return res.sendStatus(200);
+      res.setHeader("Content-Length", "0");
+      return res.status(204).end();
     }
     next();
   });
