@@ -95,7 +95,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     setAiAnalysisMessage('Iniciando análise inteligente da imagem...');
     try {
       // Se estiver rodando fora do domínio do Cloud Run ou localhost (por exemplo, na Vercel),
-      // fazemos a requisição para o backend do container hospedado no Cloud Run.
+      // fazemos a requisição para o backend do container ativo de desenvolvimento, que possui
+      // as alterações de CORS atualizadas em tempo real.
       const isExternal = !window.location.hostname.includes('run.app') && 
                          !window.location.hostname.includes('localhost') && 
                          !window.location.hostname.includes('127.0.0.1');

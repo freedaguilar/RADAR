@@ -15,6 +15,7 @@ async function startServer() {
   app.use(express.json({ limit: "15mb" }));
 
   // CORS middleware to allow external sites (like Vercel) to call the API
+  // CORS configurado para permitir requisições seguras de qualquer origem (inclusive Vercel)
   app.use(
     cors({
       origin: (origin, callback) => {
