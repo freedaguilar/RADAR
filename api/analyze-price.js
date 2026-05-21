@@ -54,7 +54,7 @@ export default async function handler(req, res) {
       \n${catalogText}\n
 
       Siga as instruções estritas:
-      1. Localize o preço numérico na imagem da etiqueta ou cartaz. Geralmente é o valor em destaque (em Reais, R$).
+      1. Localize o preço numérico na imagem da etiqueta ou cartaz. Se a etiqueta contiver múltiplos preços (como atacado, clube, cliente, etc.), IGNORE-OS E IDENTIFIQUE EXCLUSIVAMENTE O PREÇO DE VAREJO (o preço base de venda para o consumidor final em quantidade unitária).
       2. Identifique quais palavras na foto correspondem ao nome do produto, marca ou peso no catálogo. Procure correspondências de marca (ex: Dr. Oetker, Mavalério, Royal, Dona Benta, Fleischmann) e peso ou volume relevantes.
       3. Selecione o "matchedProductId" correspondente da lista que representa o ID do melhor produto mapeado. Se não houver correspondência ideal, deixe vazio ou selecione o ID do produto mais provável.
       4. Retorne o preço como um número decimal (ex: 4.89 ou 22.90). Se o preço contiver centavos, mapeie de forma correspondente.
