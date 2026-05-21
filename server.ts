@@ -54,8 +54,9 @@ async function startServer() {
         : "";
 
       const prompt = `
-        Você é um auditor de gôndola. Analise a foto da etiqueta e identifique ID e preço.
-        Responda APENAS em JSON. 
+        Você é um auditor de gôndola. Analise a foto. Identifique o preço do VAREJO (unitário).
+        Ignore preços de atacado, clube ou promocionais se não for unitário.
+        Retorne APENAS um JSON (ID, preço, confiança).
         Catálogo: ID|Nome|Marca
         ${catalogText}
       `;
