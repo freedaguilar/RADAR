@@ -43,15 +43,10 @@ async function startServer() {
 
       const client = getGeminiClient();
 
-      // Parse image data (handle both base64 data URLs and raw base64)
+      // Parse image data
       const matchesImg = image.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
-      let mimeType = "image/jpeg";
-      let base64Data = image;
-
-      if (matchesImg) {
-        mimeType = matchesImg[1];
-        base64Data = matchesImg[2];
-      }
+      const mimeType = matchesImg ? matchesImg[1] : "image/jpeg";
+      const base64Data = matchesImg ? matchesImg[2] : image;
 
       // Format products catalog list for the model prompt
       const catalogText = Array.isArray(products) 
@@ -75,7 +70,7 @@ async function startServer() {
       `;
 
       const response = await client.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-3.1-flash-lite",
         contents: [
           {
             inlineData: {
@@ -147,3 +142,4 @@ async function startServer() {
 }
 
 startServer();
+
