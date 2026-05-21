@@ -438,7 +438,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       // Show success feedback and clear form
       setSuccessMsg(true);
       setSelectedProductId('');
-      setSelectedChainId('');
       setPrice('');
       setNotes('');
       setProductSearch('');
@@ -1029,6 +1028,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 id="btn-register-more-yes"
                 onClick={() => {
                   setShowRedirectPrompt(false);
+                  setStep(2);
                 }}
                 className="flex-1 px-4 py-2.5 bg-[#D40511] hover:bg-[#b0040e] text-white rounded-xl text-xs font-bold transition duration-150 cursor-pointer shadow-xs text-center"
               >
