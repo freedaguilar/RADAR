@@ -94,73 +94,132 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     setIsAnalyzing(true);
     setAiAnalysisMessage('Iniciando análise inteligente da imagem...');
     try {
-      // Se estiver rodando fora do domínio do Cloud Run ou localhost (por exemplo, na Vercel),
-      // fazemos a requisição para o backend do container ativo de desenvolvimento, que possui
-      // as alterações de CORS atualizadas em tempo real.
-      const isExternal = !window.location.hostname.includes('run.app') && 
-                         !window.location.hostname.includes('localhost') && 
-                         !window.location.hostname.includes('127.0.0.1');
-      const apiBase = isExternal 
-        ? 'https://ais-pre-lr7n3hpqgqdedjenfavfrb-349633944700.us-east1.run.app'
-        : '';
+      // NOTE: Using a client-side environment variable (VITE_ANTHROPIC_API_KEY) exposes the key to the browser bundle of your frontend.
+      // This approach is utilized as requested by the user to avoid Cloud Run backend and CORS issues with Vercel origins.
+      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error('Chave de API VITE_ANTHROPIC_API_KEY da Anthropic não está configurada!');
+      }
 
-      const res = await fetch(`${apiBase}/api/analyze-price`, {
-        method: 'POST',
+      // Parsea imagem para obter dados puros em base64 e mimetype correto
+      const matchesImg = base64Image.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+      const mimeType = matchesImg ? matchesImg[1] : 'image/jpeg';
+      const base64Data = matchesImg ? matchesImg[2] : base64Image;
+
+      // Chama a Claude Haiku v4.5 diretamente a partir do cliente
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
         },
         body: JSON.stringify({
-          image: base64Image,
-          products: products.map(p => ({
-            id: p.id,
-            name: p.name,
-            brand: p.brand,
-            weight: p.weight,
-            category: p.category
-          }))
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 1000,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: mimeType === 'image/png' ? 'image/png' : mimeType === 'image/webp' ? 'image/webp' : mimeType === 'image/gif' ? 'image/gif' : 'image/jpeg',
+                    data: base64Data
+                  }
+                },
+                {
+                  type: "text",
+                  text: `Analise esta imagem de etiqueta de preço de supermercado e retorne APENAS um JSON com os campos: { "produto": "nome do produto", "preco": 0.00, "observacao": "qualquer informação relevante como promoção, validade etc" }. Se não conseguir identificar algum campo, deixe como null.
+                  
+Dispomos do seguinte catálogo de produtos em nosso banco de dados. Se encontrar o produto correspondente ideal, inclua também um atributo opcional "matchedProductId" com o ID correspondente.
+Catálogo local de produtos:
+${products.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join('\n')}`
+                }
+              ]
+            }
+          ]
         })
       });
 
-      if (!res.ok) {
-        throw new Error('Falha na resposta do servidor de IA');
+      if (!response.ok) {
+        throw new Error('Falha na resposta da API da Anthropic (Haiku)');
       }
 
-      const data = await res.json();
+      const responseData = await response.json();
+      const textContent = responseData.content?.[0]?.text || '';
+      
+      let data: any = null;
+      try {
+        const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          data = JSON.parse(jsonMatch[0]);
+        } else {
+          data = JSON.parse(textContent);
+        }
+      } catch (e) {
+        console.error('Falha ao parsear o JSON retornado pelo Claude:', e);
+      }
       
       if (data) {
         let priceSet = false;
-        if (data.price !== undefined && data.price !== null) {
-          const formattedPrice = String(data.price).replace('.', ',');
+        const rawPreco = data.preco !== undefined ? data.preco : data.price;
+        if (rawPreco !== undefined && rawPreco !== null) {
+          const formattedPrice = String(rawPreco).replace('.', ',');
           setPrice(formattedPrice);
           priceSet = true;
         }
 
+        let finalMatchedName = '';
         let productMatched = false;
-        if (data.matchedProductId) {
-          const matchedProd = products.find(p => p.id === data.matchedProductId);
+        const matchedIdFromAi = data.matchedProductId;
+        if (matchedIdFromAi) {
+          const matchedProd = products.find(p => p.id === matchedIdFromAi);
           if (matchedProd) {
             setSelectedProductId(matchedProd.id);
             setProductSearch(matchedProd.name);
+            finalMatchedName = matchedProd.name;
+            productMatched = true;
+          }
+        }
+
+        // Busca de fallback por texto similar se matchedProductId não foi retornado mas string produto existe
+        if (!productMatched && data.produto) {
+          const lowerDetected = data.produto.toLowerCase();
+          const matchedProd = products.find(p => 
+            p.name.toLowerCase().includes(lowerDetected) || 
+            lowerDetected.includes(p.name.toLowerCase())
+          );
+          if (matchedProd) {
+            setSelectedProductId(matchedProd.id);
+            setProductSearch(matchedProd.name);
+            finalMatchedName = matchedProd.name;
             productMatched = true;
           }
         }
 
         if (priceSet && productMatched) {
-          setAiAnalysisMessage(`✨ IA detectou: ${data.detectedText || 'Sucesso!'}`);
+          setAiAnalysisMessage(`✨ Claude detectou: R$ ${String(rawPreco).replace('.', ',')} para "${finalMatchedName}". ${data.observacao ? `Obs: ${data.observacao}` : ''}`);
         } else if (priceSet) {
-          setAiAnalysisMessage(`✨ IA detectou o Preço (R$ ${String(data.price).replace('.', ',')}), mas não identificou o produto no catálogo.`);
+          setAiAnalysisMessage(`✨ Claude detectou o Preço (R$ ${String(rawPreco).replace('.', ',')}), mas não identificou com precisão o produto no catálogo. Produto lido: "${data.produto || ''}"`);
         } else if (productMatched) {
-          setAiAnalysisMessage(`✨ IA identificou o Produto, mas não conseguiu ler o preço.`);
+          setAiAnalysisMessage(`✨ Claude identificou o Produto "${finalMatchedName}", mas não conseguiu ler o preço.`);
         } else {
-          setAiAnalysisMessage(`⚠️ IA leu: "${data.detectedText || 'Sem correspondência'}". Não pôde preencher automaticamente.`);
+          setAiAnalysisMessage(`⚠️ Claude leu: "${data.produto || 'Sem correspondência'}". Não pôde preencher automaticamente.`);
         }
       }
     } catch (err: any) {
-      console.error('Erro na análise automática:', err);
-      setAiAnalysisMessage('⚠️ Não foi possível analisar a imagem automaticamente. Insira os dados manualmente.');
+      console.error('Erro na análise automática via Anthropic Claude:', err);
+      // Se chave faltar, exibe ajuda mais amigável
+      if (err.message && err.message.includes('VITE_ANTHROPIC_API_KEY')) {
+        setAiAnalysisMessage('⚠️ A chave VITE_ANTHROPIC_API_KEY não foi configurada no seu ambiente. Insira os dados manualmente.');
+      } else {
+        setAiAnalysisMessage('⚠️ Não foi possível analisar a imagem automaticamente. Insira os dados manualmente.');
+      }
     } finally {
       setIsAnalyzing(false);
-      // Auto advance to step 3 once the AI scanner completes (on success or fail to allow manual correction)
+      // Avança para a etapa 3 de formulário para revisão do usuário
       setStep(3);
     }
   };
