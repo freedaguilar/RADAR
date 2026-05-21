@@ -62,7 +62,7 @@ async function startServer() {
       `;
 
       const response = await client.models.generateContent({
-        model: "gemini-3.1-flash-lite",
+        model: "gemini-3.5-flash",
         contents: [
           {
             inlineData: {
