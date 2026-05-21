@@ -1148,7 +1148,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 className={`flex-1 text-center py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${registrationMode === 'single' ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-700'}`}
               >
                 <Sliders className="w-3.5 h-3.5" />
-                Reg. Único (Padrão)
+                Registrar 1 item
               </button>
               <button 
                 type="button" 
@@ -1160,7 +1160,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 className={`flex-1 text-center py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${registrationMode === 'batch' ? 'bg-white text-[#D40511] shadow-sm font-black border border-red-100' : 'text-slate-400 hover:text-slate-700'}`}
               >
                 <Layers className="w-3.5 h-3.5" />
-                Reg. em Lote ({batchItems.length}/10)
+                Registrar vários itens ({batchItems.length}/10)
               </button>
             </div>
           )}
@@ -1649,7 +1649,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                     >
                                       <div className="flex items-center gap-3 min-w-0 pr-2 flex-1">
                                         {/* Auto-suggest product image preview */}
-                                        <div className="w-9 h-9 rounded-md bg-white overflow-hidden flex items-center justify-center border border-slate-150 shrink-0">
+                                        <div className="w-9 h-9 rounded-md bg-white overflow-hidden flex items-center justify-center shrink-0">
                                           {p.imageUrl ? (
                                             <img
                                               src={p.imageUrl}
@@ -1804,7 +1804,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                           {item.aiAnalysisMessage && item.status === 'success' && (
                             <div className="p-3 bg-violet-50/25 rounded-xl border border-violet-100 text-[10px] text-violet-700 flex items-start gap-1.5 leading-relaxed font-sans">
                               <Sparkles className="w-3.5 h-3.5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
-                              <span><strong>Retorno Cognitivo da IA:</strong> {item.aiAnalysisMessage}</span>
+                              <span><strong>Resposta da IA:</strong> {item.aiAnalysisMessage}</span>
                             </div>
                           )}
 
