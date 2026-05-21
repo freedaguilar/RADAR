@@ -182,6 +182,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     });
   }, [products, productSearch]);
 
+  // Helper to find latest price
+  const getLatestPrice = (productId: string, chainId: string) => {
+    const chainRecords = [...records].filter(r => r.productId === productId && r.chainId === chainId);
+    if (chainRecords.length === 0) return null;
+    chainRecords.sort((a, b) => b.date.localeCompare(a.date));
+    return chainRecords[0].price;
+  };
+
   const handleProductSelect = (product: Product) => {
     setSelectedProductId(product.id);
     setProductSearch(product.name);
@@ -268,6 +276,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     reader.readAsDataURL(file);
   };
 
+  // Setup camera stream when camera is active
+  useEffect(() => {
+    if (useCamera && cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play().catch(err => console.error('Video play error:', err));
+    }
+  }, [useCamera, cameraStream]);
+
   // Turn on camera for real-time video capture
   const startCamera = async () => {
     setErrorMsg('');
@@ -278,10 +294,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         audio: false,
       });
       setCameraStream(stream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-      }
     } catch (err) {
       console.error('Camera access error:', err);
       // Give fallback mock image if webcam is physically restricted
@@ -300,6 +312,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   // Capture frame from active video feed stream
   const captureFrame = () => {
     if (!videoRef.current || !canvasRef.current) return;
+    
     const cw = videoRef.current.videoWidth || 640;
     const ch = videoRef.current.videoHeight || 480;
 
@@ -665,6 +678,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             <div className="space-y-5" id="live-camera-feed-box-camera">
               <div className="relative rounded-2xl overflow-hidden bg-black aspect-video max-h-72 shadow-inner border border-slate-800">
                 <video ref={videoRef} className="w-full h-full object-cover" playsInline muted></video>
+                <canvas ref={canvasRef} className="hidden"></canvas>
                 {/* Overlay bounding box effect */}
                 <div className="absolute inset-x-6 inset-y-8 border border-dashed border-violet-400/50 rounded-lg pointer-events-none flex items-center justify-center">
                   <div className="w-full h-0.5 bg-violet-400 animate-pulse absolute"></div>
@@ -821,36 +835,48 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
               {/* Visual preview of selected product with photo */}
               {selectedProduct && (
-                <div className="mt-2.5 p-3.5 bg-slate-55 border border-slate-100/80 rounded-xl flex items-center gap-3 animate-fade-in" id="selected-product-preview-card">
-                  <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200 shrink-0">
-                    {selectedProduct.imageUrl ? (
-                      <img
-                        src={selectedProduct.imageUrl}
-                        alt={selectedProduct.name}
-                        className="w-full h-full object-contain"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Foto</span>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <h4 className="text-xs font-bold text-slate-800 truncate">{selectedProduct.name}</h4>
-                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                      <span className="text-[10px] text-slate-400 font-medium font-sans">
-                        {selectedProduct.category} {selectedProduct.subcategory ? `• ${selectedProduct.subcategory}` : ''} {selectedProduct.weight ? `• ${selectedProduct.weight}` : ''}
-                      </span>
-                      <span className={`text-[9px] font-extrabold border rounded px-1.5 py-0.2 whitespace-nowrap uppercase font-mono tracking-wide ${
-                        (selectedProduct.brand?.toLowerCase().includes('mavalerio') || selectedProduct.brand?.toLowerCase().includes('mavalério'))
-                          ? 'bg-violet-50 text-violet-800 border-violet-100'
-                          : selectedProduct.isCompetitor
-                            ? 'bg-rose-50 text-rose-700 border-rose-100'
-                            : 'bg-emerald-50 text-emerald-800 border-emerald-150'
-                      }`}>
-                        {selectedProduct.brand || 'Dr. Oetker'}
-                      </span>
+                <div className="mt-2.5 p-3.5 bg-slate-50 border border-slate-100/80 rounded-xl flex items-center justify-between gap-3 animate-fade-in" id="selected-product-preview-card">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200 shrink-0">
+                      {selectedProduct.imageUrl ? (
+                        <img
+                          src={selectedProduct.imageUrl}
+                          alt={selectedProduct.name}
+                          className="w-full h-full object-contain"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Foto</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-slate-800 truncate">{selectedProduct.name}</h4>
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span className="text-[10px] text-slate-400 font-medium font-sans">
+                          {selectedProduct.category} {selectedProduct.subcategory ? `• ${selectedProduct.subcategory}` : ''} {selectedProduct.weight ? `• ${selectedProduct.weight}` : ''}
+                        </span>
+                        <span className={`text-[9px] font-extrabold border rounded px-1.5 py-0.2 whitespace-nowrap uppercase font-mono tracking-wide ${
+                          (selectedProduct.brand?.toLowerCase().includes('mavalerio') || selectedProduct.brand?.toLowerCase().includes('mavalério'))
+                            ? 'bg-violet-50 text-violet-800 border-violet-100'
+                            : selectedProduct.isCompetitor
+                              ? 'bg-rose-50 text-rose-700 border-rose-100'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                        }`}>
+                          {selectedProduct.brand || 'Dr. Oetker'}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  {selectedChainId && (
+                    <div className="shrink-0 text-right">
+                       <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Último</span>
+                       <span className="font-mono text-xs text-slate-800 font-bold">
+                        {getLatestPrice(selectedProduct.id, selectedChainId) 
+                          ? `R$ ${getLatestPrice(selectedProduct.id, selectedChainId)?.toFixed(2).replace('.', ',')}` 
+                          : '---'}
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -885,20 +911,29 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        {prod.isCompetitor ? (
-                          <span className="text-[8px] font-extrabold bg-rose-50 text-rose-700 border border-rose-100 rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide">
-                            {prod.brand}
-                          </span>
-                        ) : (
-                          <span className={`text-[8px] font-extrabold border rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide ${
-                            (prod.brand?.toLowerCase().includes('mavalerio') || prod.brand?.toLowerCase().includes('mavalério'))
-                              ? 'bg-violet-50 text-violet-800 border-violet-100'
-                              : 'bg-emerald-50 text-emerald-800 border-emerald-150'
-                          }`}>
-                            {prod.brand || 'Dr. Oetker'}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        {selectedChainId && (
+                          <span className="font-mono text-[10px] text-slate-500 font-bold">
+                            {getLatestPrice(prod.id, selectedChainId) 
+                              ? `R$ ${getLatestPrice(prod.id, selectedChainId)?.toFixed(2).replace('.', ',')}` 
+                              : '---'}
                           </span>
                         )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {prod.isCompetitor ? (
+                            <span className="text-[8px] font-extrabold bg-rose-50 text-rose-700 border border-rose-100 rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide">
+                              {prod.brand}
+                            </span>
+                          ) : (
+                            <span className={`text-[8px] font-extrabold border rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide ${
+                              (prod.brand?.toLowerCase().includes('mavalerio') || prod.brand?.toLowerCase().includes('mavalério'))
+                                ? 'bg-violet-50 text-violet-800 border-violet-100'
+                                : 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                            }`}>
+                              {prod.brand || 'Dr. Oetker'}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
