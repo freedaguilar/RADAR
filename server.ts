@@ -50,23 +50,14 @@ async function startServer() {
 
       // Format products catalog list for the model prompt
       const catalogText = Array.isArray(products) 
-        ? products.map(p => `ID: "${p.id}", Name: "${p.name}", Brand: "${p.brand || ''}", Vol/Weight: "${p.weight || ''}", Category: "${p.category || ''}"`).join("\n")
+        ? products.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join("\n")
         : "";
 
       const prompt = `
-        Você é um auditor de gôndola inteligente de supermercado brasileiro.
-        Sua tarefa é analisar a foto de uma etiqueta de preço ou produto na prateleira fornecida.
-        Compare as informações visuais da foto com o catálogo de produtos fornecido abaixo e identifique o ID do produto correspondente e o preço de gôndola associado.
-
-        Catálogo de Produtos disponível para mapeamento:
+        Você é um auditor de gôndola. Analise a foto da etiqueta e identifique ID e preço.
+        Responda APENAS em JSON. 
+        Catálogo: ID|Nome|Marca
         ${catalogText}
-
-        Siga as instruções estritas:
-        1. Localize o preço numérico na imagem da etiqueta ou cartaz. Se a etiqueta contiver múltiplos preços (como atacado, clube, cliente, etc.), IGNORE-OS E IDENTIFIQUE EXCLUSIVAMENTE O PREÇO DE VAREJO (o preço base de venda para o consumidor final em quantidade unitária).
-        2. Identifique quais palavras na foto correspondem ao nome do produto, marca ou peso no catálogo. Procure correspondências de marca (ex: Dr. Oetker, Mavalério, Royal, Dona Benta, Fleischmann) e peso ou volume relevantes.
-        3. Selecione o "matchedProductId" correspondente da lista que representa o ID do melhor produto mapeado. Se não houver correspondência ideal, deixe vazio ou selecione o ID do produto mais provável.
-        4. Retorne o preço como um número decimal (ex: 4.89 ou 22.90). Se o preço contiver centavos, mapeie de forma correspondente.
-        5. Forneça um status curto da detecção em "detectedText".
       `;
 
       const response = await client.models.generateContent({
