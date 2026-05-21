@@ -13,6 +13,20 @@ async function startServer() {
   // Increase payload limit for base64 image uploads
   app.use(express.json({ limit: "15mb" }));
 
+  // CORS middleware to allow external sites (like Vercel) to call the API
+  app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+    res.setHeader("Access-Control-Allow-Headers", "X-Requested-With,content-type,Authorization");
+    res.setHeader("Access-Control-Allow-Credentials", "true");
+    
+    // Handle preflight OPTIONS request
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // API Client Setup
   let geminiClient: GoogleGenAI | null = null;
   function getGeminiClient() {

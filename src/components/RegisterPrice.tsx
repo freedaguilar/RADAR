@@ -94,7 +94,16 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     setIsAnalyzing(true);
     setAiAnalysisMessage('Iniciando análise inteligente da imagem...');
     try {
-      const res = await fetch('/api/analyze-price', {
+      // Se estiver rodando fora do domínio do Cloud Run ou localhost (por exemplo, na Vercel),
+      // fazemos a requisição para o backend do container hospedado no Cloud Run.
+      const isExternal = !window.location.hostname.includes('run.app') && 
+                         !window.location.hostname.includes('localhost') && 
+                         !window.location.hostname.includes('127.0.0.1');
+      const apiBase = isExternal 
+        ? 'https://ais-pre-lr7n3hpqgqdedjenfavfrb-349633944700.us-east1.run.app'
+        : '';
+
+      const res = await fetch(`${apiBase}/api/analyze-price`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
