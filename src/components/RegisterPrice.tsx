@@ -701,6 +701,24 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     return chainRecords[0].price;
   };
 
+  // Helper to find latest price record
+  const getLatestPriceRecord = (productId: string, chainId: string) => {
+    const chainRecords = [...records].filter(r => r.productId === productId && r.chainId === chainId);
+    if (chainRecords.length === 0) return null;
+    chainRecords.sort((a, b) => b.date.localeCompare(a.date));
+    return chainRecords[0];
+  };
+
+  // Helper date format BR YYYY-MM-DD -> DD/MM/YYYY
+  const formatDateBR = (dateStr: string) => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return dateStr;
+  };
+
   const handleProductSelect = (product: Product) => {
     setSelectedProductId(product.id);
     setProductSearch(product.name);
@@ -1276,15 +1294,21 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 <div className="space-y-6">
                   {/* Triggers de entrada do Lote */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <button
-                      type="button"
-                      onClick={startCamera}
-                      className="p-6 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 flex flex-col items-center justify-center gap-2.5 transition duration-150 cursor-pointer shadow-2xs hover:shadow-xs"
+                    <label
+                      className="p-6 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 flex flex-col items-center justify-center gap-2.5 transition duration-150 cursor-pointer shadow-2xs hover:shadow-xs text-center"
                     >
                       <Camera className="w-6 h-6 text-[#D40511]" />
-                      <span className="text-xs font-bold">Captura Sequencial (Câmera)</span>
-                      <span className="text-[10px] text-slate-400 font-medium font-sans">Abra a lente e tire fotos uma atrás da outra</span>
-                    </button>
+                      <span className="text-xs font-bold">Tirar Foto (Adicionar)</span>
+                      <span className="text-[10px] text-slate-400 font-medium font-sans">Abra a câmera e tire fotos consecutivas para o lote</span>
+                      <input
+                        id="register-batch-camera-capture"
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        onChange={handleBatchFilesChange}
+                        className="hidden"
+                      />
+                    </label>
 
                     <label
                       className="p-6 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 flex flex-col items-center justify-center gap-2.5 transition duration-150 cursor-pointer shadow-2xs hover:shadow-xs"
@@ -1619,8 +1643,19 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                     onClick={() => handleBatchItemProductSelect(item.id, p)}
                                     className="px-3.5 py-2.5 hover:bg-slate-50 text-xs text-slate-800 cursor-pointer flex justify-between items-center border-b border-slate-105 pointer-events-auto"
                                   >
-                                    <div className="min-w-0 pr-3">
-                                      <p className="font-extrabold text-slate-850 truncate">{p.name}</p>
+                                    <div className="min-w-0 pr-3 flex-1">
+                                      <p className="font-extrabold text-slate-850 truncate">
+                                        <span>{p.name}</span>
+                                        {(() => {
+                                          const bChainId = item.selectedChainId || selectedChainId;
+                                          const latest = bChainId ? getLatestPrice(p.id, bChainId) : null;
+                                          return latest ? (
+                                            <span className="text-[10px] text-slate-400 font-normal ml-2 font-sans select-none">
+                                              Último: R$ {latest.toFixed(2).replace('.', ',')}
+                                            </span>
+                                          ) : null;
+                                        })()}
+                                      </p>
                                       <span className="text-[10px] text-slate-400 font-sans mt-0.5 block">{p.category} • {p.weight}</span>
                                     </div>
                                     <span className="text-[9px] font-mono font-extrabold uppercase bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 shrink-0">{p.brand}</span>
@@ -1675,6 +1710,22 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                   required
                                 />
                               </div>
+                              {(() => {
+                                if (!item.selectedProductId) return null;
+                                const chainId = item.selectedChainId || selectedChainId;
+                                const lastRecord = getLatestPriceRecord(item.selectedProductId, chainId);
+                                return (
+                                  <p className="text-[10px] text-slate-500 mt-1 font-sans leading-relaxed">
+                                    {lastRecord ? (
+                                      <span>
+                                        Último preço registrado: R$ {lastRecord.price.toFixed(2).replace('.', ',')} ({formatDateBR(lastRecord.date)})
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-400 italic">Sem registro anterior</span>
+                                    )}
+                                  </p>
+                                );
+                              })()}
                             </div>
 
                             <div>
@@ -1893,8 +1944,18 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                 <span className="text-[9px] text-slate-300 font-bold uppercase">SF</span>
                               )}
                             </div>
-                            <div className="flex flex-col min-w-0">
-                              <span className="font-bold text-slate-850 truncate">{prod.name}</span>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="font-bold text-slate-850 truncate">
+                                <span>{prod.name}</span>
+                                {(() => {
+                                  const latest = selectedChainId ? getLatestPrice(prod.id, selectedChainId) : null;
+                                  return latest ? (
+                                    <span className="text-[10px] text-slate-450 font-normal ml-2 font-sans select-none">
+                                      Último: R$ {latest.toFixed(2).replace('.', ',')}
+                                    </span>
+                                  ) : null;
+                                })()}
+                              </span>
                               <span className="text-[10px] text-slate-400 mt-0.5 font-sans">
                                 {prod.category} {prod.subcategory ? `• ${prod.subcategory}` : ''} {prod.weight ? `• ${prod.weight}` : ''}
                               </span>
