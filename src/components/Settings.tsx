@@ -625,7 +625,7 @@ export function Settings({
           Painel de Gerenciamento do Gestor
         </span>
         <h1 className="text-3xl font-black text-[#1A1A1A] font-sans">
-          Configurações do RADAR
+          Configurações do PriceHub
         </h1>
         <p className="text-sm text-gray-500 mt-1">
           Gerencie o catálogo de produtos ativos, credencie novas

@@ -246,27 +246,20 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
   }, [records, products, chains]);
 
   return (
-    <div className="space-y-12" id="dashboard-view">
+    <div className="space-y-8" id="dashboard-view">
       {/* Welcome Banner */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 pb-8 border-b border-slate-100" id="dashboard-header">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 pb-4 border-b border-slate-100" id="dashboard-header">
         <div>
           <span className="text-[10px] font-extrabold tracking-widest text-[#D40511] uppercase font-mono block mb-2">
             Painel Executivo de Inteligência
           </span>
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 font-sans">
-            RADAR<span className="text-[#D40511]">.</span> Dashboard Commercial
+            PriceHub Dashboard
           </h1>
           <p className="text-sm text-slate-500 mt-1.5 font-medium leading-relaxed">
-            Status operacional de auditorias de preços, desvios e monitoramento comercial em tempo real.
+            Acompanhe preços, concorrência e oportunidades de mercado em um só lugar.
           </p>
         </div>
-        <button
-          id="quick-register-price-shortcut"
-          onClick={() => onNavigate('registrar')}
-          className="self-start md:self-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-6 py-3 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm hover:shadow-md hover:-translate-y-0.5"
-        >
-          <span>+ Registrar Preço</span>
-        </button>
       </div>
 
       {/* Primary KPI Metrics Grid - 5 Columns with Executive breathing space */}

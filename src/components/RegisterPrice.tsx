@@ -290,7 +290,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       
       // Seed a lovely preset retail photo to satisfy preview
       setTimeout(() => {
-        const fallbackUrl = `data:image/svg+xml;utf8,<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23dfdfdf"/><text x="200" y="140" font-family="sans-serif" font-weight="bold" font-size="14" fill="%23D40511" text-anchor="middle">FOTO DE GÔNDOLA AUDITADA</text><text x="200" y="165" font-family="sans-serif" font-size="10" fill="%23555555" text-anchor="middle">Camera simulator fallback - RADAR Mobile v1.4</text></svg>`;
+        const fallbackUrl = `data:image/svg+xml;utf8,<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23dfdfdf"/><text x="200" y="140" font-family="sans-serif" font-weight="bold" font-size="14" fill="%23D40511" text-anchor="middle">FOTO DE GÔNDOLA AUDITADA</text><text x="200" y="165" font-family="sans-serif" font-size="10" fill="%23555555" text-anchor="middle">Camera simulator fallback - PriceHub Mobile v1.4</text></svg>`;
         compressImage(fallbackUrl, 250000); // simulate 250KB photo
         setUseCamera(false);
       }, 1000);
@@ -507,7 +507,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           <div>
             <p className="text-sm font-bold font-sans">Preço Auditado com Sucesso!</p>
             <p className="text-xs text-emerald-700/90 mt-1 font-medium leading-relaxed">
-              O registro foi consolidado, verificado por scanner IA e transmitido em tempo real para o dashboard executivo do RADAR.
+              O registro foi consolidado, verificado por scanner IA e transmitido em tempo real para o dashboard executivo do PriceHub.
             </p>
           </div>
         </div>
@@ -985,7 +985,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             <div className="space-y-2">
               <h3 className="text-lg font-extrabold text-slate-900">Preço Registrado com Sucesso!</h3>
               <p className="text-xs text-slate-500 leading-relaxed">
-                Os dados foram computados e publicados no painel do RADAR. Deseja realizar outra auditoria de preço agora?
+                Os dados foram computados e publicados no painel do PriceHub. Deseja realizar outra auditoria de preço agora?
               </p>
             </div>
             <div className="flex flex-col sm:flex-row gap-3">

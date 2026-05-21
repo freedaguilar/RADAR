@@ -420,15 +420,15 @@ export default function App() {
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-gray-100 shrink-0">
                 <img
-                  src="https://i.imgur.com/yFECwYD.png"
-                  alt="Radar Logo"
+                  src="https://i.imgur.com/TGgcoZg.png"
+                  alt="PriceHub Logo"
                   className="w-full h-full object-contain"
                   referrerPolicy="no-referrer"
                 />
               </div>
               <div>
                 <h1 className="text-md font-bold tracking-tight text-[#1A1A1A] font-sans">
-                  RADAR<span className="text-[#D40511] font-black">.</span>
+                  PriceHub
                 </h1>
                 <span className="text-[9px] text-gray-400 font-mono tracking-wider block uppercase">
                   MONITORIA DE PREÇOS
@@ -523,18 +523,18 @@ export default function App() {
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded bg-white overflow-hidden flex items-center justify-center border border-gray-100 shrink-0">
             <img
-              src="https://i.imgur.com/yFECwYD.png"
-              alt="Radar Logo"
+              src="https://i.imgur.com/TGgcoZg.png"
+              alt="PriceHub Logo"
               className="w-full h-full object-contain"
               referrerPolicy="no-referrer"
             />
           </div>
           <div>
             <h1 className="text-sm font-black text-[#1A1A1A] leading-none">
-              RADAR.
+              PriceHub
             </h1>
             <span className="text-[8px] text-gray-400 uppercase font-mono tracking-wider">
-              Oetker inspired
+              Dr.Oetker Brasil
             </span>
           </div>
         </div>

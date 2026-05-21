@@ -58,14 +58,14 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
         <div className="text-center mb-8" id="login-brand-header">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white shadow-sm border border-gray-100 p-2 overflow-hidden mb-3">
             <img
-              src="https://i.imgur.com/yFECwYD.png"
-              alt="Radar Logo"
+              src="https://i.imgur.com/TGgcoZg.png"
+              alt="PriceHub Logo"
               className="w-full h-full object-contain"
               referrerPolicy="no-referrer"
             />
           </div>
           <h1 className="text-3xl font-bold tracking-tight text-[#1A1A1A] font-sans">
-            RADAR<span className="text-[#D40511] font-semibold">.</span>
+            PriceHub
           </h1>
           <p className="text-xs text-gray-500 mt-1 uppercase font-mono tracking-wider">
             Pesquisa & Auditoria de Preços
@@ -141,7 +141,7 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
               disabled={success}
               className="w-full bg-[#D40511] text-white py-3 rounded-lg text-sm font-semibold hover:bg-[#b0040e] transition-colors focus:ring-2 focus:ring-[#D40511]/40 flex items-center justify-center cursor-pointer mt-6"
             >
-              {success ? 'Entrando...' : 'Entrar no RADAR'}
+              {success ? 'Entrando...' : 'Entrar no PriceHub'}
             </button>
           </form>
 
@@ -175,7 +175,7 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
       {/* Footer with version beta and credits */}
       <footer className="py-6 text-center border-t border-[#E0E0E0]" id="login-footer">
         <p className="text-xs text-gray-500 font-sans">
-          RADAR - Sistema de Monitoria de Preços <span className="font-mono text-[10px] bg-red-100 text-[#D40511] px-1.5 py-0.5 rounded ml-1 font-bold">BETA v1.4</span>
+          PriceHub - Sistema de Monitoria de Preços <span className="font-mono text-[10px] bg-red-100 text-[#D40511] px-1.5 py-0.5 rounded ml-1 font-bold">BETA v1.4</span>
         </p>
         <p className="text-[10px] text-gray-400 mt-1 font-sans">
           Inspirado na identidade de prestígio Dr. Oetker. Desenvolvido para auditoria rápida em campo.
