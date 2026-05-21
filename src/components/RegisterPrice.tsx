@@ -94,72 +94,55 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     setIsAnalyzing(true);
     setAiAnalysisMessage('Iniciando análise inteligente da imagem...');
     try {
-      // NOTE: Using a client-side environment variable (VITE_ANTHROPIC_API_KEY) exposes the key to the browser bundle of your frontend.
-      // This approach is utilized as requested by the user to avoid Cloud Run backend and CORS issues with Vercel origins.
-      const apiKey = import.meta.env.VITE_ANTHROPIC_API_KEY;
-      if (!apiKey) {
-        throw new Error('Chave de API VITE_ANTHROPIC_API_KEY da Anthropic não está configurada!');
-      }
-
       // Parsea imagem para obter dados puros em base64 e mimetype correto
       const matchesImg = base64Image.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
       const mimeType = matchesImg ? matchesImg[1] : 'image/jpeg';
       const base64Data = matchesImg ? matchesImg[2] : base64Image;
 
-      // Chama a Claude Haiku v4.5 diretamente a partir do cliente
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
+      // [GITHUB COMENTÁRIO]: Chamada relativa direcionada ao endpoint '/api/analyze-price'.
+      // Esta abordagem dinâmica resolve a conformidade de política de CORS ao delegar a chamada
+      // para processamento no lado do servidor (seja a Serverless Function na Vercel ou o backend
+      // tradicional). Isso elimina chamadas Cross-Origin a partir do frontend no navegador.
+      const response = await fetch('/api/analyze-price', {
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01"
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 1000,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: {
-                    type: "base64",
-                    media_type: mimeType === 'image/png' ? 'image/png' : mimeType === 'image/webp' ? 'image/webp' : mimeType === 'image/gif' ? 'image/gif' : 'image/jpeg',
-                    data: base64Data
-                  }
-                },
-                {
-                  type: "text",
-                  text: `Analise esta imagem de etiqueta de preço de supermercado e retorne APENAS um JSON com os campos: { "produto": "nome do produto", "preco": 0.00, "observacao": "qualquer informação relevante como promoção, validade etc" }. Se não conseguir identificar algum campo, deixe como null.
-                  
-Dispomos do seguinte catálogo de produtos em nosso banco de dados. Se encontrar o produto correspondente ideal, inclua também um atributo opcional "matchedProductId" com o ID correspondente.
-Catálogo local de produtos:
-${products.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join('\n')}`
-                }
-              ]
-            }
-          ]
+          imageBase64: base64Data,
+          mediaType: mimeType === 'image/png' ? 'image/png' : mimeType === 'image/webp' ? 'image/webp' : mimeType === 'image/gif' ? 'image/gif' : 'image/jpeg',
+          products: products.map(p => ({
+            id: p.id,
+            name: p.name,
+            brand: p.brand
+          }))
         })
       });
 
       if (!response.ok) {
-        throw new Error('Falha na resposta da API da Anthropic (Haiku)');
+        throw new Error('Falha na resposta do servidor de análise inteligente de preço.');
       }
 
       const responseData = await response.json();
-      const textContent = responseData.content?.[0]?.text || '';
-      
       let data: any = null;
-      try {
-        const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          data = JSON.parse(jsonMatch[0]);
-        } else {
-          data = JSON.parse(textContent);
+
+      // [GITHUB COMENTÁRIO]: Suporta dinamicamente as duas formas de retorno JSON:
+      // 1. Resposta em formato de array de conteúdo direto do Claude (Anthropic Messages API)
+      // 2. Resposta formatada direta retornada pelo backend tradicional (Gemini)
+      if (responseData.content && Array.isArray(responseData.content)) {
+        const textContent = responseData.content[0]?.text || '';
+        try {
+          const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            data = JSON.parse(jsonMatch[0]);
+          } else {
+            data = JSON.parse(textContent);
+          }
+        } catch (e) {
+          console.error('Falha ao desfragmentar JSON retornado pela Claude API:', e);
         }
-      } catch (e) {
-        console.error('Falha ao parsear o JSON retornado pelo Claude:', e);
+      } else {
+        data = responseData;
       }
       
       if (data) {
