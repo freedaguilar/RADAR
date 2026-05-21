@@ -756,7 +756,30 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             )}
           </div>
 
+          {/* AI Banner feedback if image exists */}
+          {imagePreview && (
+            <div className="p-4 bg-violet-50/45 border border-violet-100/50 rounded-xl space-y-4" id="ai-feedback-banner">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50/20 p-1 rounded-lg">
+                <div className="flex items-start gap-2.5 min-w-0">
+                  <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
+                  <div className="min-w-0">
+                    <h4 className="text-xs font-bold text-violet-900">Leitura Inteligente Concluída</h4>
+                    <p className="text-xs text-violet-700/90 mt-0.5 leading-relaxed">{aiAnalysisMessage || 'Valores preenchidos sob os rótulos de gôndola.'}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => analyzeImage(imagePreview)}
+                  className="sm:self-center shrink-0 flex items-center justify-center gap-1 text-[9px] bg-violet-600 hover:bg-violet-700 text-white font-extrabold py-1.5 px-3 rounded-lg font-mono transition cursor-pointer"
+                >
+                  <RefreshCw className="w-2.5 h-2.5 animate-spin-hover" />
+                  Reanalisar
+                </button>
+              </div>
 
+            
+            </div>
+          )}
 
           {/* Inputs */}
           <div className="space-y-5" id="form-fields-grid">
