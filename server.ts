@@ -11,24 +11,20 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  // Increase payload limit for base64 image uploads
-  app.use(express.json({ limit: "15mb" }));
-
-  // CORS middleware to allow external sites (like Vercel) to call the API
-  // CORS configurado para permitir requisições seguras de qualquer origem (inclusive Vercel)
+  // [CORS] Configuração do Middleware de CORS colocado no topo absoluto do servidor
+  // Isso garante que requisições pré-vôo (OPTIONS preflight) vindas da Vercel sejam interceptadas e respondidas com sucesso imediatamente
   app.use(
     cors({
-      origin: (origin, callback) => {
-        // Permitir qualquer origem dinamicamente (necessário para credentials: true)
-        callback(null, true);
-      },
+      origin: true, // Espelha dinamicamente a origem da requisição para permitir qualquer domínio da Vercel (com suporte a credentials)
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-      preflightContinue: false,
-      optionsSuccessStatus: 204,
+      optionsSuccessStatus: 200, // Retorna status 200 para requisições OPTIONS pré-vôo (altamente compatível com navegadores)
     })
   );
+
+  // Aumentar o limite de payload para uploads de imagem em base64
+  app.use(express.json({ limit: "15mb" }));
 
   // API Client Setup
   let geminiClient: GoogleGenAI | null = null;
