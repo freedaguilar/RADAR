@@ -250,9 +250,6 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
       {/* Welcome Banner */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6 pb-4 border-b border-slate-100" id="dashboard-header">
         <div>
-          <span className="text-[10px] font-extrabold tracking-widest text-[#D40511] uppercase font-mono block mb-2">
-            Painel Executivo de Inteligência
-          </span>
           <h1 className="text-3xl font-extrabold tracking-tight text-slate-900 font-sans">
             <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span> Dashboard
           </h1>
