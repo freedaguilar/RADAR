@@ -594,6 +594,7 @@ export default function App() {
           <RegisterPrice
             products={state.products}
             chains={state.chains}
+            records={state.records}
             onSaveRecord={handleSavePriceRecord}
             currentUser={state.currentUser}
             onNavigate={handleNavigate}

@@ -53,14 +53,18 @@ function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md"
 interface RegisterPriceProps {
   products: Product[];
   chains: Chain[];
+  records?: PriceRecord[];
   onSaveRecord: (newRecord: PriceRecord) => void;
   currentUser: User | null;
   onNavigate?: (page: string, params?: any) => void;
 }
 
-export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onNavigate }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, records = [], onSaveRecord, currentUser, onNavigate }: RegisterPriceProps) {
   // Navigation Steps
   const [step, setStep] = useState<1 | 2 | 3>(1);
+
+  // Duplication warning confirm
+  const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
 
   // Inputs
   const [selectedProductId, setSelectedProductId] = useState('');
@@ -183,6 +187,10 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
     setProductSearch(product.name);
     setShowSearchDropdown(false);
   };
+
+  const selectedProduct = useMemo(() => {
+    return products.find((p) => p.id === selectedProductId);
+  }, [products, selectedProductId]);
 
   // Image compressor using Canvas to satisfy "Comprimir imagens antes do upload"
   const compressImage = (base64Str: string, originalBytes: number) => {
@@ -330,8 +338,28 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
   }, [cameraStream]);
 
   // Form submission
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    executeSubmit(false);
+  };
+
+  const handleRefuseDuplicate = () => {
+    setShowDuplicateConfirm(false);
+    setSelectedProductId('');
+    setSelectedChainId('');
+    setPrice('');
+    setNotes('');
+    setProductSearch('');
+    setImagePreview(null);
+    setOriginalSizeKB(0);
+    setCompressedSizeKB(0);
+    setCompressionRatio(0);
+    setAiAnalysisMessage('');
+    setIsAnalyzing(false);
+    setStep(1);
+  };
+
+  const executeSubmit = async (bypassDuplicate = false) => {
     setErrorMsg('');
 
     if (!selectedProductId) {
@@ -350,6 +378,21 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
       return;
     }
 
+    // Check duplicate: same product, same chain, same day (YYYY-MM-DD)
+    const todayStr = new Date().toISOString().split('T')[0];
+    const isDuplicate = records.some(
+      (r) =>
+        r.productId === selectedProductId &&
+        r.chainId === selectedChainId &&
+        r.date === todayStr
+    );
+
+    if (isDuplicate && !bypassDuplicate) {
+      setShowDuplicateConfirm(true);
+      return;
+    }
+
+    setShowDuplicateConfirm(false);
     setIsUploading(true);
     try {
       let finalImageUrl = '';
@@ -367,7 +410,7 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
         productId: selectedProductId,
         chainId: selectedChainId,
         price: priceNum,
-        date: new Date().toISOString().split('T')[0],
+        date: todayStr,
         imageUrl: finalImageUrl,
         notes: finalNotes || undefined,
         userName: currentUser?.name || 'Vendedor Autônomo',
@@ -408,18 +451,6 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
 
   return (
     <div className="max-w-2xl mx-auto space-y-10" id="register-price-view">
-      {/* View Title */}
-      <div className="border-b border-slate-100 pb-6 text-center sm:text-left" id="register-price-header">
-        <span className="text-[10px] font-extrabold tracking-widest text-slate-400 uppercase font-mono block mb-2">
-          Painel do Colaborador em Campo
-        </span>
-        <h1 className="text-3xl font-extrabold text-slate-900 font-sans tracking-tight">
-          Registrar Preço Rápido
-        </h1>
-        <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed max-w-lg">
-          Fluxo sequencial inteligente. Identifique a rede, escolha a foto para análise por IA e confirme os valores do PDV instantaneamente.
-        </p>
-      </div>
 
       {/* Visual Stepper Progress Indicator */}
       <div className="flex items-center justify-between max-w-lg mx-auto px-4 select-none" id="stepper-progress-indicator">
@@ -788,6 +819,41 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
                 )}
               </div>
 
+              {/* Visual preview of selected product with photo */}
+              {selectedProduct && (
+                <div className="mt-2.5 p-3.5 bg-slate-55 border border-slate-100/80 rounded-xl flex items-center gap-3 animate-fade-in" id="selected-product-preview-card">
+                  <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200 shrink-0">
+                    {selectedProduct.imageUrl ? (
+                      <img
+                        src={selectedProduct.imageUrl}
+                        alt={selectedProduct.name}
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Foto</span>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <h4 className="text-xs font-bold text-slate-800 truncate">{selectedProduct.name}</h4>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="text-[10px] text-slate-400 font-medium font-sans">
+                        {selectedProduct.category} {selectedProduct.subcategory ? `• ${selectedProduct.subcategory}` : ''} {selectedProduct.weight ? `• ${selectedProduct.weight}` : ''}
+                      </span>
+                      <span className={`text-[9px] font-extrabold border rounded px-1.5 py-0.2 whitespace-nowrap uppercase font-mono tracking-wide ${
+                        (selectedProduct.brand?.toLowerCase().includes('mavalerio') || selectedProduct.brand?.toLowerCase().includes('mavalério'))
+                          ? 'bg-violet-50 text-violet-800 border-violet-100'
+                          : selectedProduct.isCompetitor
+                            ? 'bg-rose-50 text-rose-700 border-rose-100'
+                            : 'bg-emerald-50 text-emerald-800 border-emerald-150'
+                      }`}>
+                        {selectedProduct.brand || 'Dr. Oetker'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Combobox autocomplete selections list */}
               {showSearchDropdown && (
                 <div className="absolute z-10 w-full left-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto pointer-events-auto" id="autocomplete-list" onClick={(e) => e.stopPropagation()}>
@@ -798,11 +864,26 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
                       onClick={() => handleProductSelect(prod)}
                       className="px-4 py-3 hover:bg-slate-50 text-xs text-slate-800 cursor-pointer flex items-center justify-between pointer-events-auto border-b border-slate-50/50 last:border-0"
                     >
-                      <div className="flex flex-col min-w-0 pr-2">
-                        <span className="font-bold text-slate-800 truncate">{prod.name}</span>
-                        <span className="text-[10px] text-slate-400 mt-0.5">
-                          {prod.category} {prod.subcategory ? `• ${prod.subcategory}` : ''} {prod.weight ? `• ${prod.weight}` : ''}
-                        </span>
+                      <div className="flex items-center gap-3 min-w-0 pr-2">
+                        {/* Auto-suggest product image preview */}
+                        <div className="w-9 h-9 rounded-md bg-white overflow-hidden flex items-center justify-center border border-slate-100 shrink-0">
+                          {prod.imageUrl ? (
+                            <img
+                              src={prod.imageUrl}
+                              alt={prod.name}
+                              className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <span className="text-[9px] text-slate-300 font-bold uppercase">SF</span>
+                          )}
+                        </div>
+                        <div className="flex flex-col min-w-0">
+                          <span className="font-bold text-slate-850 truncate">{prod.name}</span>
+                          <span className="text-[10px] text-slate-400 mt-0.5 font-sans">
+                            {prod.category} {prod.subcategory ? `• ${prod.subcategory}` : ''} {prod.weight ? `• ${prod.weight}` : ''}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {prod.isCompetitor ? (
@@ -930,6 +1011,70 @@ export function RegisterPrice({ products, chains, onSaveRecord, currentUser, onN
                 className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition duration-150 cursor-pointer border border-slate-200 text-center"
               >
                 Não, ver detalhes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Duplication confirmation modal overlay */}
+      {showDuplicateConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/65 backdrop-blur-xs font-sans animate-fade-in" id="register-duplicate-modal-overlay">
+          <div className="bg-white rounded-2xl border border-slate-100 p-6 sm:p-8 max-w-sm w-full text-center shadow-2xl space-y-6" id="register-duplicate-modal-content">
+            <div className="mx-auto w-12 h-12 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center">
+              <AlertTriangle className="w-6 h-6 shrink-0 animate-bounce" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-base font-extrabold text-slate-900">Atualização de Preço Já Realizada!</h3>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Já foi registrada uma atualização de preço para o produto <strong className="text-slate-800">{selectedProduct?.name}</strong> na rede <strong className="text-slate-800">{chains.find(c => c.id === selectedChainId)?.name}</strong> no dia de hoje.
+              </p>
+              <p className="text-xs text-slate-400 font-medium">
+                Deseja registrar uma nova modificação de preço para este mesmo produto hoje?
+              </p>
+            </div>
+
+            {/* Selected product and chain visual confirmation */}
+            <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center gap-3 text-left">
+              <div className="w-10 h-10 rounded bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+                {selectedProduct?.imageUrl ? (
+                  <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                ) : (
+                  <span className="text-[10px] text-slate-300 font-bold uppercase font-sans">SF</span>
+                )}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-black text-slate-800 truncate leading-tight">{selectedProduct?.name}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="text-[10px] font-medium text-slate-400 leading-none">{selectedProduct?.weight || ''}</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 rounded bg-slate-100 px-1 py-0.5 leading-none">
+                    {chains.find(c => c.id === selectedChainId) && (
+                      <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                    )}
+                    <span className="truncate max-w-[80px] font-bold font-sans">{chains.find(c => c.id === selectedChainId)?.name}</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                id="btn-duplicate-confirm-accept"
+                onClick={() => {
+                  executeSubmit(true);
+                }}
+                className="flex-1 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition duration-150 cursor-pointer shadow-xs text-center border border-emerald-700/20"
+              >
+                Sim, salvar mesmo assim
+              </button>
+              <button
+                type="button"
+                id="btn-duplicate-confirm-refuse"
+                onClick={handleRefuseDuplicate}
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold transition duration-150 cursor-pointer border border-slate-200 text-center select-none"
+              >
+                Não, recusar e voltar
               </button>
             </div>
           </div>
