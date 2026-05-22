@@ -18,7 +18,7 @@ export default async function handler(req, res) {
       '\n\nREGRAS DE PREÇO:' +
       '\n- Registre SEMPRE o preço unitário avulso (1 unidade, qualquer cliente).' +
       '\n- Ignore preços de atacado, lote, clube ou fidelidade (exigem quantidade mínima ou cadastro).' +
-      '\n- O preço unitário costuma estar em tamanho menor, com termos como "unidade", "varejo" ou "1 UN".' +
+      '\n- O preço unitário costuma ser o de maior valor (na dúvida, priorize o preço maior) e o tamanho da fonte do preço costuma ser menor, com termos como "unidade", "varejo" ou "1 UN".' +
       '\n- Se houver apenas um preço sem condicionais, registre esse.';
 
     if (products && Array.isArray(products) && products.length > 0) {
@@ -35,6 +35,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 200,
+        temperature: 0.0,
         messages: [{
           role: 'user',
           content: [
