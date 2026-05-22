@@ -239,6 +239,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           priceSet = true;
         }
 
+        const obsValue = data.observacao || '';
+        setNotes(obsValue);
+
         let finalMatchedName = '';
         let productMatched = false;
         const matchedIdFromAi = data.matchedProductId;
