@@ -2606,7 +2606,7 @@ export function Products({
                   return (
                     <div className="space-y-4">
                       <div className="text-xs text-gray-500 font-sans">
-                        Mostrando {sortedPeers.length} produtos correspondentes ordenados pelo menor preço médio mais recente:
+                        Mostrando {sortedPeers.length} produtos correspondentes ordenados pelo menor {competitorCompareChainId !== "Todas" ? "preço atual" : "preço médio"} mais recente:
                       </div>
 
                       <div className="space-y-3" id="comparer-peers-list font-sans">
@@ -2630,12 +2630,12 @@ export function Products({
                             >
                               <div className="flex items-start sm:items-center gap-3">
                                 {/* Product Image Thumbnail */}
-                                <div className="w-12 h-12 rounded-lg border border-gray-200 overflow-hidden shrink-0 bg-gray-50 flex items-center justify-center relative">
+                                <div className="w-12 h-12 rounded-lg border border-gray-200 overflow-hidden shrink-0 bg-white flex items-center justify-center relative p-1">
                                   {item.product.imageUrl ? (
                                     <img
                                       src={item.product.imageUrl}
                                       alt={item.product.name}
-                                      className="w-full h-full object-cover"
+                                      className="w-full h-full object-contain"
                                       referrerPolicy="no-referrer"
                                     />
                                   ) : (
@@ -2687,7 +2687,7 @@ export function Products({
                                   
                                   <div className="text-left sm:text-right shrink-0 mt-1 sm:mt-0">
                                     <span className="block text-[9px] uppercase font-bold text-gray-400 font-sans tracking-wider">
-                                      Preço Médio
+                                      {competitorCompareChainId !== "Todas" ? "Preço Atual" : "Preço Médio"}
                                     </span>
                                     <span className={`text-sm font-black font-mono leading-none ${isSelf ? "text-amber-900 animate-none" : "text-gray-900"}`}>
                                       R$ {item.averagePrice.toFixed(2)}
