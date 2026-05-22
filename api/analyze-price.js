@@ -22,9 +22,7 @@ export default async function handler(req, res) {
       '\n- Se houver apenas um preço sem condicionais, registre esse.';
 
     if (products && Array.isArray(products) && products.length > 0) {
-      // Limita a 50 produtos mais relevantes para economizar tokens
-      const limitedProducts = products.slice(0, 50);
-      prompt += '\n\nCatálogo (id|nome|marca):\n' + limitedProducts.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join('\n');
+      prompt += '\n\nCatálogo (id|nome|marca):\n' + products.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join('\n');
     }
 
     const apiResponse = await fetch('https://api.anthropic.com/v1/messages', {
