@@ -2239,7 +2239,7 @@ export function Products({
                         <div className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
                           <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
-                            🟢 Menor Preço
+                          Menor Preço
                           </span>
                         </div>
                         <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
@@ -2260,7 +2260,7 @@ export function Products({
                         <div className="flex items-center gap-1.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
                           <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
-                            🔴 Maior Preço
+                          Maior Preço
                           </span>
                         </div>
                         <div className="text-base font-black font-mono text-red-950 mt-0.5">
