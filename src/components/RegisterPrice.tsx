@@ -3,7 +3,7 @@ import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Slider
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { uploadToSupabaseStorage } from '../lib/supabase';
-import { normalizeString, searchAndRankProducts } from '../lib/textUtils';
+import { normalizeString, searchAndRankProducts, safeParseJSON } from '../lib/textUtils';
 
 // Batch analysis list item structure
 interface BatchItem {
@@ -222,15 +222,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       // 2. Resposta formatada direta retornada pelo backend tradicional
       if (responseData.content && Array.isArray(responseData.content)) {
         const textContent = responseData.content[0]?.text || '';
-        try {
-          const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            data = JSON.parse(jsonMatch[0]);
-          } else {
-            data = JSON.parse(textContent);
-          }
-        } catch (e) {
-          console.error('Falha ao desfragmentar JSON retornado pela API da IA:', e);
+        data = safeParseJSON(textContent);
+        if (!data) {
+          console.error('Falha ao desfragmentar JSON retornado pela API da IA com safeParseJSON. Conteúdo original:', textContent);
         }
       } else {
         data = responseData;
@@ -469,15 +463,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
         if (responseData.content && Array.isArray(responseData.content)) {
           const textContent = responseData.content[0]?.text || '';
-          try {
-            const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-            if (jsonMatch) {
-              data = JSON.parse(jsonMatch[0]);
-            } else {
-              data = JSON.parse(textContent);
-            }
-          } catch (e) {
-            console.error('Falha de parse no item:', e);
+          data = safeParseJSON(textContent);
+          if (!data) {
+            console.error('Falha de parse no item com safeParseJSON. Conteúdo original:', textContent);
           }
         } else {
           data = responseData;

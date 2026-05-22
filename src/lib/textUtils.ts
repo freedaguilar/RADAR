@@ -170,3 +170,108 @@ export function searchAndRankProducts<T extends SearchableProduct>(
     .sort((a, b) => b.score - a.score)
     .map(r => r.product);
 }
+
+/**
+ * Parses JSON safely, especially robust against trailing conversational text or markdown.
+ */
+export function safeParseJSON(text: string): any {
+  if (!text) return null;
+  const trimmed = text.trim();
+  
+  // Try direct parse first
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    // If direct parse fails, try to locate JSON block(s)
+  }
+
+  // Find the first '{'
+  const startIndex = trimmed.indexOf('{');
+  if (startIndex === -1) {
+    return null;
+  }
+
+  // Bracket depth algorithm to extract the first complete balance of `{}`
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  
+  for (let i = startIndex; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    
+    if (char === '\\') {
+      escape = true;
+      continue;
+    }
+    
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+    
+    if (!inString) {
+      if (char === '{') {
+        depth++;
+      } else if (char === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = trimmed.substring(startIndex, i + 1);
+          try {
+            return JSON.parse(candidate);
+          } catch (e) {
+            // Ignore parse failures inside the pairing loop and keep scanning
+          }
+        }
+      }
+    }
+  }
+
+  // Fallback 1: match start and end of all braces and try from largest to smallest
+  const openingBraces: number[] = [];
+  const closingBraces: number[] = [];
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === '{') openingBraces.push(i);
+    if (trimmed[i] === '}') closingBraces.push(i);
+  }
+
+  for (const start of openingBraces) {
+    for (let j = closingBraces.length - 1; j >= 0; j--) {
+      const end = closingBraces[j];
+      if (end > start) {
+        const chunk = trimmed.substring(start, end + 1);
+        try {
+          return JSON.parse(chunk);
+        } catch (err) {
+          // Continue to next pair
+        }
+      }
+    }
+  }
+
+  // Fallback 2: remove markdown ticks and clean
+  const cleanMarkdown = trimmed
+    .replace(/^```json\s*/i, '')
+    .replace(/```\s*$/, '')
+    .trim();
+  
+  try {
+    return JSON.parse(cleanMarkdown);
+  } catch (e) {
+    const matches = cleanMarkdown.match(/\{[\s\S]*?\}/g);
+    if (matches) {
+       for (const m of matches) {
+         try {
+           return JSON.parse(m);
+         } catch (x) {}
+       }
+    }
+  }
+
+  return null;
+}
+
