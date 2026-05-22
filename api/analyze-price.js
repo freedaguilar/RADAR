@@ -15,11 +15,11 @@ export default async function handler(req, res) {
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY não configurada.' });
 
     let prompt = 'Analise esta etiqueta de preço de supermercado. Retorne APENAS JSON: { "produto": "nome", "preco": 0.00, "observacao": "info relevante ou null", "matchedProductId": "uuid ou null" }.' +
-      '\n\nREGRAS DE PREÇO:' +
-      '\n- Registre SEMPRE o preço unitário avulso (1 unidade, qualquer cliente).' +
-      '\n- Ignore preços de atacado, lote, clube ou fidelidade (exigem quantidade mínima ou cadastro).' +
-      '\n- O preço unitário costuma ser o de maior valor (na dúvida, priorize o preço maior) e o tamanho da fonte do preço costuma ser menor, com termos como "unidade", "varejo" ou "1 UN".' +
-      '\n- Se houver apenas um preço sem condicionais, registre esse.';
+      '\n\nREGRAS CRÍTICAS DE PREÇO:' +
+      '\n- SEMPRE priorize o maior preço presente na etiqueta (que normalmente é o preço unitário de varejo para compra avulsa de apenas 1 única unidade).' +
+      '\n- NÃO REGISTRE preços promocionais vinculados a atacado, caixa fechada, lote, clubes de fidelidade, aplicativos de vantagens ou cartões da loja no campo "preco". O campo "preco" deve conter unicamente o preço unitário avulso padronizado para cliente comum sem condicionais.' +
+      '\n- Se o preço unitário avulso comum estiver com fontes menores (termos como "Varejo", "Unidade", "unitário", "1 UN", ou "Preço Normal"), enquanto ofertas condicionais de atacado ("Lote", "Lave X Pague Y", "A partir de X unidades") estão gigantes, você DEVE ignorar o preço gigante do atacado e capturar o preço de varejo, que é o MAIOR preço da etiqueta.' +
+      '\n- Coloque qualquer outra informação relevante — como as condições do preço de atacado ignorado (ex: "Preço atacado R$ X.XX a partir de Y unidades"), regulamento, promoções, datas de validade ou clube de fidelidade — dentro do campo de texto "observacao".';
 
     if (products && Array.isArray(products) && products.length > 0) {
       prompt += '\n\nCatálogo (id|nome|marca):\n' + products.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join('\n');

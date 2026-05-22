@@ -64,8 +64,8 @@ const compressSingleImagePromise = (base64Str: string, originalBytes: number): P
       canvas.height = h;
       ctx.drawImage(img, 0, 0, w, h);
 
-      // Exporta em JPEG com qualidade otimizada (60%)
-      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+      // Exporta em JPEG com qualidade otimizada (78%)
+      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.78);
       
       // Calcula o tamanho comprimido em base64
       const stringLength = compressedBase64.length - 'data:image/jpeg;base64,'.length;
