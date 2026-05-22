@@ -761,6 +761,27 @@ export function Products({
     }
   };
 
+  const getAuditDateColorClass = (dateStr: string | undefined | null) => {
+    if (!dateStr) return "text-gray-400";
+    try {
+      const today = new Date();
+      const auditDate = new Date(dateStr + "T00:00:00");
+      const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      
+      const diffTime = todayZero.getTime() - auditDate.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays > 30) {
+        return "text-rose-600"; 
+      } else if (diffDays >= 15) {
+        return "text-amber-500";
+      }
+      return "text-gray-400 font-medium";
+    } catch {
+      return "text-gray-400";
+    }
+  };
+
   return (
     <div className="space-y-6" id="products-view">
       {activeView === "list" && (
@@ -1251,13 +1272,13 @@ export function Products({
                         </div>
 
                         {/* Audit Details */}
-                        <div className="text-[10px] text-gray-400 mt-1 flex items-center justify-between font-sans">
+                        <div className="text-[10px] mt-1 flex items-center justify-between font-sans">
                           {latestRecord ? (
-                            <span className="truncate block max-w-[140px]" title={formatDateBR(latestRecord.date)}>
+                            <span className={`truncate block max-w-[140px] ${getAuditDateColorClass(latestRecord.date)}`} title={formatDateBR(latestRecord.date)}>
                               Auditado: {formatDateBR(latestRecord.date)}
                             </span>
                           ) : (
-                            <span>Base (sem audit.)</span>
+                            <span className="text-gray-400">Base (sem audit.)</span>
                           )}
                           {latestRecord && selectedChainId === "Todas" && (
                             <span className="text-[9px] text-gray-450 font-semibold uppercase font-sans">
@@ -1529,13 +1550,13 @@ export function Products({
                             return null;
                           })()}
                         </div>
-                        <div className="text-[9.5px] text-gray-400 whitespace-nowrap overflow-hidden text-ellipsis mt-0.5">
+                        <div className="text-[9.5px] whitespace-nowrap overflow-hidden text-ellipsis mt-0.5">
                           {latestRecord ? (
-                            <span title={formatDateBR(latestRecord.date)}>
+                            <span className={getAuditDateColorClass(latestRecord.date)} title={formatDateBR(latestRecord.date)}>
                               Auditado em: {formatDateBR(latestRecord.date)} {selectedChainId === "Todas" && `(${chains.find(c => c.id === latestRecord.chainId)?.name.split(" ")[0]})`}
                             </span>
                           ) : (
-                            <span>Base (sem audit.)</span>
+                            <span className="text-gray-400">Base (sem audit.)</span>
                           )}
                         </div>
                       </div>
@@ -2399,14 +2420,14 @@ export function Products({
 
                             {/* Footer Row: Date & Small Pill Status Info */}
                             <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
-                              <span className="text-[8px] text-gray-400 font-mono flex items-center gap-0.5 min-w-0">
+                              <span className="text-[8px] font-mono flex items-center gap-0.5 min-w-0">
                                 {latestRecord ? (
                                   <>
                                     <Clock className="w-2 h-2 text-gray-300 shrink-0" />
-                                    <span className="truncate">{formatDateBR(latestRecord.date).substring(0, 5)}</span>
+                                    <span className={`truncate ${getAuditDateColorClass(latestRecord.date)}`}>{formatDateBR(latestRecord.date).substring(0, 5)}</span>
                                   </>
                                 ) : (
-                                  "-"
+                                  <span className="text-gray-400">-</span>
                                 )}
                               </span>
                               
