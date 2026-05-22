@@ -68,10 +68,18 @@ async function startServer() {
         : "";
 
       const prompt = `
-        Você é um auditor de gôndola. Analise a foto. Identifique o preço do VAREJO (unitário).
-        Ignore preços de atacado, clube ou promocionais se não for unitário.
-        Retorne APENAS um JSON (ID, preço, confiança).
-        Catálogo: ID|Nome|Marca
+        Você é um auditor de gôndola de supermercado altamente preciso. Sua principal missão é analisar a foto e identificar o PREÇO DE VAREJO UNITÁRIO.
+        
+        ATENÇÃO CRÍTICA (REGRAS DE PRIORIZAÇÃO DE PREÇO DO VAREJO AVULSO):
+        1. Em etiquetas ou cartazes de supermercados (especialmente do tipo "atacarejo" ou "clube de compras"), o preço de atacado ou promocional em lote (por exemplo, "A partir de 3 unidades: R$ X cada") ou preço para membros de clube/aplicativo de vantagens costumam estar impressos em letras e números GIGANTES para atrair atenção.
+        2. O PREÇO DE VAREJO UNITÁRIO padrão (para qualquer cliente comum comprar apenas 1 única unidade avulsa) costuma estar impresso em tamanho bem menor e com menor destaque, mas ele é o preço correto a ser registrado! Geralmente é identificado por palavras em minúsculo ou adjacentes como "Unidade", "Unitário", "Preço Normal", "Varejo", "1 UN", ou simplesmente o preço menor sem condicionais de quantidade.
+        3. Você DEVE ignorar os números gigantes de atacado ou de clube de fidelidade se eles exigirem a compra de mais de 1 unidade ou cadastro especial, e focar ativamente em encontrar o preço unitário avulso comum.
+        4. O valor numérico que você deve retornar no campo "price" é estritamente o PREÇO DE VAREJO UNITÁRIO comum (para compra de apenas 1 única unidade).
+        5. Caso haja apenas um preço impresso na etiqueta sem qualquer condicional de atacado ou clube, retorne esse preço único.
+
+        Retorne APENAS o JSON conforme o esquema do catálogo mapeado abaixo.
+        
+        Catálogo para mapeamento do produto: ID|Nome|Marca
         ${catalogText}
       `;
 

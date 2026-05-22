@@ -38,8 +38,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // Configurando instrução básica para o modelo
-    let promptInstruction = 'Você é um auditor de gôndola de supermercado altamente preciso. Analise esta imagem de etiqueta de preço de supermercado e retorne APENAS um JSON com os campos: { "produto": "nome do produto", "preco": 0.00, "observacao": "qualquer informação relevante como promoção, validade etc" }. CRÍTICO: Identifique e priorize sempre o PREÇO DE VAREJO UNITÁRIO. Se houver múltiplos preços (como atacado, clube de fidelidade, preço por quilo ou promoções do tipo Leve Pague), ignore preços de atacado, clube e caixas fechadas se não forem unitários simples. Se não conseguir identificar algum campo, deixe como null.';
+    // Configurando instrução básica para o modelo com regras fortes de priorização
+    let promptInstruction = 'Você é um auditor de gôndola de supermercado altamente preciso. Analise esta imagem de etiqueta de preço de supermercado e retorne APENAS um JSON com os campos: { "produto": "nome do produto", "preco": 0.00, "observacao": "qualquer informação relevante como promoção, validade etc" }. Se não conseguir identificar algum campo, deixe como null. ' +
+      '\n\nATENÇÃO CRÍTICA (REGRAS DE PRIORIZAÇÃO DE PREÇO DO VAREJO AVULSO):' +
+      '\n1. Em etiquetas ou cartazes de supermercados (especialmente do tipo "atacarejo" ou "clube de compras"), o preço de atacado ou promocional em lote (por exemplo, "A partir de 3 unidades: R$ X cada") ou preço para membros de clube/aplicativo de vantagens costumam estar impressos em letras e números GIGANTES para atrair atenção.' +
+      '\n2. O PREÇO DE VAREJO UNITÁRIO padrão (para qualquer cliente comum comprar apenas 1 única unidade avulsa) costuma estar impresso em tamanho bem menor e com menor destaque, mas ele é o preço correto a ser registrado! Geralmente é identificado por palavras como "unidade", "unitário", "Preço Normal", "Varejo", "1 UN", ou simplemente o preço menor visível sem condicionais de quantidade.' +
+      '\n3. Você DEVE ignorar os números gigantes de atacado ou de clube de fidelidade se eles exigirem a compra de mais de 1 unidade ou cadastro especial, e focar ativamente em encontrar o preço unitário avulso comum para preencher o campo "preco".' +
+      '\n4. Caso haja apenas um preço impresso na etiqueta sem qualquer condicional de atacado ou clube, retorne esse preço único.';
 
     // Opcional: Anexar catálogo para matching guiado pela IA no servidor
     if (products && Array.isArray(products) && products.length > 0) {
