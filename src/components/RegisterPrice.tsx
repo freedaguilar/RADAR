@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { uploadToSupabaseStorage } from '../lib/supabase';
+import { normalizeString } from '../lib/textUtils';
 
 // Batch analysis list item structure
 interface BatchItem {
@@ -150,7 +151,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   // Inputs
   const [selectedProductId, setSelectedProductId] = useState('');
   const [selectedChainId, setSelectedChainId] = useState('');
-  const [price, setPrice] = useState('');
+  const [price, setPrice] = useState('0,00');
   const [notes, setNotes] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
@@ -173,6 +174,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
   // Batch Mode States
   const [registrationMode, setRegistrationMode] = useState<'single' | 'batch'>('single');
+  const [fullscreenProductPhoto, setFullscreenProductPhoto] = useState<{ url: string; name: string } | null>(null);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [batchProductSearches, setBatchProductSearches] = useState<Record<string, string>>({});
   const [batchShowSearchDropdowns, setBatchShowSearchDropdowns] = useState<Record<string, boolean>>({});
@@ -258,11 +260,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
         // Busca de fallback por texto similar se matchedProductId não foi retornado mas string produto existe
         if (!productMatched && data.produto) {
-          const lowerDetected = data.produto.toLowerCase();
-          const matchedProd = products.find(p => 
-            p.name.toLowerCase().includes(lowerDetected) || 
-            lowerDetected.includes(p.name.toLowerCase())
-          );
+          const normalizedDetected = normalizeString(data.produto);
+          const matchedProd = products.find(p => {
+            const normalizedName = normalizeString(p.name);
+            return normalizedName.includes(normalizedDetected) || normalizedDetected.includes(normalizedName);
+          });
           if (matchedProd) {
             setSelectedProductId(matchedProd.id);
             setProductSearch(matchedProd.name);
@@ -327,7 +329,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           status: 'compressing',
           selectedProductId: '',
           productSearch: '',
-          price: '',
+          price: '0,00',
           notes: '',
           selectedChainId: selectedChainId,
           confidence: 'low'
@@ -387,7 +389,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       status: 'compressing',
       selectedProductId: '',
       productSearch: '',
-      price: '',
+      price: '0,00',
       notes: '',
       selectedChainId: selectedChainId,
       confidence: 'low'
@@ -505,11 +507,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           }
 
           if (!productMatched && data.produto) {
-            const lowerDetected = data.produto.toLowerCase();
-            const matchedProd = products.find(p => 
-              p.name.toLowerCase().includes(lowerDetected) || 
-              lowerDetected.includes(p.name.toLowerCase())
-            );
+            const normalizedDetected = normalizeString(data.produto);
+            const matchedProd = products.find(p => {
+              const normalizedName = normalizeString(p.name);
+              return normalizedName.includes(normalizedDetected) || normalizedDetected.includes(normalizedName);
+            });
             if (matchedProd) {
               matchedProdId = matchedProd.id;
               matchedProdName = matchedProd.name;
@@ -577,11 +579,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     // Valida se todos possuem produtos id e preços numéricos corretos
     const invalidItems = batchItems.filter(item => {
       const priceNum = parseFloat(item.price.replace(',', '.'));
-      return !item.selectedProductId || isNaN(priceNum) || priceNum <= 0;
+      return !item.selectedProductId || isNaN(priceNum) || priceNum <= 0 || item.price === '0,00';
     });
 
     if (invalidItems.length > 0) {
-      setErrorMsg('Existem cards com produtos não selecionados ou com preço inválido no lote. Verifique se inseriu o produto e o preço corretamente em todos.');
+      setErrorMsg('Existem cards com produtos não selecionados ou com preço zerado (R$ 0,00) no lote. Certifique-se de preencher todos com preços válidos.');
       return;
     }
 
@@ -639,12 +641,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
   const getBatchFilteredProducts = (search: string) => {
     if (!search) return products.slice(0, 5);
-    const low = search.toLowerCase();
+    const low = normalizeString(search);
     return products.filter(
       p =>
-        p.name.toLowerCase().includes(low) ||
-        p.brand?.toLowerCase().includes(low) ||
-        p.category.toLowerCase().includes(low)
+        normalizeString(p.name).includes(low) ||
+        (p.brand ? normalizeString(p.brand).includes(low) : false) ||
+        normalizeString(p.category).includes(low)
     );
   };
 
@@ -680,14 +682,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const filteredProductsBySearch = useMemo(() => {
     const activeProducts = products.filter(p => p.active);
     if (!productSearch) return activeProducts;
-    const searchTerms = productSearch.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const searchTerms = productSearch.toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
     return activeProducts.filter((p) => {
       return searchTerms.every((term) => {
-        const nameMatch = p.name.toLowerCase().includes(term);
-        const categoryMatch = p.category ? p.category.toLowerCase().includes(term) : false;
-        const subcategoryMatch = p.subcategory ? p.subcategory.toLowerCase().includes(term) : false;
-        const brandMatch = p.brand ? p.brand.toLowerCase().includes(term) : false;
-        const weightMatch = p.weight ? p.weight.toLowerCase().includes(term) : false;
+        const nameMatch = normalizeString(p.name).includes(term);
+        const categoryMatch = p.category ? normalizeString(p.category).includes(term) : false;
+        const subcategoryMatch = p.subcategory ? normalizeString(p.subcategory).includes(term) : false;
+        const brandMatch = p.brand ? normalizeString(p.brand).includes(term) : false;
+        const weightMatch = p.weight ? normalizeString(p.weight).includes(term) : false;
         return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch;
       });
     });
@@ -725,6 +727,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
     return dateStr;
+  };
+
+  // Calculator-style price formatter (digit input from right to left)
+  const formatToCalculatorPrice = (inputValue: string): string => {
+    const digits = inputValue.replace(/\D/g, '');
+    if (!digits) return '0,00';
+    const cents = parseInt(digits, 10);
+    return (cents / 100).toFixed(2).replace('.', ',');
   };
 
   const handleProductSelect = (product: Product) => {
@@ -897,7 +907,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     setShowDuplicateConfirm(false);
     setSelectedProductId('');
     setSelectedChainId('');
-    setPrice('');
+    setPrice('0,00');
     setNotes('');
     setProductSearch('');
     setImagePreview(null);
@@ -923,8 +933,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     }
 
     const priceNum = parseFloat(price.replace(',', '.'));
-    if (isNaN(priceNum) || priceNum <= 0) {
-      setErrorMsg('Por favor, insira um preço de gôndola válido.');
+    if (isNaN(priceNum) || priceNum <= 0 || price === '0,00') {
+      setErrorMsg('O preço de gôndola não pode ser R$ 0,00. Por favor, insira um preço válido.');
       return;
     }
 
@@ -975,7 +985,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       // Show success feedback and clear form
       setSuccessMsg(true);
       setSelectedProductId('');
-      setPrice('');
+      setPrice('0,00');
       setNotes('');
       setProductSearch('');
       setImagePreview(null);
@@ -1231,7 +1241,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                         setIsAnalyzing(false);
                         setSelectedProductId('');
                         setProductSearch('');
-                        setPrice('');
+                        setPrice('0,00');
                         setNotes('');
                         setStep(3);
                       }}
@@ -1714,9 +1724,24 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                             {resolvedProduct && (
                               <div className="mt-2.5 p-3 bg-emerald-50/20 border border-emerald-100 rounded-xl flex items-center justify-between gap-3">
                                 <div className="flex items-center gap-2.5 min-w-0">
-                                  <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
+                                  <div 
+                                    className={`w-9 h-9 rounded-lg bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 select-none ${
+                                      resolvedProduct.imageUrl ? 'cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative' : ''
+                                    }`}
+                                    onClick={() => {
+                                      if (resolvedProduct.imageUrl) {
+                                        setFullscreenProductPhoto({ url: resolvedProduct.imageUrl, name: resolvedProduct.name });
+                                      }
+                                    }}
+                                    title={resolvedProduct.imageUrl ? "Clique para ver foto do produto em tela cheia" : undefined}
+                                  >
                                     {resolvedProduct.imageUrl ? (
-                                      <img src={resolvedProduct.imageUrl} alt={resolvedProduct.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                                      <>
+                                        <img src={resolvedProduct.imageUrl} alt={resolvedProduct.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                                        <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                          <Search className="w-3.5 h-3.5 text-white" />
+                                        </div>
+                                      </>
                                     ) : (
                                       <span className="text-[9px] text-slate-300 font-bold uppercase font-sans">SF</span>
                                     )}
@@ -1743,10 +1768,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                 <span className="absolute left-3.5 top-2.5 text-xs text-slate-400 font-mono font-extrabold">R$</span>
                                 <input
                                   type="text"
+                                  inputMode="numeric"
                                   placeholder="0,00"
-                                  value={item.price}
+                                  value={item.price || '0,00'}
                                   onChange={(e) => {
-                                    const val = e.target.value;
+                                    const val = formatToCalculatorPrice(e.target.value);
                                     setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, price: val } : i));
                                   }}
                                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:bg-white focus:border-[#D40511]"
@@ -1920,16 +1946,31 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                   {selectedProduct && (
                     <div className="mt-2.5 p-3.5 bg-slate-50 border border-slate-100/80 rounded-xl flex items-center justify-between gap-3 animate-fade-in" id="selected-product-preview-card">
                       <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div className="w-12 h-12 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200 shrink-0">
+                        <div 
+                          className={`w-12 h-12 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200 shrink-0 select-none ${
+                            selectedProduct.imageUrl ? 'cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative' : ''
+                          }`}
+                          onClick={() => {
+                            if (selectedProduct.imageUrl) {
+                              setFullscreenProductPhoto({ url: selectedProduct.imageUrl, name: selectedProduct.name });
+                            }
+                          }}
+                          title={selectedProduct.imageUrl ? "Clique para ver foto do produto em tela cheia" : undefined}
+                        >
                           {selectedProduct.imageUrl ? (
-                            <img
-                              src={selectedProduct.imageUrl}
-                              alt={selectedProduct.name}
-                              className="w-full h-full object-contain"
-                              referrerPolicy="no-referrer"
-                            />
+                            <>
+                              <img
+                                src={selectedProduct.imageUrl}
+                                alt={selectedProduct.name}
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <Search className="w-4 h-4 text-white" />
+                              </div>
+                            </>
                           ) : (
-                            <span className="text-[10px] text-slate-300 font-bold uppercase">Sem Foto</span>
+                            <span className="text-[10px] text-slate-300 font-bold uppercase font-sans">Sem Foto</span>
                           )}
                         </div>
                         <div className="min-w-0">
@@ -2047,9 +2088,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                     <input
                       id="register-price-input"
                       type="text"
+                      inputMode="numeric"
                       placeholder="0,00"
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
+                      value={price || '0,00'}
+                      onChange={(e) => setPrice(formatToCalculatorPrice(e.target.value))}
                       className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-800 font-mono focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all"
                       required
                     />
@@ -2165,9 +2207,24 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
             {/* Selected product and chain visual confirmation */}
             <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl flex items-center gap-3 text-left">
-              <div className="w-10 h-10 rounded bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center">
+              <div 
+                className={`w-10 h-10 rounded bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center select-none ${
+                  selectedProduct?.imageUrl ? 'cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative' : ''
+                }`}
+                onClick={() => {
+                  if (selectedProduct?.imageUrl) {
+                    setFullscreenProductPhoto({ url: selectedProduct.imageUrl, name: selectedProduct.name });
+                  }
+                }}
+                title={selectedProduct?.imageUrl ? "Clique para ver foto do produto em tela cheia" : undefined}
+              >
                 {selectedProduct?.imageUrl ? (
-                  <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                  <>
+                    <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Search className="w-3.5 h-3.5 text-white" />
+                    </div>
+                  </>
                 ) : (
                   <span className="text-[10px] text-slate-300 font-bold uppercase font-sans">SF</span>
                 )}
@@ -2206,6 +2263,41 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 Não, recusar e voltar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product Image Fullscreen Viewer Modal */}
+      {fullscreenProductPhoto && (
+        <div
+          id="product-photo-fullscreen-modal"
+          onClick={() => setFullscreenProductPhoto(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 cursor-pointer animate-fade-in"
+        >
+          <div
+            className="relative flex flex-col items-center max-w-full max-h-full cursor-default select-none animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button with min touch target 44x44px */}
+            <button
+              onClick={() => setFullscreenProductPhoto(null)}
+              className="absolute -top-12 sm:top-2 -right-2 sm:-right-12 text-white hover:text-gray-300 bg-[#E0E0E0]/20 hover:bg-[#E0E0E0]/30 rounded-full w-11 h-11 flex items-center justify-center transition-all cursor-pointer focus:outline-none"
+              aria-label="Fechar visualização"
+              title="Fechar"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            
+            <img
+              src={fullscreenProductPhoto.url}
+              alt={fullscreenProductPhoto.name}
+              referrerPolicy="no-referrer"
+              className="max-w-[90vw] max-h-[75vh] md:max-h-[80vh] rounded-xl object-contain shadow-2xl"
+            />
+            
+            <p className="text-center text-sm md:text-base text-white/95 font-bold font-mono mt-4 px-4 py-2 bg-black/60 rounded-lg max-w-[85vw] break-words">
+              {fullscreenProductPhoto.name}
+            </p>
           </div>
         </div>
       )}

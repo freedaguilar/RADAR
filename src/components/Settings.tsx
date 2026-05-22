@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Product, Chain, User } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
+import { normalizeString } from "../lib/textUtils";
 
 function extractDominantColor(fileOrUrl: File | string): Promise<string> {
   return new Promise((resolve) => {
@@ -342,13 +343,13 @@ export function Settings({
   }, [newProdName, productView]);
 
   const filteredProducts = products.filter((p) => {
-    const searchTerms = filterText.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const searchTerms = filterText.toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
     return searchTerms.every((term) => {
-      const nameMatch = p.name.toLowerCase().includes(term);
-      const categoryMatch = p.category.toLowerCase().includes(term);
-      const subcategoryMatch = p.subcategory ? p.subcategory.toLowerCase().includes(term) : false;
-      const brandMatch = p.brand ? p.brand.toLowerCase().includes(term) : false;
-      const weightMatch = p.weight ? p.weight.toLowerCase().includes(term) : false;
+      const nameMatch = normalizeString(p.name).includes(term);
+      const categoryMatch = normalizeString(p.category).includes(term);
+      const subcategoryMatch = p.subcategory ? normalizeString(p.subcategory).includes(term) : false;
+      const brandMatch = p.brand ? normalizeString(p.brand).includes(term) : false;
+      const weightMatch = p.weight ? normalizeString(p.weight).includes(term) : false;
       return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch;
     });
   });
@@ -768,75 +769,110 @@ export function Settings({
                           <th className="pb-3">Visual</th>
                           <th className="pb-3">Nome do Produto</th>
                           <th className="pb-3">Categoria</th>
-                          <th className="pb-3">Preço Base</th>
                           {currentUser?.role === "gestor" && <th className="pb-3 text-right">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-[#F5F5F5]">
-                        {filteredProducts.map((prod) => (
-                          <tr
-                            key={prod.id}
-                            className="hover:bg-gray-50/55 transition-colors"
-                          >
-                            <td className="py-2.5">
-                              <img
-                                src={prod.imageUrl}
-                                alt=""
-                                referrerPolicy="no-referrer"
-                                className="w-8 h-8 rounded border border-[#E0E0E0] p-0.5 object-contain"
-                              />
-                            </td>
-                            <td className="py-2.5 font-semibold text-gray-800">
-                              {prod.name}
-                            </td>
-                            <td className="py-2.5 text-gray-500 font-sans">
-                              {prod.category}
-                            </td>
-                            <td className="py-2.5 font-mono">
-                              R$ {prod.basePrice.toFixed(2)}
-                            </td>
-                            {currentUser?.role === "gestor" ? (
-                              <td className="py-2.5 text-right flex items-center justify-end gap-1">
-                                <button
-                                  id={`edit-product-setting-${prod.id}`}
-                                  onClick={() => {
-                                    setSelectedProductId(prod.id);
-                                    setProductView("edit");
-                                    setNewProdName(prod.name);
-                                    setNewProdCategory(prod.category);
-                                    setNewProdSubcategory(prod.subcategory || "");
-                                    setNewProdWeight(prod.weight || "");
-                                    setNewProdImageUrl(prod.imageUrl || "");
-                                    setNewProdBasePrice(prod.basePrice.toString());
-                                    setNewProdIsCompetitor(prod.isCompetitor || false);
-                                    setNewProdBrand(prod.brand || "");
-                                    setFormFeedback(null);
-                                    setAutoFilledFields({});
-                                    setUserModifiedFields({});
-                                  }}
-                                  className="text-gray-400 hover:text-[#1A1A1A] p-1.5 rounded transition-colors cursor-pointer"
-                                  title="Editar produto"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                  id={`delete-product-setting-${prod.id}`}
-                                  onClick={() => {
-                                    setDeleteConfirm({
-                                      type: "product",
-                                      id: prod.id,
-                                      name: prod.name,
-                                    });
-                                  }}
-                                  className="text-gray-400 hover:text-[#D40511] p-1.5 rounded transition-colors cursor-pointer"
-                                  title="Remover produto"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                        {(() => {
+                          const sortedFilteredProducts = [...filteredProducts].sort((a, b) => {
+                            const isDynamicA = a.id.startsWith("prod-add-");
+                            const isDynamicB = b.id.startsWith("prod-add-");
+                            if (isDynamicA && isDynamicB) {
+                              const tsA = parseInt(a.id.replace("prod-add-", ""), 10) || 0;
+                              const tsB = parseInt(b.id.replace("prod-add-", ""), 10) || 0;
+                              return tsB - tsA;
+                            }
+                            if (isDynamicA) return -1;
+                            if (isDynamicB) return 1;
+
+                            const numA = parseInt(a.id.replace(/\D/g, ""), 10) || 0;
+                            const numB = parseInt(b.id.replace(/\D/g, ""), 10) || 0;
+                            return numB - numA;
+                          });
+
+                          return sortedFilteredProducts.map((prod) => (
+                            <tr
+                              key={prod.id}
+                              className={`hover:bg-gray-55 transition-colors ${currentUser?.role === "gestor" ? "cursor-pointer" : ""}`}
+                              onClick={(e) => {
+                                const target = e.target as HTMLElement;
+                                if (target.closest('button') || target.closest('a')) {
+                                  return;
+                                }
+                                if (currentUser?.role === "gestor") {
+                                  setSelectedProductId(prod.id);
+                                  setProductView("edit");
+                                  setNewProdName(prod.name);
+                                  setNewProdCategory(prod.category);
+                                  setNewProdSubcategory(prod.subcategory || "");
+                                  setNewProdWeight(prod.weight || "");
+                                  setNewProdImageUrl(prod.imageUrl || "");
+                                  setNewProdBasePrice(prod.basePrice.toString());
+                                  setNewProdIsCompetitor(prod.isCompetitor || false);
+                                  setNewProdBrand(prod.brand || "");
+                                  setFormFeedback(null);
+                                  setAutoFilledFields({});
+                                  setUserModifiedFields({});
+                                }
+                              }}
+                            >
+                              <td className="py-2.5">
+                                <img
+                                  src={prod.imageUrl}
+                                  alt=""
+                                  referrerPolicy="no-referrer"
+                                  className="w-8 h-8 rounded border border-[#E0E0E0] p-0.5 object-contain"
+                                />
                               </td>
-                            ) : null}
-                          </tr>
-                        ))}
+                              <td className="py-2.5 font-semibold text-gray-800">
+                                {prod.name}
+                              </td>
+                              <td className="py-2.5 text-gray-500 font-sans">
+                                {prod.category}
+                              </td>
+                              {currentUser?.role === "gestor" ? (
+                                <td className="py-2.5 text-right flex items-center justify-end gap-1">
+                                  <button
+                                    id={`edit-product-setting-${prod.id}`}
+                                    onClick={() => {
+                                      setSelectedProductId(prod.id);
+                                      setProductView("edit");
+                                      setNewProdName(prod.name);
+                                      setNewProdCategory(prod.category);
+                                      setNewProdSubcategory(prod.subcategory || "");
+                                      setNewProdWeight(prod.weight || "");
+                                      setNewProdImageUrl(prod.imageUrl || "");
+                                      setNewProdBasePrice(prod.basePrice.toString());
+                                      setNewProdIsCompetitor(prod.isCompetitor || false);
+                                      setNewProdBrand(prod.brand || "");
+                                      setFormFeedback(null);
+                                      setAutoFilledFields({});
+                                      setUserModifiedFields({});
+                                    }}
+                                    className="text-gray-400 hover:text-[#1A1A1A] p-1.5 rounded transition-colors cursor-pointer"
+                                    title="Editar produto"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    id={`delete-product-setting-${prod.id}`}
+                                    onClick={() => {
+                                      setDeleteConfirm({
+                                        type: "product",
+                                        id: prod.id,
+                                        name: prod.name,
+                                      });
+                                    }}
+                                    className="text-gray-400 hover:text-[#D40511] p-1.5 rounded transition-colors cursor-pointer"
+                                    title="Remover produto"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              ) : null}
+                            </tr>
+                          ));
+                        })()}
                       </tbody>
                     </table>
                   </div>

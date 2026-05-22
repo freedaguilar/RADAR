@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import {
   Search,
+  X,
   Filter,
   Plus,
   ChevronLeft,
@@ -20,6 +21,7 @@ import {
   Package,
 } from "lucide-react";
 import { Product, Chain, PriceRecord } from "../types";
+import { normalizeString } from "../lib/textUtils";
 
 function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md" }) {
   const getInitialsAndColors = (name: string) => {
@@ -94,6 +96,7 @@ export function Products({
     null,
   );
   const [displayMode, setDisplayMode] = useState<"grid" | "list">("grid");
+  const [productPhotoModal, setProductPhotoModal] = useState<{ url: string; name: string } | null>(null);
 
   // O(1) map of record.id to its index in the original records list to determine insertion order
   const recordIndexMap = useMemo(() => {
@@ -418,13 +421,13 @@ export function Products({
     return products.filter((prod) => {
       if (!prod.active) return false;
 
-      const searchTerms = searchTerm.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      const searchTerms = searchTerm.toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
       const matchesSearch = searchTerms.every((term) => {
-        const nameMatch = prod.name.toLowerCase().includes(term);
-        const categoryMatch = prod.category.toLowerCase().includes(term);
-        const subcategoryMatch = prod.subcategory ? prod.subcategory.toLowerCase().includes(term) : false;
-        const brandMatch = prod.brand ? prod.brand.toLowerCase().includes(term) : false;
-        const weightMatch = prod.weight ? prod.weight.toLowerCase().includes(term) : false;
+        const nameMatch = normalizeString(prod.name).includes(term);
+        const categoryMatch = normalizeString(prod.category).includes(term);
+        const subcategoryMatch = prod.subcategory ? normalizeString(prod.subcategory).includes(term) : false;
+        const brandMatch = prod.brand ? normalizeString(prod.brand).includes(term) : false;
+        const weightMatch = prod.weight ? normalizeString(prod.weight).includes(term) : false;
         return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch;
       });
 
@@ -1763,13 +1766,20 @@ export function Products({
                   className="md:col-span-1 flex flex-col items-center text-center p-4 border border-[#E0E0E0] rounded-xl self-start bg-white"
                   id="detail-product-sidebar"
                 >
-                  <div className="w-24 h-24 rounded-2xl overflow-hidden bg-gray-50 flex items-center justify-center p-1.5 shadow-2xs">
+                  <div
+                    onClick={() => setProductPhotoModal({ url: selectedProduct.imageUrl, name: selectedProduct.name })}
+                    className="w-24 h-24 rounded-2xl overflow-hidden bg-gray-50 flex items-center justify-center p-1.5 shadow-2xs cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative"
+                    title="Clique para ver foto em tela cheia"
+                  >
                     <img
                       src={selectedProduct.imageUrl}
                       alt={selectedProduct.name}
                       referrerPolicy="no-referrer"
                       className="w-full h-full object-contain"
                     />
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
+                      <Search className="w-5 h-5 text-white" />
+                    </div>
                   </div>
                   <h2 className="text-base font-bold text-[#1A1A1A] mt-4 font-sans leading-tight">
                     {selectedProduct.name}
@@ -2986,6 +2996,41 @@ export function Products({
             >
               &times;
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Product Image Fullscreen Viewer Modal */}
+      {productPhotoModal && (
+        <div
+          id="product-photo-fullscreen-modal"
+          onClick={() => setProductPhotoModal(null)}
+          className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-4 cursor-pointer animate-fade-in"
+        >
+          <div
+            className="relative flex flex-col items-center max-w-full max-h-full cursor-default select-none animate-scale-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button with min touch target 44x44px */}
+            <button
+              onClick={() => setProductPhotoModal(null)}
+              className="absolute -top-12 sm:top-2 -right-2 sm:-right-12 text-white hover:text-gray-300 bg-[#E0E0E0]/20 hover:bg-[#E0E0E0]/30 rounded-full w-11 h-11 flex items-center justify-center transition-all cursor-pointer focus:outline-none"
+              aria-label="Fechar visualização"
+              title="Fechar"
+            >
+              <X className="w-6 h-6" />
+            </button>
+            
+            <img
+              src={productPhotoModal.url}
+              alt={productPhotoModal.name}
+              referrerPolicy="no-referrer"
+              className="max-w-[90vw] max-h-[75vh] md:max-h-[80vh] rounded-xl object-contain shadow-2xl"
+            />
+            
+            <p className="text-center text-sm md:text-base text-white/95 font-bold font-sans mt-4 px-4 py-2 bg-black/60 rounded-lg max-w-[85vw] break-words">
+              {productPhotoModal.name}
+            </p>
           </div>
         </div>
       )}
