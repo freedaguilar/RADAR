@@ -2,14 +2,15 @@ import { useMemo } from 'react';
 import { 
   Package, 
   TrendingUp, 
+  TrendingDown,
   Award, 
   ArrowUpRight, 
   ArrowDownRight, 
   Sparkles, 
   Eye,
-  TrendingDown
 } from 'lucide-react';
 import { Product, Chain, PriceRecord } from '../types';
+import { getOutdatedProducts } from '../lib/productUtils';
 
 interface DashboardProps {
   products: Product[];
@@ -147,6 +148,69 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
       max: maxObserved,
     };
   }, [records, products]);
+
+  // Produtos sem registro nos últimos 30 dias
+  const outdatedProducts = useMemo(() => {
+    return getOutdatedProducts(products, records);
+  }, [products, records]);
+
+  // Total de registros e variação vs mês anterior
+  const recordsStats = useMemo(() => {
+    const now = new Date();
+    const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().split('T')[0];
+
+    const thisMonth = records.filter(r => r.date >= thisMonthStart).length;
+    const lastMonth = records.filter(r => r.date >= lastMonthStart && r.date < thisMonthStart).length;
+
+    const variation = lastMonth > 0 ? ((thisMonth - lastMonth) / lastMonth) * 100 : 0;
+    return { total: records.length, thisMonth, lastMonth, variation };
+  }, [records]);
+
+  // Rede mais cara (maior preço médio)
+  const mostExpensiveChain = useMemo(() => {
+    if (records.length === 0 || chains.length === 0) return null;
+
+    const chainMetrics: Record<string, { total: number; count: number }> = {};
+    chains.forEach(c => { chainMetrics[c.id] = { total: 0, count: 0 }; });
+
+    const uniqueLatestKey: Record<string, PriceRecord> = {};
+    records.forEach(r => {
+      const key = `${r.productId}-${r.chainId}`;
+      const existing = uniqueLatestKey[key];
+      if (!existing) {
+        uniqueLatestKey[key] = r;
+      } else {
+        const dateCompare = r.date.localeCompare(existing.date);
+        if (dateCompare > 0 || (dateCompare === 0 && r.id.localeCompare(existing.id) > 0)) {
+          uniqueLatestKey[key] = r;
+        }
+      }
+    });
+
+    Object.values(uniqueLatestKey).forEach(r => {
+      if (chainMetrics[r.chainId]) {
+        chainMetrics[r.chainId].total += r.price;
+        chainMetrics[r.chainId].count += 1;
+      }
+    });
+
+    let worstChainId = '';
+    let highestAverage = -Infinity;
+
+    Object.entries(chainMetrics).forEach(([chainId, data]) => {
+      if (data.count === 0) return;
+      const avg = data.total / data.count;
+      if (avg > highestAverage) {
+        highestAverage = avg;
+        worstChainId = chainId;
+      }
+    });
+
+    if (!worstChainId) return null;
+    const wc = chains.find(c => c.id === worstChainId);
+    return { chain: wc, averagePrice: Number(highestAverage.toFixed(2)), count: chainMetrics[worstChainId].count };
+  }, [records, chains]);
 
   // 5. Most competitive chain (lowest average price of monitored assets)
   const mostCompetitiveChain = useMemo(() => {
@@ -306,103 +370,100 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
           </div>
         </div>
 
-        {/* KPI 2: Lowest Price Found */}
-        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between hover:border-slate-300 hover:shadow-sm transition-all duration-200" id="kpi-lowest-found">
+                {/* KPI 2: Produtos sem registro recente */}
+        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between hover:border-slate-300 hover:shadow-sm transition-all duration-200" id="kpi-outdated">
           <div>
             <div className="flex justify-between items-start mb-4">
               <span className="text-[10px] font-extrabold font-sans text-slate-400 uppercase tracking-wider block">
-                Menor Preço Ativo
+                Produtos Desatualizados
               </span>
-              <div className="p-2 bg-emerald-55 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100/30">
-                <ArrowDownRight className="w-4 h-4" />
+              <div className="p-2 bg-amber-50 text-amber-600 rounded-lg border border-amber-100/30">
+                <TrendingDown className="w-4 h-4" />
               </div>
             </div>
-            {lowestPriceRecord ? (
-              <>
-                <p className="text-4xl font-extrabold text-emerald-600 font-mono tracking-tight leading-none">
-                  R$ {lowestPriceRecord.price.toFixed(2)}
-                </p>
-                <p className="text-xs text-slate-500 font-medium truncate mt-2.5 leading-tight" title={lowestPriceRecord.product?.name}>
-                  {lowestPriceRecord.product?.name}
-                </p>
-              </>
+            <p className="text-4xl font-extrabold text-amber-600 font-sans tracking-tight leading-none">
+              {outdatedProducts.length}
+            </p>
+            <p className="text-xs text-slate-500 font-medium mt-2.5 leading-tight">
+              sem registro nos últimos 30 dias
+            </p>
+          </div>
+          <div className="mt-6 pt-4 border-t border-slate-50">
+            {outdatedProducts.length > 0 ? (
+              <button
+                onClick={() => onNavigate('produtos', { filter: 'outdated' })}
+                className="text-[11px] text-amber-600 font-bold hover:underline inline-flex items-center gap-1 cursor-pointer"
+              >
+                Ver produtos desatualizados &rarr;
+              </button>
             ) : (
-              <p className="text-sm text-slate-400 mt-2.5">Sem dados</p>
+              <span className="text-[11px] text-emerald-600 font-bold">
+                ✅ Todos atualizados
+              </span>
             )}
           </div>
-          {lowestPriceRecord && lowestPriceRecord.chain && (
-            <div className="mt-6 pt-4 border-t border-slate-50 flex items-center gap-2">
-              <RetailerLogo chain={lowestPriceRecord.chain} size="sm" />
-              <span className="text-xs text-slate-600 font-semibold truncate" title={lowestPriceRecord.chain.name}>
-                {lowestPriceRecord.chain.name}
-              </span>
-            </div>
-          )}
         </div>
 
-        {/* KPI 3: Highest Price Found */}
-        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between hover:border-slate-300 hover:shadow-sm transition-all duration-200" id="kpi-highest-found">
+        {/* KPI 3: Total de registros com variação mensal */}
+        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between hover:border-slate-300 hover:shadow-sm transition-all duration-200" id="kpi-records">
           <div>
             <div className="flex justify-between items-start mb-4">
               <span className="text-[10px] font-extrabold font-sans text-slate-400 uppercase tracking-wider block">
-                Maior Preço Ativo
+                Total de Registros
               </span>
-              <div className="p-2 bg-rose-50 text-rose-600 rounded-lg border border-rose-100/30">
+              <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100/30">
                 <ArrowUpRight className="w-4 h-4" />
               </div>
             </div>
-            {highestPriceRecord ? (
-              <>
-                <p className="text-4xl font-extrabold text-rose-600 font-mono tracking-tight leading-none">
-                  R$ {highestPriceRecord.price.toFixed(2)}
-                </p>
-                <p className="text-xs text-slate-500 font-medium truncate mt-2.5 leading-tight" title={highestPriceRecord.product?.name}>
-                  {highestPriceRecord.product?.name}
-                </p>
-              </>
-            ) : (
-              <p className="text-sm text-slate-400 mt-2.5">Sem dados</p>
-            )}
-          </div>
-          {highestPriceRecord && highestPriceRecord.chain && (
-            <div className="mt-6 pt-4 border-t border-slate-50 flex items-center gap-2">
-              <RetailerLogo chain={highestPriceRecord.chain} size="sm" />
-              <span className="text-xs text-slate-600 font-semibold truncate" title={highestPriceRecord.chain.name}>
-                {highestPriceRecord.chain.name}
+            <p className="text-4xl font-extrabold text-slate-900 font-sans tracking-tight leading-none">
+              {recordsStats.total.toLocaleString('pt-BR')}
+            </p>
+            <div className="flex items-center gap-1.5 mt-2.5">
+              <span className={`text-xs font-bold ${recordsStats.variation >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                {recordsStats.variation >= 0 ? '▲' : '▼'} {Math.abs(recordsStats.variation).toFixed(0)}% vs mês anterior
               </span>
             </div>
-          )}
+          </div>
+          <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between text-[11px] font-bold text-slate-400">
+            <span>Este mês:</span>
+            <span className="text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-100 font-mono">
+              {recordsStats.thisMonth} registros
+            </span>
+          </div>
         </div>
 
-        {/* KPI 4: Highest Variance */}
-        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between hover:border-slate-300 hover:shadow-sm transition-all duration-200" id="kpi-highest-variance">
+        {/* KPI 4: Rede mais cara */}
+        <div className="bg-white p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between hover:border-slate-300 hover:shadow-sm transition-all duration-200" id="kpi-expensive-chain">
           <div>
             <div className="flex justify-between items-start mb-4">
               <span className="text-[10px] font-extrabold font-sans text-slate-400 uppercase tracking-wider block">
-                Maior Variação
+                Rede Mais Cara
               </span>
-              <div className="p-2 bg-amber-50 text-amber-600 rounded-lg border border-amber-100/30">
+              <div className="p-2 bg-rose-50 text-rose-600 rounded-lg border border-rose-100/30">
                 <TrendingUp className="w-4 h-4" />
               </div>
             </div>
-            {highestVarianceInfo ? (
+            {mostExpensiveChain ? (
               <>
-                <p className="text-4xl font-extrabold text-slate-900 font-mono tracking-tight leading-none">
-                  +{highestVarianceInfo.variancePercentage}%
+                <p className="text-base font-extrabold text-rose-600 truncate max-w-[130px]" title={mostExpensiveChain.chain?.name}>
+                  {mostExpensiveChain.chain?.name}
                 </p>
-                <p className="text-xs text-slate-500 font-medium truncate mt-2.5 leading-tight" title={highestVarianceInfo.product?.name}>
-                  {highestVarianceInfo.product?.name}
+                <p className="text-xl font-bold text-slate-900 font-sans tracking-tight mt-1 leading-none">
+                  Méd: R$ {mostExpensiveChain.averagePrice.toFixed(2)}
                 </p>
               </>
             ) : (
               <p className="text-sm text-slate-400 mt-2.5">Sem dados</p>
             )}
           </div>
-          {highestVarianceInfo && (
-            <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between text-[11px] font-bold text-slate-400 font-mono">
-              <span>Faixa:</span>
-              <span className="text-slate-700 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                R${highestVarianceInfo.min.toFixed(2)} - R${highestVarianceInfo.max.toFixed(2)}
+          {mostExpensiveChain && mostExpensiveChain.chain && (
+            <div className="mt-6 pt-4 border-t border-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <RetailerLogo chain={mostExpensiveChain.chain} size="sm" />
+                <span className="text-[10px] text-slate-400 font-bold uppercase">Index</span>
+              </div>
+              <span className="text-[10px] bg-rose-50 text-rose-700 font-extrabold px-2 py-0.5 rounded-full uppercase border border-rose-100">
+                {mostExpensiveChain.count} Itens
               </span>
             </div>
           )}

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { Product, Chain, PriceRecord } from "../types";
 import { normalizeString } from "../lib/textUtils";
+import { getOutdatedProducts } from "../lib/productUtils";
 
 function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md" }) {
   const getInitialsAndColors = (name: string) => {
@@ -132,6 +133,7 @@ export function Products({
   }, []);
 
   // Filters state
+  const [isOutdatedFilter, setIsOutdatedFilter] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todas");
   const [selectedSubcategory, setSelectedSubcategory] = useState("Todas");
@@ -160,6 +162,7 @@ export function Products({
         { id: "maior-dispersao", label: "Maior dispersão de preços" },
         { id: "mais-auditorias", label: "Mais registros de auditoria" },
         { id: "cadastro-recente", label: "Cadastro mais recente" },
+        { id: "mais-antigo", label: "Mais tempo sem atualização" },
       ];
     } else {
       return [
@@ -170,6 +173,7 @@ export function Products({
         { id: "maior-preco-rede", label: "Maior preço nessa rede" },
         { id: "mais-auditorias", label: "Mais registros de auditoria" },
         { id: "cadastro-recente", label: "Cadastro mais recente" },
+        { id: "mais-antigo", label: "Mais tempo sem atualização" },
       ];
     }
   }, [selectedChainId]);
@@ -247,6 +251,7 @@ export function Products({
 
   useEffect(() => {
     if (pageParams?.action === "create") {
+      setIsOutdatedFilter(false);
       setActiveView("create");
       setNewProdName("");
       setNewProdCategory("Geral Retail");
@@ -257,6 +262,7 @@ export function Products({
       setNewProdIsCompetitor(false);
       setNewProdBrand("Dr. Oetker");
     } else if (pageParams?.action === "edit" && pageParams.productId) {
+      setIsOutdatedFilter(false);
       const prod = products.find((p) => p.id === pageParams.productId);
       if (prod) {
         setSelectedProductId(prod.id);
@@ -271,9 +277,14 @@ export function Products({
         setNewProdBrand(prod.brand || "Dr. Oetker");
       }
     } else if (pageParams?.action === "detail" && pageParams.productId) {
+      setIsOutdatedFilter(false);
       setSelectedProductId(pageParams.productId);
       setActiveView("detail");
+    } else if (pageParams?.filter === "outdated") {
+      setIsOutdatedFilter(true);
+      setActiveView("list");
     } else {
+      setIsOutdatedFilter(false);
       setActiveView("list");
     }
   }, [pageParams, products]);
@@ -469,6 +480,10 @@ export function Products({
       // Weight filter logic
       const matchesWeight =
         selectedWeight === "Todas" || prod.weight === selectedWeight;
+      
+      const outdatedProductsList = getOutdatedProducts(products, records);
+      const isOutdated = outdatedProductsList.some(p => p.id === prod.id);
+      const matchesOutdated = isOutdatedFilter ? isOutdated : true;
 
       return (
         matchesSearch &&
@@ -476,11 +491,13 @@ export function Products({
         matchesSubcategory &&
         matchesChain &&
         matchesBrand &&
-        matchesWeight
+        matchesWeight &&
+        matchesOutdated
       );
     });
   }, [
     products,
+    records,
     searchTerm,
     selectedCategory,
     selectedSubcategory,
@@ -488,6 +505,7 @@ export function Products({
     selectedBrandFilters,
     selectedWeight,
     latestPricePerChainMap,
+    isOutdatedFilter,
   ]);
 
   // Sort mappings
@@ -615,6 +633,16 @@ export function Products({
           const idxA = products.findIndex((item) => item.id === a.id);
           const idxB = products.findIndex((item) => item.id === b.id);
           return idxA - idxB;
+        }
+        case "mais-antigo": {
+          const valA = productLatestRecordMap[a.id];
+          const valB = productLatestRecordMap[b.id];
+          const timeA = valA ? valA.time : 0;
+          const timeB = valB ? valB.time : 0;
+          if (timeA !== timeB) {
+            return timeA - timeB; // Ascending
+          }
+          return a.name.localeCompare(b.name, "pt-BR");
         }
         case "menor-preco-rede": {
           const priceA = latestPricePerChainMap[a.id]?.[selectedChainId];
