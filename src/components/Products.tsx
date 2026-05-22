@@ -2671,14 +2671,51 @@ export function Products({
                                     </div>
                                     
                                     <div className="flex items-center gap-1.5 text-[11px] text-gray-500 font-sans mt-1 flex-wrap">
-                                      <span className="font-medium text-gray-400">Menor oferta em:</span>
-                                      <span className="font-extrabold text-gray-700">{item.minChainName}</span>
-                                      <span className="text-gray-200 font-normal">|</span>
-                                      <span className="font-medium text-gray-400">Menor preço:</span>
-                                      <span className="font-mono font-black text-emerald-650 bg-emerald-50 px-1 py-0.2 rounded">
-                                        R$ {item.minPrice.toFixed(2)}
-                                      </span>
-                                    </div>
+  {competitorCompareChainId !== "Todas" ? (() => {
+    // Calcula variação vs média geral de todas as redes
+    const allRecordsForProduct = records.filter(r => r.productId === item.product.id && r.price > 0);
+    const latestByAllChains: Record<string, number> = {};
+    allRecordsForProduct.forEach(r => {
+      const existing = latestByAllChains[r.chainId];
+      if (!existing) latestByAllChains[r.chainId] = r.price;
+      else {
+        const cur = allRecordsForProduct.filter(x => x.chainId === r.chainId).sort((a,b) => b.date.localeCompare(a.date))[0];
+        if (cur) latestByAllChains[r.chainId] = cur.price;
+      }
+    });
+    const allPrices = Object.values(latestByAllChains);
+    if (allPrices.length < 2) return (
+      <span className="text-gray-400 italic">Sem dados suficientes para comparar</span>
+    );
+    const globalAvg = allPrices.reduce((a, b) => a + b, 0) / allPrices.length;
+    const diff = ((item.averagePrice - globalAvg) / globalAvg) * 100;
+    const isAbove = diff > 1;
+    const isBelow = diff < -1;
+    return (
+      <span className={`font-extrabold px-1.5 py-0.5 rounded text-[10px] ${
+        isAbove 
+          ? "text-red-700 bg-red-50" 
+          : isBelow 
+            ? "text-emerald-700 bg-emerald-50" 
+            : "text-gray-600 bg-gray-100"
+      }`}>
+        {isAbove ? `▲ ${diff.toFixed(1)}% acima da média geral` 
+          : isBelow ? `▼ ${Math.abs(diff).toFixed(1)}% abaixo da média geral` 
+          : "Na média geral"}
+      </span>
+    );
+  })() : (
+    <>
+      <span className="font-medium text-gray-400">Menor oferta em:</span>
+      <span className="font-extrabold text-gray-700">{item.minChainName}</span>
+      <span className="text-gray-200 font-normal">|</span>
+      <span className="font-medium text-gray-400">Menor preço:</span>
+      <span className="font-mono font-black text-emerald-650 bg-emerald-50 px-1 py-0.2 rounded">
+        R$ {item.minPrice.toFixed(2)}
+      </span>
+    </>
+  )}
+</div>
                                   </div>
                                   
                                   <div className="text-left sm:text-right shrink-0 mt-1 sm:mt-0">
