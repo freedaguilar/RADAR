@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard,
   ShoppingBag,
@@ -376,6 +377,96 @@ export default function App() {
     }
   }, []);
 
+  // Pull to refresh pull gesture state hooks & touch engine handlers (mobile/tablet only)
+  const [pullY, setPullY] = useState(0);
+  const [isPulling, setIsPulling] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [touchStartY, setTouchStartY] = useState<number | null>(null);
+
+  const handleRefreshData = useCallback(async () => {
+    if (!isConfigured) return;
+    try {
+      const data = await fetchAll();
+      if (data) {
+        setState((prev) => ({
+          ...prev,
+          products: data.products,
+          chains: data.chains,
+          records: data.records,
+          users: data.users,
+        }));
+      }
+    } catch (err) {
+      console.error("Erro ao recarregar dados do database via gesture:", err);
+    }
+  }, [isConfigured, fetchAll]);
+
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent<HTMLElement>) => {
+      // Allow pull gesture only if the view scrolls are totally at the very top (0)
+      const isAtTop = e.currentTarget.scrollTop <= 1 && window.scrollY <= 1;
+      if (!isAtTop || isRefreshing) {
+        setTouchStartY(null);
+        return;
+      }
+      setTouchStartY(e.touches[0].clientY);
+    },
+    [isRefreshing]
+  );
+
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent<HTMLElement>) => {
+      if (touchStartY === null || isRefreshing) return;
+
+      const isAtTop = e.currentTarget.scrollTop <= 1 && window.scrollY <= 1;
+      if (!isAtTop) {
+        setTouchStartY(null);
+        setIsPulling(false);
+        setPullY(0);
+        return;
+      }
+
+      const currentY = e.touches[0].clientY;
+      const diffY = currentY - touchStartY;
+
+      // Handle downward dragging
+      if (diffY > 10) {
+        setIsPulling(true);
+        // Apply responsive damp physical physics limits
+        const newPullY = Math.min(diffY * 0.45, 100);
+        setPullY(newPullY);
+
+        // Cancel browser native overscroll bouncing/pull reload effects on top
+        if (e.cancelable) {
+          e.preventDefault();
+        }
+      }
+    },
+    [touchStartY, isRefreshing]
+  );
+
+  const handleTouchEnd = useCallback(() => {
+    if (touchStartY === null || isRefreshing) return;
+
+    if (isPulling && pullY >= 50) {
+      setIsRefreshing(true);
+      setPullY(50); // locks loading visual position during download
+
+      handleRefreshData().then(() => {
+        // Delay to allow complete loading visualization smoothness
+        setTimeout(() => {
+          setIsRefreshing(false);
+          setIsPulling(false);
+          setPullY(0);
+        }, 1000);
+      });
+    } else {
+      setIsPulling(false);
+      setPullY(0);
+    }
+    setTouchStartY(null);
+  }, [touchStartY, isPulling, pullY, isRefreshing, handleRefreshData]);
+
   // Guard routing: if no active profile, force Login screen
   if (!state.currentUser) {
     if (isInitializing) {
@@ -566,9 +657,42 @@ export default function App() {
 
       {/* 3. DYNAMIC WORKING AREA / WRAPPER ZONE */}
       <main
-        className="flex-1 p-4 lg:p-8 overflow-y-auto max-w-7xl mx-auto w-full font-sans"
+        className="flex-1 p-4 lg:p-8 overflow-y-auto max-w-7xl mx-auto w-full font-sans relative"
         id="app-main-content"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
+        {/* Pull-to-Refresh Gestures Panel Indicator wrapper */}
+        <AnimatePresence>
+          {(pullY > 0 || isRefreshing) && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+              animate={{ 
+                opacity: 1, 
+                height: isRefreshing ? 52 : Math.max(0, pullY),
+                marginBottom: isRefreshing ? 14 : Math.min(14, pullY / 3.5)
+              }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              transition={{ type: "spring", stiffness: 350, damping: 26 }}
+              className="w-full flex items-center justify-center overflow-hidden border border-dashed border-[#D40511]/15 bg-[#D40511]/5 rounded-2xl select-none pointer-events-none"
+              id="pull-to-refresh-visual-indicator"
+            >
+              <div className="flex items-center gap-2.5 py-2">
+                <Loader2 
+                  className={`w-5 h-5 text-[#D40511] ${isRefreshing ? "animate-spin" : ""}`}
+                  style={{
+                    transform: isRefreshing ? undefined : `rotate(${pullY * 6}deg)`,
+                  }}
+                />
+                <span className="text-[11px] text-[#D40511] font-bold font-sans tracking-wider uppercase">
+                  {isRefreshing ? "Atualizando dados..." : pullY >= 50 ? "Solte para atualizar" : "Puxe para atualizar"}
+                </span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {activeTab === "dashboard" && (
           <Dashboard
             products={state.products}

@@ -3,7 +3,7 @@ import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Slider
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { uploadToSupabaseStorage } from '../lib/supabase';
-import { normalizeString } from '../lib/textUtils';
+import { normalizeString, searchAndRankProducts } from '../lib/textUtils';
 
 // Batch analysis list item structure
 interface BatchItem {
@@ -640,14 +640,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   };
 
   const getBatchFilteredProducts = (search: string) => {
-    if (!search) return products.slice(0, 5);
-    const low = normalizeString(search);
-    return products.filter(
-      p =>
-        normalizeString(p.name).includes(low) ||
-        (p.brand ? normalizeString(p.brand).includes(low) : false) ||
-        normalizeString(p.category).includes(low)
-    );
+    const activeProducts = products.filter(p => p.active);
+    if (!search) return activeProducts.slice(0, 5);
+    return searchAndRankProducts(activeProducts, search);
   };
 
   const handleBatchItemProductSelect = (itemId: string, selectedProduct: Product) => {
@@ -681,18 +676,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   // Dropdown search filtering
   const filteredProductsBySearch = useMemo(() => {
     const activeProducts = products.filter(p => p.active);
-    if (!productSearch) return activeProducts;
-    const searchTerms = productSearch.toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
-    return activeProducts.filter((p) => {
-      return searchTerms.every((term) => {
-        const nameMatch = normalizeString(p.name).includes(term);
-        const categoryMatch = p.category ? normalizeString(p.category).includes(term) : false;
-        const subcategoryMatch = p.subcategory ? normalizeString(p.subcategory).includes(term) : false;
-        const brandMatch = p.brand ? normalizeString(p.brand).includes(term) : false;
-        const weightMatch = p.weight ? normalizeString(p.weight).includes(term) : false;
-        return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch;
-      });
-    });
+    return searchAndRankProducts(activeProducts, productSearch);
   }, [products, productSearch]);
 
   // Helper to find latest price
@@ -1595,13 +1579,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                       <div className="flex flex-col md:flex-row gap-5">
                         {/* Left Side: Photo preview details and sizes */}
                         <div className="w-full md:w-32 shrink-0 flex flex-col items-center gap-2">
-                          <div className="w-32 h-32 rounded-xl bg-slate-50 border border-slate-150 overflow-hidden flex items-center justify-center shadow-inner pt-1">
+                          <div 
+                            className="w-32 h-32 rounded-xl bg-slate-50 border border-slate-150 overflow-hidden flex items-center justify-center shadow-inner pt-1 cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative select-none"
+                            onClick={() => setFullscreenProductPhoto({ url: item.imagePreview, name: `Foto do Rótulo de Gôndola - Lote ${idx + 1}` })}
+                            title="Clique para ver a foto em tela cheia"
+                          >
                             <img 
                               src={item.imagePreview} 
                               alt={`Lote - ${idx + 1}`} 
                               className="w-full h-full object-contain"
                               referrerPolicy="no-referrer"
                             />
+                            <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <Search className="w-5 h-5 text-white shrink-0" />
+                            </div>
                           </div>
                           {item.compressedSizeKB && (
                             <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">
@@ -1884,23 +1875,44 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             <form onSubmit={handleSubmit} className="space-y-6" id="single-form-workspace">
               {/* AI Banner feedback if image exists */}
               {imagePreview && (
-                <div className="p-4 bg-violet-50/45 border border-violet-100/50 rounded-xl space-y-4" id="ai-feedback-banner">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50/20 p-1 rounded-lg">
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-bold text-violet-900">Leitura Inteligente Concluída</h4>
-                        <p className="text-xs text-violet-700/90 mt-0.5 leading-relaxed">{aiAnalysisMessage || 'Valores preenchidos sob os rótulos de gôndola.'}</p>
-                      </div>
+                <div className="p-4 bg-violet-50/45 border border-violet-100/50 rounded-xl flex flex-col sm:flex-row gap-4 items-start sm:items-center" id="ai-feedback-banner">
+                  {/* Miniature Thumbnail of the taken photo */}
+                  <div 
+                    className="w-20 h-20 rounded-lg bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-[#D40511] transition-all relative group shadow-2xs select-none"
+                    onClick={() => {
+                      setFullscreenProductPhoto({ url: imagePreview, name: "Foto do Rótulo de Gôndola" });
+                    }}
+                    title="Clique para ver a foto em tela cheia"
+                  >
+                    <img 
+                      src={imagePreview} 
+                      alt="Foto da Gôndola" 
+                      className="w-full h-full object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                      <Search className="w-4 h-4 text-white" />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => analyzeImage(imagePreview)}
-                      className="sm:self-center shrink-0 flex items-center justify-center gap-1 text-[9px] bg-violet-600 hover:bg-violet-700 text-white font-extrabold py-1.5 px-3 rounded-lg font-mono transition cursor-pointer"
-                    >
-                      <RefreshCw className="w-2.5 h-2.5 animate-spin-hover" />
-                      Reanalisar
-                    </button>
+                  </div>
+
+                  <div className="flex-1 space-y-3 min-w-0 w-full">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50/20 p-1 rounded-lg">
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-violet-900">Leitura Inteligente Concluída</h4>
+                          <p className="text-xs text-violet-700/90 mt-0.5 leading-relaxed">{aiAnalysisMessage || 'Valores preenchidos sob os rótulos de gôndola.'}</p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => analyzeImage(imagePreview)}
+                        className="sm:self-center shrink-0 flex items-center justify-center gap-1 text-[9px] bg-violet-600 hover:bg-violet-700 text-white font-extrabold py-1.5 px-3 rounded-lg font-mono transition cursor-pointer"
+                      >
+                        <RefreshCw className="w-2.5 h-2.5 animate-spin-hover" />
+                        Reanalisar
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
