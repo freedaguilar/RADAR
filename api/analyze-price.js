@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     }
 
     // Configurando instrução básica para o modelo
-    let promptInstruction = 'Analise esta imagem de etiqueta de preço de supermercado e retorne APENAS um JSON com os campos: { "produto": "nome do produto", "preco": 0.00, "observacao": "qualquer informação relevante como promoção, validade etc" }. Se não conseguir identificar algum campo, deixe como null.';
+    let promptInstruction = 'Você é um auditor de gôndola de supermercado altamente preciso. Analise esta imagem de etiqueta de preço de supermercado e retorne APENAS um JSON com os campos: { "produto": "nome do produto", "preco": 0.00, "observacao": "qualquer informação relevante como promoção, validade etc" }. CRÍTICO: Identifique e priorize sempre o PREÇO DE VAREJO UNITÁRIO. Se houver múltiplos preços (como atacado, clube de fidelidade, preço por quilo ou promoções do tipo Leve Pague), ignore preços de atacado, clube e caixas fechadas se não forem unitários simples. Se não conseguir identificar algum campo, deixe como null.';
 
     // Opcional: Anexar catálogo para matching guiado pela IA no servidor
     if (products && Array.isArray(products) && products.length > 0) {

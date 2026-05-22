@@ -49,17 +49,18 @@ async function startServer() {
   // API endpoint for analyzing price and matching products
   app.post("/api/analyze-price", async (req, res) => {
     try {
-      const { image, products } = req.body;
-      if (!image) {
+      const { image, imageBase64, products } = req.body;
+      const targetImage = image || imageBase64;
+      if (!targetImage) {
         return res.status(400).json({ error: "Imagem é obrigatória para processamento." });
       }
 
       const client = getGeminiClient();
 
       // Parse image data
-      const matchesImg = image.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+      const matchesImg = targetImage.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
       const mimeType = matchesImg ? matchesImg[1] : "image/jpeg";
-      const base64Data = matchesImg ? matchesImg[2] : image;
+      const base64Data = matchesImg ? matchesImg[2] : targetImage;
 
       // Format products catalog list for the model prompt
       const catalogText = Array.isArray(products) 
