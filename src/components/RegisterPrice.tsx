@@ -772,7 +772,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       ctx.drawImage(img, 0, 0, w, h);
 
       // Export as JPEG with 0.6 quality (60% comp ratio)
-      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+      const compressedBase64 = canvas.toDataURL('image/jpeg', 0.78);
       
       // Calculate compressed size
       const stringLength = compressedBase64.length - 'data:image/jpeg;base64,'.length;
@@ -854,7 +854,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     canvasRef.current.height = ch;
     ctx.drawImage(videoRef.current, 0, 0, cw, ch);
 
-    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.95);
+    const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.78);
     
     // Stop camera streams
     stopCamera();
