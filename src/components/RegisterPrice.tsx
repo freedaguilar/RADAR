@@ -686,7 +686,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     chainRecords.sort((a, b) => {
       const dateCompare = b.date.localeCompare(a.date);
       if (dateCompare !== 0) return dateCompare;
-      return records.indexOf(b) - records.indexOf(a);
+      return b.id.localeCompare(a.id);
     });
     return chainRecords[0].price;
   };
@@ -698,7 +698,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     chainRecords.sort((a, b) => {
       const dateCompare = b.date.localeCompare(a.date);
       if (dateCompare !== 0) return dateCompare;
-      return records.indexOf(b) - records.indexOf(a);
+      return b.id.localeCompare(a.id);
     });
     return chainRecords[0];
   };

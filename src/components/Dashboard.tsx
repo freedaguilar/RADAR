@@ -161,8 +161,13 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
     records.forEach((r) => {
       const key = `${r.productId}-${r.chainId}`;
       const existing = uniqueLatestKey[key];
-      if (!existing || new Date(r.date) > new Date(existing.date)) {
+      if (!existing) {
         uniqueLatestKey[key] = r;
+      } else {
+        const dateCompare = r.date.localeCompare(existing.date);
+        if (dateCompare > 0 || (dateCompare === 0 && r.id.localeCompare(existing.id) > 0)) {
+          uniqueLatestKey[key] = r;
+        }
       }
     });
 
@@ -232,7 +237,11 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
   // recent activities
   const recentActivities = useMemo(() => {
     return [...records]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .sort((a, b) => {
+        const dateCompare = b.date.localeCompare(a.date);
+        if (dateCompare !== 0) return dateCompare;
+        return b.id.localeCompare(a.id);
+      })
       .slice(0, 5)
       .map((rec) => {
         const prod = products.find((p) => p.id === rec.productId);

@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles } from 'lucide-react';
+import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink } from 'lucide-react';
 import { PriceRecord, Product, Chain } from '../types';
 
 interface AuditProps {
@@ -7,9 +7,11 @@ interface AuditProps {
   products: Product[];
   chains: Chain[];
   initialSelectedRecordId?: string | null;
+  onDeleteRecord?: (recordId: string) => void;
+  onNavigate?: (page: string, params?: any) => void;
 }
 
-export function Audit({ records, products, chains, initialSelectedRecordId }: AuditProps) {
+export function Audit({ records, products, chains, initialSelectedRecordId, onDeleteRecord, onNavigate }: AuditProps) {
   // Filter states
   const [selectedProductId, setSelectedProductId] = useState('Todos');
   const [selectedChainId, setSelectedChainId] = useState('Todas');
@@ -18,6 +20,12 @@ export function Audit({ records, products, chains, initialSelectedRecordId }: Au
 
   // Lightbox view state
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(initialSelectedRecordId || null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleCloseLightbox = () => {
+    setSelectedRecordId(null);
+    setShowDeleteConfirm(false);
+  };
 
   const activeRecordForLightbox = useMemo(() => {
     if (!selectedRecordId) return null;
@@ -66,15 +74,10 @@ export function Audit({ records, products, chains, initialSelectedRecordId }: Au
         return matchesProduct && matchesChain && matchesSearch && matchesPeriod;
       })
       .sort((a, b) => {
-        const timeA = new Date(a.date).getTime();
-        const timeB = new Date(b.date).getTime();
-        if (timeA !== timeB) {
-          return timeB - timeA;
-        }
-        const indexA = records.indexOf(a);
-        const indexB = records.indexOf(b);
-        return indexB - indexA;
-      }); // descending by date & insertion order
+        const dateCompare = b.date.localeCompare(a.date);
+        if (dateCompare !== 0) return dateCompare;
+        return b.id.localeCompare(a.id);
+      }); // descending by date & insertion/ID order
   }, [records, selectedProductId, selectedChainId, searchNotes, filterPeriodDays]);
 
   return (
@@ -192,9 +195,21 @@ export function Audit({ records, products, chains, initialSelectedRecordId }: Au
               {/* Text Meta Container */}
               <div className="p-4 flex-1 flex flex-col justify-between space-y-2">
                 <div>
-                  <h4 className="text-xs font-bold text-[#1A1A1A] line-clamp-1 leading-normal font-sans" title={product?.name}>
+                <div className="flex items-center gap-2">
+                  {product?.imageUrl && (
+                    <img src={product.imageUrl} alt={product.name} className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100" />
+                  )}
+                  <h4 
+                    className="text-xs font-bold text-[#1A1A1A] line-clamp-1 leading-normal font-sans hover:text-[#D40511] cursor-pointer" 
+                    title={product?.name}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onNavigate?.('produtos', { action: 'detail', productId: rec.productId });
+                    }}
+                  >
                     {product ? product.name : 'Produto Indisponível'} {product?.weight ? `(${product.weight})` : ''}
                   </h4>
+                </div>
                   <p className="text-[10px] text-gray-500 font-sans truncate">
                     Rede: {chain ? chain.name : 'Indefinida'}
                   </p>
@@ -244,8 +259,18 @@ export function Audit({ records, products, chains, initialSelectedRecordId }: Au
                 <span className="text-[10px] font-bold text-[#D40511] bg-red-100 rounded px-2 py-0.5 uppercase tracking-wider">
                   Comprovante Válido - Auditoria
                 </span>
-                <h3 className="text-xs font-bold text-[#1A1A1A] mt-1 pr-6 font-sans">
+                <h3 
+                  onClick={() => {
+                    handleCloseLightbox();
+                    onNavigate?.('produtos', { action: 'detail', productId: activeRecordForLightbox.productId });
+                  }}
+                  className="text-xs font-bold text-[#1A1A1A] mt-1 pr-6 font-sans hover:text-[#D40511] cursor-pointer flex items-center gap-1"
+                >
+                  {activeRecordForLightbox.product?.imageUrl && (
+                    <img src={activeRecordForLightbox.product.imageUrl} alt={activeRecordForLightbox.product.name} className="w-6 h-6 rounded object-contain bg-white border border-gray-100" />
+                  )}
                   {activeRecordForLightbox.product?.name}
+                  <ExternalLink className="w-3 h-3" />
                 </h3>
               </div>
               <button
@@ -311,7 +336,34 @@ export function Audit({ records, products, chains, initialSelectedRecordId }: Au
                 </div>
 
                 <div className="pt-4 border-t border-[#E0E0E0] flex items-center justify-between text-[10px] text-gray-400 bg-white">
-                  <span>Supabase ID: {activeRecordForLightbox.id}</span>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="flex items-center gap-1 text-[10px] text-red-600 hover:text-red-700 font-bold"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Excluir Registro
+                  </button>
+                  {showDeleteConfirm && (
+                    <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center gap-4">
+                      <p className="text-sm font-bold text-gray-800">Deseja realmente excluir este registro?</p>
+                      <div className="flex gap-4">
+                        <button 
+                          onClick={() => {
+                              onDeleteRecord?.(activeRecordForLightbox.id);
+                              handleCloseLightbox();
+                          }}
+                          className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-xs"
+                        >
+                          Sim, excluir
+                        </button>
+                        <button 
+                          onClick={() => setShowDeleteConfirm(false)}
+                          className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg font-bold text-xs"
+                        >
+                          Cancelar
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded uppercase">
                     Comprimida OK
                   </span>

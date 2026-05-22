@@ -356,6 +356,24 @@ export default function App() {
     [isConfigured],
   );
 
+  const handleDeletePriceRecord = useCallback(
+    async (recordId: string) => {
+      setState((prev) => ({
+        ...prev,
+        records: prev.records.filter((r) => r.id !== recordId),
+      }));
+
+      if (isConfigured) {
+        const { error } = await supabase
+          .from("price_records")
+          .delete()
+          .eq("id", recordId);
+        if (error) console.error("Error deleting price record:", error);
+      }
+    },
+    [isConfigured],
+  );
+
   // Quick navigation with deep parameters support (e.g. going directly to view photo)
   const handleNavigate = useCallback((page: string, params?: any) => {
     if (page === "auditoria") {
@@ -708,6 +726,7 @@ export default function App() {
             chains={state.chains}
             records={state.records}
             onDeleteProduct={handleDeleteProduct}
+            onDeleteRecord={handleDeletePriceRecord}
             onAddProduct={handleAddProduct}
             onEditProduct={handleEditProduct}
             pageParams={productPageParams}
@@ -731,6 +750,8 @@ export default function App() {
             products={state.products}
             chains={state.chains}
             initialSelectedRecordId={selectedAuditRecordId}
+            onDeleteRecord={handleDeletePriceRecord}
+            onNavigate={handleNavigate}
           />
         )}
 

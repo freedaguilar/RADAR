@@ -72,6 +72,7 @@ interface ProductsProps {
   chains: Chain[];
   records: PriceRecord[];
   onDeleteProduct: (productId: string) => void;
+  onDeleteRecord?: (recordId: string) => void;
   onAddProduct: (product: Product) => void;
   onEditProduct: (product: Product) => void;
   pageParams?: any;
@@ -85,6 +86,7 @@ export function Products({
   onDeleteProduct,
   onAddProduct,
   onEditProduct,
+  onDeleteRecord,
   pageParams,
   onNavigate,
 }: ProductsProps) {
@@ -107,33 +109,27 @@ export function Products({
     return map;
   }, [records]);
 
-  // Compare records: youngest/most recent date & index first (descending chronological order)
+  // Compare records: youngest/most recent date & ID first (descending chronological order)
   const compareRecordsDesc = useMemo(() => {
     return (a: PriceRecord, b: PriceRecord) => {
-      const tA = new Date(a.date).getTime();
-      const tB = new Date(b.date).getTime();
-      if (tA !== tB) {
-        return tB - tA;
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) {
+        return dateCompare;
       }
-      const idxA = recordIndexMap.get(a.id) ?? -1;
-      const idxB = recordIndexMap.get(b.id) ?? -1;
-      return idxB - idxA;
+      return b.id.localeCompare(a.id);
     };
-  }, [recordIndexMap]);
+  }, []);
 
-  // Compare records: oldest date & index first (ascending chronological order)
+  // Compare records: oldest date & ID first (ascending chronological order)
   const compareRecordsAsc = useMemo(() => {
     return (a: PriceRecord, b: PriceRecord) => {
-      const tA = new Date(a.date).getTime();
-      const tB = new Date(b.date).getTime();
-      if (tA !== tB) {
-        return tA - tB;
+      const dateCompare = a.date.localeCompare(b.date);
+      if (dateCompare !== 0) {
+        return dateCompare;
       }
-      const idxA = recordIndexMap.get(a.id) ?? -1;
-      const idxB = recordIndexMap.get(b.id) ?? -1;
-      return idxA - idxB;
+      return a.id.localeCompare(b.id);
     };
-  }, [recordIndexMap]);
+  }, []);
 
   // Filters state
   const [searchTerm, setSearchTerm] = useState("");
@@ -192,6 +188,8 @@ export function Products({
   }, [searchTerm, selectedCategory, selectedSubcategory, selectedChainId, selectedWeight, selectedBrandFilters, sortBy]);
 
   // Audit Photo Modal / Lightbox inside Product Detail
+  const [selectedRecord, setSelectedRecord] = useState<PriceRecord | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [lightboxPhoto, setLightboxPhoto] = useState<string | null>(null);
   const [compareChainId, setCompareChainId] = useState<string>("");
   const [compareWeight, setCompareWeight] = useState<string>("Todas");
@@ -495,7 +493,8 @@ export function Products({
   // Sort mappings
   const productLatestRecordMap = useMemo(() => {
     const map: Record<string, { time: number; index: number }> = {};
-    records.forEach((r, idx) => {
+    const sortedAsc = [...records].sort(compareRecordsAsc);
+    sortedAsc.forEach((r, idx) => {
       if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
       const t = new Date(r.date).getTime();
       const existing = map[r.productId];
@@ -504,7 +503,7 @@ export function Products({
       }
     });
     return map;
-  }, [records, selectedChainId]);
+  }, [records, selectedChainId, compareRecordsAsc]);
 
   const productAveragePriceMap = useMemo(() => {
     const map: Record<string, { sum: number; count: number }> = {};
@@ -2325,7 +2324,11 @@ export function Products({
                           <div
                             key={chain.id}
                             title={tooltipText}
-                            className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-sm min-h-[110px] ${borderStyle} ${bgStyle}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              latestRecord && setSelectedRecord(latestRecord);
+                            }}
+                            className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-sm min-h-[110px] ${borderStyle} ${bgStyle} cursor-pointer hover:scale-[1.02]`}
                             id={`current-price-card-${chain.id}`}
                           >
                             {/* Top Row: Logo larger (increased to w-7 h-7) & Chain Name smaller/discrete */}
@@ -2535,16 +2538,9 @@ export function Products({
                         if (!current) {
                           latestByChain[r.chainId] = r;
                         } else {
-                          const tR = new Date(r.date).getTime();
-                          const tC = new Date(current.date).getTime();
-                          if (tR > tC) {
+                          const dateCompare = r.date.localeCompare(current.date);
+                          if (dateCompare > 0 || (dateCompare === 0 && r.id.localeCompare(current.id) > 0)) {
                             latestByChain[r.chainId] = r;
-                          } else if (tR === tC) {
-                            const idxR = recordIndexMap.get(r.id) ?? -1;
-                            const idxC = recordIndexMap.get(current.id) ?? -1;
-                            if (idxR > idxC) {
-                              latestByChain[r.chainId] = r;
-                            }
                           }
                         }
                       });
@@ -2737,7 +2733,7 @@ export function Products({
                   .map((rec) => (
                     <div
                       key={rec.id}
-                      onClick={() => setLightboxPhoto(rec.imageUrl)}
+                      onClick={() => setSelectedRecord(rec)}
                       className="group pointer-events-auto cursor-pointer border border-[#E0E0E0] rounded-lg overflow-hidden hover:border-[#D40511] transition-all bg-[#F5F5F5]"
                     >
                       <div className="aspect-video w-full overflow-hidden bg-gray-200 relative">
@@ -2971,27 +2967,62 @@ export function Products({
       )}
 
       {/* Audit Lightbox Photo */}
-      {lightboxPhoto && (
+      {selectedRecord && (
         <div
           id="common-lightbox-scroller"
-          onClick={() => setLightboxPhoto(null)}
+          onClick={() => { setSelectedRecord(null); setShowDeleteConfirm(false); }}
           className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 cursor-pointer"
         >
           <div
-            className="max-w-3xl max-h-[80vh] bg-white rounded-xl p-2 shadow-2xl relative"
+            className="max-w-3xl max-h-[80vh] bg-white rounded-xl p-2 shadow-2xl relative w-full"
             onClick={(e) => e.stopPropagation()}
           >
-            <img
-              src={lightboxPhoto}
-              alt="Auditoria de Gôndola"
-              referrerPolicy="no-referrer"
-              className="max-h-[70vh] rounded-lg object-contain w-full"
-            />
-            <p className="text-center text-xs text-gray-500 mt-2 font-sans font-medium">
-              Foto de Auditoria Comprobatória
-            </p>
+            {selectedRecord.imageUrl && (
+              <img
+                src={selectedRecord.imageUrl}
+                alt="Auditoria de Gôndola"
+                referrerPolicy="no-referrer"
+                className="max-h-[70vh] rounded-lg object-contain w-full"
+              />
+            )}
+            <div className="p-4 flex items-center justify-between">
+              <p className="text-xs text-gray-500 font-sans font-medium">
+                Foto de Auditoria Comprobatória
+              </p>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center gap-1 text-[10px] text-red-600 hover:text-red-700 font-bold"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> Excluir Registro
+              </button>
+            </div>
+            
+            {showDeleteConfirm && (
+                <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center gap-4 rounded-xl">
+                  <p className="text-sm font-bold text-gray-800">Deseja realmente excluir este registro?</p>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={() => {
+                          onDeleteRecord?.(selectedRecord.id);
+                          setSelectedRecord(null);
+                          setShowDeleteConfirm(false);
+                      }}
+                      className="bg-red-600 text-white px-4 py-2 rounded-lg font-bold text-xs"
+                    >
+                      Sim, excluir
+                    </button>
+                    <button 
+                      onClick={() => setShowDeleteConfirm(false)}
+                      className="bg-gray-200 text-gray-800 px-4 py-2 rounded-lg font-bold text-xs"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+            )}
+
             <button
-              onClick={() => setLightboxPhoto(null)}
+              onClick={() => { setSelectedRecord(null); setShowDeleteConfirm(false); }}
               className="absolute -top-3 -right-3 bg-[#D40511] text-white rounded-full w-7 h-7 flex items-center justify-center font-bold shadow hover:bg-red-700 transition-colors"
             >
               &times;
