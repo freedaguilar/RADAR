@@ -19,6 +19,7 @@ import {
   TrendingUp,
   Clock,
   Package,
+  Camera,
 } from "lucide-react";
 import { Product, Chain, PriceRecord } from "../types";
 import { normalizeString } from "../lib/textUtils";
@@ -100,6 +101,7 @@ export function Products({
   );
   const [displayMode, setDisplayMode] = useState<"grid" | "list">("grid");
   const [productPhotoModal, setProductPhotoModal] = useState<{ url: string; name: string } | null>(null);
+  const [showRegisterPriceModal, setShowRegisterPriceModal] = useState(false);
 
   // O(1) map of record.id to its index in the original records list to determine insertion order
   const recordIndexMap = useMemo(() => {
@@ -1884,6 +1886,17 @@ export function Products({
                       </span>
                     </div>
                   </div>
+
+                  <div className="w-full pt-4 mt-2 border-t border-[#F5F5F5]">
+                    <button
+                      id="detail-register-price-btn"
+                      onClick={() => setShowRegisterPriceModal(true)}
+                      className="w-full bg-[#D40511] hover:bg-[#b0040e] text-white py-2.5 px-4 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider font-sans"
+                    >
+                      <Camera className="w-4 h-4 shrink-0" />
+                      Registrar Preço
+                    </button>
+                  </div>
                 </div>
 
                 {/* Evolution Chart Column */}
@@ -3148,6 +3161,124 @@ export function Products({
             <p className="text-center text-sm md:text-base text-white/95 font-bold font-sans mt-4 px-4 py-2 bg-black/60 rounded-lg max-w-[85vw] break-words">
               {productPhotoModal.name}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Grid of registered networks modal (Register Price Quick link) */}
+      {showRegisterPriceModal && selectedProduct && (
+        <div
+          id="product-register-price-modal-backdrop"
+          onClick={() => setShowRegisterPriceModal(false)}
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div
+            className="bg-white rounded-3xl max-w-lg w-full border border-gray-150 overflow-hidden shadow-2xl relative cursor-default"
+            onClick={(e) => e.stopPropagation()}
+            id="product-register-price-modal-card"
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-[#F5F5F5]">
+              <div className="flex items-center gap-2.5">
+                <div className="bg-[#D40511] text-white p-2 rounded-xl">
+                  <Camera className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold text-[#1A1A1A] font-sans uppercase tracking-wider">
+                    Registrar Preço Coletado
+                  </h3>
+                  <p className="text-[10px] text-gray-505 mt-0.5 font-sans font-semibold">
+                    Selecione a rede de auditoria para prosseguir com a foto do comprovante.
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-register-price-modal-btn"
+                onClick={() => setShowRegisterPriceModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 cursor-pointer"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Grid of registered networks */}
+            <div className="p-6 space-y-4 max-h-[385px] overflow-y-auto">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-sans mb-1.5">
+                  Produto Selecionado
+                </p>
+                <div className="p-3 bg-red-50/20 border border-red-100 rounded-xl flex items-center gap-2.5">
+                  {selectedProduct.imageUrl && (
+                    <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100 shrink-0" />
+                  )}
+                  <div>
+                    <p className="text-[10px] font-extrabold text-slate-800 leading-snug">{selectedProduct.name}</p>
+                    <p className="text-[9px] text-slate-400 font-medium">Categoria: {selectedProduct.category} / Base: R$ {selectedProduct.basePrice.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-sans">
+                  Selecione a Rede (PDV)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {chains.map((chain) => {
+                    // find latest price record for this chain to show last registered price if any
+                    const latestRec = selectedProductHistory
+                      .filter((h) => h.chainId === chain.id)
+                      .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+                    return (
+                      <button
+                        key={chain.id}
+                        type="button"
+                        onClick={() => {
+                          setShowRegisterPriceModal(false);
+                          onNavigate?.('registrar', {
+                            productId: selectedProduct.id,
+                            chainId: chain.id,
+                            skipToStep: 3, // skips step 1 & 2 and directly goes to product and price confirmation
+                          });
+                        }}
+                        className="p-3 bg-slate-50 border border-slate-200 hover:border-[#D40511] hover:bg-red-50/5 rounded-xl transition duration-150 flex items-center justify-between text-left cursor-pointer group shadow-2xs h-14"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
+                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-white text-[9px] shrink-0 overflow-hidden border border-gray-100 shadow-2xs ${
+                              chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
+                            }`}
+                          >
+                            {chain.logoUrl ? (
+                              <img
+                                src={chain.logoUrl}
+                                alt={chain.name}
+                                className="w-full h-full object-contain p-0.5 bg-white"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <span>{chain.name.substring(0, 2).toUpperCase()}</span>
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="text-[10px] font-bold text-slate-800 leading-snug truncate group-hover:text-[#D40511]">
+                              {chain.name}
+                            </p>
+                            <p className="text-[9px] text-slate-400 font-mono font-medium mt-0.5">
+                              {latestRec ? `Último: R$ ${latestRec.price.toFixed(2)}` : 'Sem histórico'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[#D40511] font-bold text-[10px] group-hover:translate-x-0.5 transition-transform shrink-0">
+                          &rarr;
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

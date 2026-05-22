@@ -17,6 +17,7 @@ import { AppState, Product, Chain, PriceRecord, User } from "./types";
 import { getInitialState, saveStateToLocalStorage } from "./mockData";
 import { useSupabaseSync } from "./lib/useSupabaseSync";
 import { supabase } from "./lib/supabase";
+import { parsePriceRecordMeta } from "./lib/textUtils";
 
 // import Components
 import { Login } from "./components/Login";
@@ -125,6 +126,7 @@ export default function App() {
     string | null
   >(null);
   const [productPageParams, setProductPageParams] = useState<any>(null);
+  const [registerPageParams, setRegisterPageParams] = useState<any>(null);
 
   // Mobile menu visibility for structural safety
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -378,7 +380,7 @@ export default function App() {
       if (isConfigured) {
         const { error } = await supabase.from("price_records").insert({
           id: newRecord.id,
-          product_id: newRecord.productId,
+          product_id: newRecord.productId || null,
           chain_id: newRecord.chainId,
           price: newRecord.price,
           date: newRecord.date,
@@ -388,6 +390,35 @@ export default function App() {
           user_email: newRecord.userEmail,
         });
         if (error) console.error("Error inserting price record:", error);
+      }
+    },
+    [isConfigured],
+  );
+
+  const handleUpdatePriceRecord = useCallback(
+    async (updatedRecord: PriceRecord) => {
+      setState((prev) => ({
+        ...prev,
+        records: prev.records.map((r) =>
+          r.id === updatedRecord.id ? updatedRecord : r
+        ),
+      }));
+
+      if (isConfigured) {
+        const { error } = await supabase
+          .from("price_records")
+          .update({
+            product_id: updatedRecord.productId || null,
+            chain_id: updatedRecord.chainId,
+            price: updatedRecord.price,
+            date: updatedRecord.date,
+            image_url: updatedRecord.imageUrl,
+            notes: updatedRecord.notes,
+            user_name: updatedRecord.userName,
+            user_email: updatedRecord.userEmail,
+          })
+          .eq("id", updatedRecord.id);
+        if (error) console.error("Error updating price record:", error);
       }
     },
     [isConfigured],
@@ -429,6 +460,11 @@ export default function App() {
       }
     } else if (page === "registrar") {
       setActiveTab("registrar");
+      if (params) {
+        setRegisterPageParams(params);
+      } else {
+        setRegisterPageParams(null);
+      }
     }
   }, []);
 
@@ -539,6 +575,13 @@ export default function App() {
     return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
+  const pendingCount = React.useMemo(() => {
+    return state.records.filter((r) => {
+      const { isPending } = parsePriceRecordMeta(r.notes);
+      return !r.productId || isPending;
+    }).length;
+  }, [state.records]);
+
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "produtos", label: "Produtos", icon: ShoppingBag },
@@ -599,6 +642,7 @@ export default function App() {
                     setActiveTab(item.id as any);
                     setSelectedAuditRecordId(null); // clear sub-routes parameters
                     setProductPageParams(null); // ensure product view is cleaned
+                    setRegisterPageParams(null); // ensure prefill params are reset
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-xs font-bold transition-all relative border border-transparent cursor-pointer ${
                     isSelected
@@ -614,6 +658,14 @@ export default function App() {
                     className={`w-4 h-4 ${isSelected ? "text-[#D40511]" : "text-gray-400"}`}
                   />
                   <span>{item.label}</span>
+                  {item.id === "auditoria" && pendingCount > 0 && (
+                    <span 
+                      id="sidebar-pending-badge"
+                      className="ml-auto bg-red-600 text-white font-extrabold px-1.5 py-0.5 rounded-full text-[9px] min-w-[16px] h-4 flex items-center justify-center animate-pulse"
+                    >
+                      {pendingCount}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -767,6 +819,7 @@ export default function App() {
             onAddProduct={handleAddProduct}
             onEditProduct={handleEditProduct}
             pageParams={productPageParams}
+            onNavigate={handleNavigate}
           />
         )}
 
@@ -778,6 +831,7 @@ export default function App() {
             onSaveRecord={handleSavePriceRecord}
             currentUser={state.currentUser}
             onNavigate={handleNavigate}
+            pageParams={registerPageParams}
           />
         )}
 
@@ -788,6 +842,7 @@ export default function App() {
             chains={state.chains}
             initialSelectedRecordId={selectedAuditRecordId}
             onDeleteRecord={handleDeletePriceRecord}
+            onUpdateRecord={handleUpdatePriceRecord}
             onNavigate={handleNavigate}
           />
         )}
@@ -827,12 +882,23 @@ export default function App() {
                 setActiveTab(item.id as any);
                 setSelectedAuditRecordId(null);
                 setProductPageParams(null); // ensure product view is cleaned
+                setRegisterPageParams(null); // ensure prefill params are reset
               }}
               className="flex flex-col items-center justify-center flex-1 h-full py-1 text-center cursor-pointer"
             >
-              <IconComp
-                className={`w-[20px] h-[20px] transition-colors ${isSelected ? "text-[#D40511]" : "text-gray-400"}`}
-              />
+              <div className="relative">
+                <IconComp
+                  className={`w-[20px] h-[20px] transition-colors ${isSelected ? "text-[#D40511]" : "text-gray-400"}`}
+                />
+                {item.id === "auditoria" && pendingCount > 0 && (
+                  <span 
+                    id="mobile-pending-badge"
+                    className="absolute -top-1.5 -right-1.5 bg-red-600 border border-white text-white font-extrabold text-[8px] w-3.5 h-3.5 rounded-full flex items-center justify-center animate-pulse"
+                  >
+                    {pendingCount}
+                  </span>
+                )}
+              </div>
               <span
                 className={`text-[9px] mt-1 font-sans truncate font-medium max-w-[65px] ${isSelected ? "text-[#D40511] font-bold" : "text-gray-400"}`}
               >

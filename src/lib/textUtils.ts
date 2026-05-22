@@ -275,3 +275,53 @@ export function safeParseJSON(text: string): any {
   return null;
 }
 
+/**
+ * Decodes metadata from a PriceRecord notes column if it was saved as pending.
+ */
+export function parsePriceRecordMeta(notes: string | undefined): {
+  isPending: boolean;
+  aiProductSuggested: string;
+  aiPriceSuggested: number;
+  originalNotes: string;
+} {
+  if (notes && notes.startsWith('__PENDING_METADATA__:')) {
+    try {
+      const jsonStr = notes.substring('__PENDING_METADATA__:'.length);
+      const meta = JSON.parse(jsonStr);
+      return {
+        isPending: meta.status === 'pendente',
+        aiProductSuggested: meta.aiProductSuggested || '',
+        aiPriceSuggested: meta.aiPriceSuggested || 0,
+        originalNotes: meta.originalNotes || ''
+      };
+    } catch (e) {
+      return {
+        isPending: false,
+        aiProductSuggested: '',
+        aiPriceSuggested: 0,
+        originalNotes: notes
+      };
+    }
+  }
+  return {
+    isPending: false,
+    aiProductSuggested: '',
+    aiPriceSuggested: 0,
+    originalNotes: notes || ''
+  };
+}
+
+/**
+ * Encodes metadata for pending audit records.
+ */
+export function serializePendingMeta(aiProductSuggested?: string, aiPriceSuggested?: number, originalNotes?: string): string {
+  const meta = {
+    status: 'pendente',
+    aiProductSuggested: aiProductSuggested || '',
+    aiPriceSuggested: aiPriceSuggested || 0,
+    originalNotes: originalNotes || ''
+  };
+  return `__PENDING_METADATA__:${JSON.stringify(meta)}`;
+}
+
+

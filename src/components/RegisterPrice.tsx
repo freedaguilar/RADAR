@@ -3,7 +3,7 @@ import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Slider
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { uploadToSupabaseStorage } from '../lib/supabase';
-import { normalizeString, searchAndRankProducts, safeParseJSON } from '../lib/textUtils';
+import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta } from '../lib/textUtils';
 
 // Batch analysis list item structure
 interface BatchItem {
@@ -139,9 +139,14 @@ interface RegisterPriceProps {
   onSaveRecord: (newRecord: PriceRecord) => void;
   currentUser: User | null;
   onNavigate?: (page: string, params?: any) => void;
+  pageParams?: {
+    productId?: string;
+    chainId?: string;
+    skipToStep?: number;
+  } | null;
 }
 
-export function RegisterPrice({ products, chains, records = [], onSaveRecord, currentUser, onNavigate }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, records = [], onSaveRecord, currentUser, onNavigate, pageParams }: RegisterPriceProps) {
   // Navigation Steps
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -155,6 +160,26 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const [notes, setNotes] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+
+  // Prefill hook from pageParams
+  useEffect(() => {
+    if (pageParams) {
+      if (pageParams.productId) {
+        setSelectedProductId(pageParams.productId);
+        const prod = products.find(p => p.id === pageParams.productId);
+        if (prod) {
+          setProductSearch(prod.name);
+          setPrice(prod.basePrice.toFixed(2).replace('.', ','));
+        }
+      }
+      if (pageParams.chainId) {
+        setSelectedChainId(pageParams.chainId);
+      }
+      if (pageParams.skipToStep) {
+        setStep(pageParams.skipToStep as any);
+      }
+    }
+  }, [pageParams, products]);
 
   // Redirect after success prompt state
   const [showRedirectPrompt, setShowRedirectPrompt] = useState(false);
@@ -630,6 +655,68 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     }
   };
 
+  // Salva os itens do lote para re-analisar depois (status pendente)
+  const handleBatchSaveLater = async () => {
+    setErrorMsg('');
+    setIsUploading(true);
+    let countSaved = 0;
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      for (const item of batchItems) {
+        let finalImageUrl = '';
+        if (item.imagePreview) {
+          finalImageUrl = await uploadToSupabaseStorage(item.imagePreview, 'images');
+        }
+
+        // Parse suggested price or zero
+        const cleanPrice = item.price ? item.price.replace(',', '.') : '0';
+        let priceNum = parseFloat(cleanPrice);
+        if (isNaN(priceNum) || priceNum <= 0) {
+          priceNum = 0;
+        }
+
+        // Serialize metadata inside notes field using serializePendingMeta
+        const aiProductSuggested = item.productSearch || '';
+        const aiPriceSuggested = priceNum;
+        const finalNotes = serializePendingMeta(aiProductSuggested, aiPriceSuggested, item.notes);
+
+        const newRecord: PriceRecord = {
+          id: `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          productId: '', // Sem produto vinculado (salva como null no banco)
+          chainId: item.selectedChainId || selectedChainId,
+          price: priceNum, // Preço provisório
+          date: todayStr,
+          imageUrl: finalImageUrl || '',
+          notes: finalNotes,
+          userName: currentUser?.name || 'Vendedor Autônomo',
+          userEmail: currentUser?.email || 'vendas@radar.com'
+        };
+
+        onSaveRecord(newRecord);
+        countSaved++;
+      }
+
+      setSavedLaterCount(countSaved);
+      
+      // Limpa os dados do lote corporativo
+      setBatchItems([]);
+      setBatchProductSearches({});
+      setBatchShowSearchDropdowns({});
+      setStep(1);
+
+      setTimeout(() => {
+        setSavedLaterCount(null);
+      }, 6000);
+
+    } catch (err) {
+      console.error('Falha ao salvar lote pendente:', err);
+      setErrorMsg('Ocorreu um erro ao salvar o lote pendente. Por favor, tente novamente.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   const getBatchFilteredProducts = (search: string) => {
     const activeProducts = products.filter(p => p.active);
     if (!search) return activeProducts.slice(0, 5);
@@ -662,6 +749,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
   // Feedback notifications
   const [successMsg, setSuccessMsg] = useState(false);
+  const [savedLaterCount, setSavedLaterCount] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
 
   // Dropdown search filtering
@@ -1042,6 +1130,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             <p className="text-sm font-bold font-sans">Preço Auditado com Sucesso!</p>
             <p className="text-xs text-emerald-700/90 mt-1 font-medium leading-relaxed">
               O registro foi consolidado, verificado por scanner IA e transmitido em tempo real para o dashboard executivo do PriceHub.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {savedLaterCount !== null && (
+        <div className="p-5 bg-amber-50 border border-amber-100 text-amber-800 rounded-2xl flex items-start gap-4 shadow-sm" id="register-saved-later-box">
+          <div className="p-2 bg-amber-500 text-white rounded-xl col-span-1 shrink-0">
+            <CheckCircle2 className="w-5 h-5 shrink-0" />
+          </div>
+          <div>
+            <p className="text-sm font-bold font-sans">Fotos Salvas para Análise Posterior!</p>
+            <p className="text-xs text-amber-700/90 mt-1 font-medium leading-relaxed">
+              Consolidamos <strong>{savedLaterCount} foto(s)</strong> no lote com status <strong>"pendente"</strong>. As orientações da IA foram salvas como lembretes preliminares e esperam sua revisão na aba de <strong>Auditoria</strong>.
             </p>
           </div>
         </div>
@@ -1841,24 +1943,45 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                   &larr; Voltar para Fotos
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleBatchSaveAll}
-                  disabled={isUploading || batchItems.length === 0}
-                  className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-10 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                      <span>Salvando todos os registros do lote...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Salvar Todos os {batchItems.length} Registros</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={handleBatchSaveLater}
+                    disabled={isUploading || batchItems.length === 0}
+                    className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        <span>Salvando lote...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-4 h-4 text-amber-105 shrink-0" />
+                        <span>Salvar para Analisar Depois</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleBatchSaveAll}
+                    disabled={isUploading || batchItems.length === 0}
+                    className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-10 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                        <span>Salvando todos...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Salvar Todos os {batchItems.length} Registros</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
           ) : (

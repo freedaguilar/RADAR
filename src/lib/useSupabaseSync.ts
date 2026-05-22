@@ -41,7 +41,7 @@ export function useSupabaseSync() {
 
     const records = (recordsRes.data || []).map(r => ({
       id: r.id,
-      productId: r.product_id,
+      productId: r.product_id || '',
       chainId: r.chain_id,
       price: Number(r.price),
       date: r.date,
