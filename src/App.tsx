@@ -143,8 +143,45 @@ export default function App() {
     setActiveTab("dashboard");
   };
 
+  // Session check on load
+  useEffect(() => {
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session?.user?.email) {
+        // Fetch profile
+        const { data: profile } = await supabase
+          .from('app_users')
+          .select('*')
+          .eq('email', session.user.email)
+          .single();
+        
+        if (profile) {
+          setState(prev => ({
+            ...prev,
+            currentUser: {
+              id: profile.id,
+              name: profile.name,
+              email: profile.email,
+              role: profile.role,
+              active: profile.active,
+              avatarUrl: profile.avatar_url,
+            }
+          }));
+        }
+      }
+      setIsInitializing(false);
+    }
+    
+    // Only check session if it's the very first load and not already initialized
+    if (isInitializing) {
+      checkSession();
+    }
+  }, []);
+
   // Session logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setState((prev) => ({
       ...prev,
       currentUser: null,
@@ -499,7 +536,7 @@ export default function App() {
         </div>
       );
     }
-    return <Login onLoginSuccess={handleLoginSuccess} users={state.users} />;
+    return <Login onLoginSuccess={handleLoginSuccess} />;
   }
 
   const menuItems = [

@@ -1,20 +1,20 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, ShieldAlert, CheckCircle } from 'lucide-react';
 import { User } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface LoginProps {
   onLoginSuccess: (user: User) => void;
-  users: User[];
 }
 
-export function Login({ onLoginSuccess, users }: LoginProps) {
+export function Login({ onLoginSuccess }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
@@ -23,29 +23,50 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
       return;
     }
 
-    // Since it is a demo, let's find if state has a user with this email or simulate it.
-    // If we type some email that matches any of the mock users list, logging in as that user, otherwise logging as the first manager user.
-    const matchedUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
-
     setSuccess(true);
-    setTimeout(() => {
-      if (matchedUser) {
-        onLoginSuccess(matchedUser);
-      } else {
-        // Create an on-the-fly demo user or login as first
-        const administrator = users[0];
-        onLoginSuccess({
-          ...administrator,
-          email: email, // use their inputted email to make it realistic
-          name: email.split('@')[0].toUpperCase() || 'Usuário Beta'
-        });
-      }
-    }, 850);
-  };
 
-  const handleQuickLogin = (user: User) => {
-    setEmail(user.email);
-    setPassword('demo1234');
+    try {
+      // 1. Auth via Supabase
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.toLowerCase(),
+        password,
+      });
+
+      if (authError) {
+        if (authError.message === 'Invalid login credentials') {
+          throw new Error('E-mail ou senha incorretos.');
+        }
+        throw new Error(authError.message);
+      }
+
+      const userEmail = authData.user?.email;
+
+      // 2. Fetch profile from app_users
+      const { data: profile, error: profileError } = await supabase
+        .from('app_users')
+        .select('*')
+        .eq('email', userEmail)
+        .single();
+
+      if (profileError || !profile) {
+        throw new Error('Perfil de usuário não encontrado.');
+      }
+
+      // Map Supabase profile to App User type
+      const user: User = {
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        role: profile.role,
+        active: profile.active,
+        avatarUrl: profile.avatar_url,
+      };
+
+      onLoginSuccess(user);
+    } catch (err: any) {
+      setError(err.message || 'Erro ao realizar login.');
+      setSuccess(false);
+    }
   };
 
   return (
@@ -144,31 +165,6 @@ export function Login({ onLoginSuccess, users }: LoginProps) {
               {success ? 'Entrando...' : 'Entrar no PriceHub'}
             </button>
           </form>
-
-          {/* Quick Login Helpers */}
-          <div className="mt-8 border-t border-[#E0E0E0] pt-6" id="quick-login-hints">
-            <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block mb-3 text-center">
-              Acesso Demonstrativo Rápido
-            </span>
-            <div className="grid grid-cols-2 gap-2" id="quick-login-buttons">
-              {users.map((user) => (
-                <button
-                  id={`quick-login-${user.id}`}
-                  key={user.id}
-                  type="button"
-                  onClick={() => handleQuickLogin(user)}
-                  className="px-2 py-1.5 border border-[#E0E0E0] bg-[#F5F5F5] rounded-md text-left transition-colors hover:border-[#D40511] group"
-                >
-                  <p className="text-[11px] font-bold text-gray-700 truncate group-hover:text-[#D40511]">
-                    {user.name}
-                  </p>
-                  <p className="text-[9px] text-gray-400 font-mono truncate">
-                    {user.role === 'gestor' ? 'Gestor' : 'Vendedor/Campo'}
-                  </p>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
