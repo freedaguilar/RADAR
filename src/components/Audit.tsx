@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react';
 import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon } from 'lucide-react';
 import { PriceRecord, Product, Chain } from '../types';
 import { parsePriceRecordMeta, searchAndRankProducts } from '../lib/textUtils';
+import { supabase } from '../lib/supabase';
 
 interface AuditProps {
   records: PriceRecord[];
@@ -609,6 +610,26 @@ export function Audit({
                       const cleanPrice = pendingPrice.replace(',', '.');
                       const priceNum = parseFloat(cleanPrice) || 0;
                       
+                      // Save correction silently if user matched/corrected the AI suggestion
+                      const meta = parsePriceRecordMeta(pendingRecordToConfirm.notes);
+                      if (meta.aiProductSuggested) {
+                        const correctProdId = selectedProductForPending!.id;
+                        const exactMatch = products.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
+                        const suggestedProdId = exactMatch ? exactMatch.id : null;
+
+                        if (correctProdId !== suggestedProdId) {
+                          supabase.from('ai_corrections').insert({
+                            chain_id: pendingChainId,
+                            detected_text: meta.aiProductSuggested,
+                            correct_product_id: correctProdId,
+                            correct_product_name: selectedProductForPending!.name,
+                            created_by: pendingRecordToConfirm.userEmail || 'vendas@radar.com'
+                          }).then(({ error }) => {
+                            if (error) console.error("Error inserting correction from audit:", error);
+                          });
+                        }
+                      }
+
                       const updatedRecord: PriceRecord = {
                         ...pendingRecordToConfirm,
                         productId: selectedProductForPending!.id,

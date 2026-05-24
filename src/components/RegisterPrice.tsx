@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
-import { uploadToSupabaseStorage } from '../lib/supabase';
+import { supabase, uploadToSupabaseStorage } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta } from '../lib/textUtils';
 
 // Batch analysis list item structure
@@ -22,6 +22,10 @@ interface BatchItem {
   confidence: 'high' | 'low';
   aiAnalysisMessage?: string;
   error?: string;
+
+  // Progressive learning tracking fields
+  aiSuggestedProductId?: string;
+  aiDetectedText?: string;
 }
 
 // Asynchronous promise-based image compression utility (guarantees max 800x800 resolution)
@@ -193,6 +197,36 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const [isCompressing, setIsCompressing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
+  // Progressive learning state & worker helper
+  const [aiSuggestion, setAiSuggestion] = useState<{
+    detectedText: string | null;
+    productId: string | null;
+  } | null>(null);
+
+  const saveCorrectionSilently = async (
+    chainId: string,
+    detectedText: string,
+    correctProductId: string,
+    correctProductName: string,
+    createdBy: string
+  ) => {
+    try {
+      if (!chainId || !detectedText || !correctProductId || !correctProductName) {
+        return;
+      }
+      // Silently insert into Supabase
+      await supabase.from('ai_corrections').insert({
+        chain_id: chainId,
+        detected_text: detectedText,
+        correct_product_id: correctProductId,
+        correct_product_name: correctProductName,
+        created_by: createdBy
+      });
+    } catch (e) {
+      console.warn("Silent correction recording ignored:", e);
+    }
+  };
+
   // IA pricing analyzer state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysisMessage, setAiAnalysisMessage] = useState('');
@@ -227,6 +261,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         body: JSON.stringify({
           imageBase64: base64Data,
           mediaType: mimeType === 'image/png' ? 'image/png' : mimeType === 'image/webp' ? 'image/webp' : mimeType === 'image/gif' ? 'image/gif' : 'image/jpeg',
+          chainId: selectedChainId,
           products: products.map(p => ({
             id: p.id,
             name: p.name,
@@ -304,6 +339,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         } else {
           setAiAnalysisMessage(`⚠️ A IA leu: "${data.produto || 'Sem correspondência'}". Não pôde preencher automaticamente.`);
         }
+
+        // Store original suggestion information for identifying corrections later
+        setAiSuggestion({
+          detectedText: data.produto || data.detectedText || null,
+          productId: productMatched ? (matchedIdFromAi || selectedProductId) : null
+        });
       }
     } catch (err: any) {
       console.error('Erro na análise automática via Inteligência Artificial:', err);
@@ -474,6 +515,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           body: JSON.stringify({
             imageBase64: base64Data,
             mediaType: mimeType === 'image/png' ? 'image/png' : mimeType === 'image/webp' ? 'image/webp' : mimeType === 'image/gif' ? 'image/gif' : 'image/jpeg',
+            chainId: item.selectedChainId || selectedChainId,
             products: products.map(p => ({
               id: p.id,
               name: p.name,
@@ -556,7 +598,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             price: detectedPrice,
             notes: data.observacao || '',
             confidence,
-            aiAnalysisMessage: msg
+            aiAnalysisMessage: msg,
+            aiSuggestedProductId: productMatched ? matchedProdId : undefined,
+            aiDetectedText: data.produto || data.detectedText || undefined
           } : i));
 
           // Atualiza também os campos de busca textuais
@@ -631,6 +675,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           userName: currentUser?.name || 'Vendedor Autônomo',
           userEmail: currentUser?.email || 'vendas@radar.com'
         };
+
+        // Save correction silently in background if user altered the AI's suggested product in the batch item
+        if (item.aiDetectedText) {
+          if (item.selectedProductId !== item.aiSuggestedProductId) {
+            const correctProd = products.find(p => p.id === item.selectedProductId);
+            if (correctProd) {
+              const chainIdToSave = item.selectedChainId || selectedChainId;
+              saveCorrectionSilently(
+                chainIdToSave,
+                item.aiDetectedText,
+                item.selectedProductId,
+                correctProd.name,
+                currentUser?.email || 'vendas@radar.com'
+              );
+            }
+          }
+        }
 
         onSaveRecord(newRecord);
       }
@@ -1042,6 +1103,22 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
       const productIdRegistered = selectedProductId;
       setLastRegisteredProductId(productIdRegistered);
+
+      // Save correction silently in background if user altered the AI's suggested product
+      if (aiSuggestion && aiSuggestion.detectedText) {
+        if (selectedProductId !== aiSuggestion.productId) {
+          const correctProd = products.find(p => p.id === selectedProductId);
+          if (correctProd) {
+            saveCorrectionSilently(
+              selectedChainId,
+              aiSuggestion.detectedText,
+              selectedProductId,
+              correctProd.name,
+              currentUser?.email || 'vendas@radar.com'
+            );
+          }
+        }
+      }
 
       onSaveRecord(newRecord);
 

@@ -73,3 +73,19 @@ CREATE POLICY "Allow public all on products" ON products FOR ALL TO public USING
 CREATE POLICY "Allow public all on chains" ON chains FOR ALL TO public USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on price_records" ON price_records FOR ALL TO public USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all on app_users" ON app_users FOR ALL TO public USING (true) WITH CHECK (true);
+
+-- Create AI corrections table for progressive learning loop
+CREATE TABLE ai_corrections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  chain_id TEXT REFERENCES chains(id) ON DELETE SET NULL,
+  detected_text TEXT NOT NULL,
+  correct_product_id TEXT REFERENCES products(id) ON DELETE SET NULL,
+  correct_product_name TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  created_by TEXT
+);
+
+-- Enable Row Level Security and allow public access (following same schema standards)
+ALTER TABLE ai_corrections ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public all on ai_corrections" ON ai_corrections FOR ALL TO public USING (true) WITH CHECK (true);
+

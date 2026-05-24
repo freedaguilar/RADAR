@@ -2,6 +2,7 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI, Type } from "@google/genai";
+import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import cors from "cors";
 
@@ -46,10 +47,22 @@ async function startServer() {
     return geminiClient;
   }
 
+  let supabaseClient: any = null;
+  function getSupabaseClient() {
+    if (!supabaseClient) {
+      const supabaseUrl = process.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      if (supabaseUrl && supabaseAnonKey) {
+        supabaseClient = createClient(supabaseUrl, supabaseAnonKey);
+      }
+    }
+    return supabaseClient;
+  }
+
   // API endpoint for analyzing price and matching products
   app.post("/api/analyze-price", async (req, res) => {
     try {
-      const { image, imageBase64, products } = req.body;
+      const { image, imageBase64, products, chainId } = req.body;
       const targetImage = image || imageBase64;
       if (!targetImage) {
         return res.status(400).json({ error: "Imagem é obrigatória para processamento." });
@@ -67,13 +80,55 @@ async function startServer() {
         ? products.map(p => `${p.id}|${p.name}|${p.brand || ''}`).join("\n")
         : "";
 
+      // Fetch correction history for this chain for progressive learning context
+      let contextPrompt = "";
+      if (chainId) {
+        const sClient = getSupabaseClient();
+        if (sClient) {
+          try {
+            const { data: corrections, error } = await sClient
+              .from("ai_corrections")
+              .select("detected_text, correct_product_name")
+              .eq("chain_id", chainId)
+              .order("created_at", { ascending: false })
+              .limit(30);
+
+            if (error) {
+              console.error("Error fetching ai_corrections from Supabase:", error);
+            } else if (corrections && corrections.length > 0) {
+              const seenDetected = new Set();
+              const uniqueCorrections = [];
+              for (const corr of corrections) {
+                if (corr.detected_text && corr.correct_product_name) {
+                  const trimmed = corr.detected_text.trim();
+                  if (!seenDetected.has(trimmed)) {
+                    seenDetected.add(trimmed);
+                    uniqueCorrections.push(corr);
+                  }
+                }
+              }
+
+              if (uniqueCorrections.length > 0) {
+                contextPrompt = `
+Histórico de correções desta rede (aprenda com eles):
+${uniqueCorrections.map(corr => `- Quando identificar "${corr.detected_text}", o produto correto é "${corr.correct_product_name}"`).join("\n")}
+                `;
+              }
+            }
+          } catch (dbErr) {
+            console.error("Database error while fetching AI corrections:", dbErr);
+          }
+        }
+      }
+
       const prompt = `
+        ${contextPrompt}
         Você é um auditor de gôndola de supermercado altamente preciso. Sua principal missão é analisar a foto e identificar o PREÇO DE VAREJO UNITÁRIO.
         
         ATENÇÃO CRÍTICA (REGRAS DE PRIORIZAÇÃO DE PREÇO DO VAREJO AVULSO):
         1. Em etiquetas ou cartazes de supermercados (especialmente do tipo "atacarejo" ou "clube de compras"), o preço de atacado ou promocional em lote (por exemplo, "A partir de 3 unidades: R$ X cada") ou preço para membros de clube/aplicativo de vantagens costumam estar impressos em letras e números GIGANTES para atrair atenção.
         2. O PREÇO DE VAREJO UNITÁRIO padrão (para qualquer cliente comum comprar apenas 1 única unidade avulsa) costuma estar impresso em tamanho bem menor e com menor destaque, mas ele é o preço correto a ser registrado! Geralmente é identificado por palavras em minúsculo ou adjacentes como "Unidade", "Unitário", "Preço Normal", "Varejo", "1 UN", ou simplesmente o preço menor sem condicionais de quantidade.
-        3. Você DEVE ignorar os números gigantes de atacado ou de clube de fidelidade se eles exigirem a compra de mais de 1 unidade ou cadastro especial, e focar ativamente em encontrar o preço unitário avulso comum.
+        3. Você DEVE ignorar os números giants de atacado ou de clube de fidelidade se eles exigirem a compra de mais de 1 unidade ou cadastro especial, e focar ativamente em encontrar o preço unitário avulso comum.
         4. O valor numérico que você deve retornar no campo "price" é estritamente o PREÇO DE VAREJO UNITÁRIO comum (para compra de apenas 1 única unidade).
         5. Caso haja apenas um preço impresso na etiqueta sem qualquer condicional de atacado ou clube, retorne esse preço único.
 
@@ -114,9 +169,13 @@ async function startServer() {
               detectedText: {
                 type: Type.STRING,
                 description: "Breve explicação em português sobre qual texto de produto e preço foram detectados (Máximo uma linha).",
+              },
+              produto: {
+                type: Type.STRING,
+                description: "O nome ou texto do produto lido na gôndola ou etiqueta.",
               }
             },
-            required: ["price", "matchedProductId", "confidence", "detectedText"],
+            required: ["price", "matchedProductId", "confidence", "detectedText", "produto"],
           },
         },
       });

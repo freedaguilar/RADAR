@@ -1,3 +1,5 @@
+import { createClient } from '@supabase/supabase-js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -7,14 +9,54 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método não permitido.' });
 
   try {
-    const { imageBase64, mediaType, products } = req.body;
+    const { imageBase64, mediaType, products, chainId } = req.body;
 
     if (!imageBase64) return res.status(400).json({ error: 'imageBase64 ausente.' });
 
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY não configurada.' });
 
-    let prompt = 'Analise esta etiqueta de preço de supermercado. Retorne APENAS JSON: { "produto": "nome", "preco": 0.00, "observacao": "info relevante ou null", "matchedProductId": "uuid ou null" }.' +
+    // Supabase
+    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+    
+    let contextPrompt = "";
+    if (chainId && supabaseUrl && supabaseAnonKey) {
+      try {
+        const supabase = createClient(supabaseUrl, supabaseAnonKey);
+        const { data: corrections, error } = await supabase
+          .from("ai_corrections")
+          .select("detected_text, correct_product_name")
+          .eq("chain_id", chainId)
+          .order("created_at", { ascending: false })
+          .limit(30);
+
+        if (error) {
+          console.error("Error fetching ai_corrections in serverless:", error);
+        } else if (corrections && corrections.length > 0) {
+          const seenDetected = new Set();
+          const uniqueCorrections = [];
+          for (const corr of corrections) {
+            if (corr.detected_text && corr.correct_product_name) {
+              const trimmed = corr.detected_text.trim();
+              if (!seenDetected.has(trimmed)) {
+                seenDetected.add(trimmed);
+                uniqueCorrections.push(corr);
+              }
+            }
+          }
+
+          if (uniqueCorrections.length > 0) {
+            contextPrompt = "\nHistórico de correções desta rede (aprenda com eles):\n" +
+              uniqueCorrections.map(corr => `- Quando identificar "${corr.detected_text}", o produto correto é "${corr.correct_product_name}"`).join("\n") + "\n";
+          }
+        }
+      } catch (dbErr) {
+        console.error("Database error in serverless:", dbErr);
+      }
+    }
+
+    let prompt = (contextPrompt ? contextPrompt + '\n' : '') + 'Analise esta etiqueta de preço de supermercado. Retorne APENAS JSON: { "produto": "nome", "preco": 0.00, "observacao": "info relevante ou null", "matchedProductId": "uuid ou null" }.' +
       '\n\nREGRAS CRÍTICAS DE PREÇO:' +
       '\n- SEMPRE priorize o maior preço presente na etiqueta (que normalmente é o preço unitário de varejo para compra avulsa de apenas 1 única unidade).' +
       '\n- NÃO REGISTRE preços promocionais vinculados a atacado, caixa fechada, lote, clubes de fidelidade, aplicativos de vantagens ou cartões da loja no campo "preco". O campo "preco" deve conter unicamente o preço unitário avulso padronizado para cliente comum sem condicionais.' +
