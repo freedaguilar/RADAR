@@ -196,6 +196,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const [compressionRatio, setCompressionRatio] = useState<number>(0);
   const [isCompressing, setIsCompressing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSavingLater, setIsSavingLater] = useState(false);
+  const [isSavingAll, setIsSavingAll] = useState(false);
+  const [batchSaveProgress, setBatchSaveProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Progressive learning state & worker helper
   const [aiSuggestion, setAiSuggestion] = useState<{
@@ -212,18 +215,34 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   ) => {
     try {
       if (!chainId || !detectedText || !correctProductId || !correctProductName) {
+        console.warn("DEBUG/CORRECTIONS: Insufficient fields to record correction:", { chainId, detectedText, correctProductId, correctProductName });
         return;
       }
-      // Silently insert into Supabase
-      await supabase.from('ai_corrections').insert({
+      
+      console.log("DEBUG/CORRECTIONS: Atemping to save correction to Supabase...", {
         chain_id: chainId,
         detected_text: detectedText,
         correct_product_id: correctProductId,
         correct_product_name: correctProductName,
         created_by: createdBy
       });
+
+      // Insert into Supabase with detailed error handling
+      const { data, error } = await supabase.from('ai_corrections').insert({
+        chain_id: chainId,
+        detected_text: detectedText,
+        correct_product_id: correctProductId,
+        correct_product_name: correctProductName,
+        created_by: createdBy
+      }).select();
+
+      if (error) {
+        console.error("DEBUG/CORRECTIONS: Supabase returned an insert error code:", error.code, "message:", error.message, "details:", error.details);
+      } else {
+        console.log("DEBUG/CORRECTIONS: Success! Saved AI Correction successfully. Data returned:", data);
+      }
     } catch (e) {
-      console.warn("Silent correction recording ignored:", e);
+      console.error("DEBUG/CORRECTIONS: Critical exception during silent correction recording:", e);
     }
   };
 
@@ -305,6 +324,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         let finalMatchedName = '';
         let productMatched = false;
         const matchedIdFromAi = data.matchedProductId;
+        let suggestedId: string | null = null;
         if (matchedIdFromAi) {
           const matchedProd = products.find(p => p.id === matchedIdFromAi);
           if (matchedProd) {
@@ -312,6 +332,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             setProductSearch(matchedProd.name);
             finalMatchedName = matchedProd.name;
             productMatched = true;
+            suggestedId = matchedProd.id;
           }
         }
 
@@ -327,6 +348,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             setProductSearch(matchedProd.name);
             finalMatchedName = matchedProd.name;
             productMatched = true;
+            suggestedId = matchedProd.id;
           }
         }
 
@@ -343,7 +365,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         // Store original suggestion information for identifying corrections later
         setAiSuggestion({
           detectedText: data.produto || data.detectedText || null,
-          productId: productMatched ? (matchedIdFromAi || selectedProductId) : null
+          productId: suggestedId
         });
       }
     } catch (err: any) {
@@ -647,11 +669,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       return;
     }
 
-    setIsUploading(true);
+    setIsSavingAll(true);
+    setBatchSaveProgress({ current: 0, total: batchItems.length });
     try {
       const todayStr = new Date().toISOString().split('T')[0];
 
+      let idx = 0;
       for (const item of batchItems) {
+        setBatchSaveProgress({ current: idx + 1, total: batchItems.length });
         let finalImageUrl = '';
         if (item.imagePreview) {
           finalImageUrl = await uploadToSupabaseStorage(item.imagePreview, 'images');
@@ -694,6 +719,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         }
 
         onSaveRecord(newRecord);
+        idx++;
       }
 
       setSuccessMsg(true);
@@ -712,19 +738,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       console.error('Falha de envio batch records:', err);
       setErrorMsg('Ocorreu um erro ao salvar o lote. Por favor, tente novamente.');
     } finally {
-      setIsUploading(false);
+      setIsSavingAll(false);
+      setBatchSaveProgress(null);
     }
   };
 
   // Salva os itens do lote para re-analisar depois (status pendente)
   const handleBatchSaveLater = async () => {
     setErrorMsg('');
-    setIsUploading(true);
+    setIsSavingLater(true);
+    setBatchSaveProgress({ current: 0, total: batchItems.length });
     let countSaved = 0;
     try {
       const todayStr = new Date().toISOString().split('T')[0];
 
+      let idx = 0;
       for (const item of batchItems) {
+        setBatchSaveProgress({ current: idx + 1, total: batchItems.length });
         let finalImageUrl = '';
         if (item.imagePreview) {
           finalImageUrl = await uploadToSupabaseStorage(item.imagePreview, 'images');
@@ -756,6 +786,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
         onSaveRecord(newRecord);
         countSaved++;
+        idx++;
       }
 
       setSavedLaterCount(countSaved);
@@ -774,7 +805,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       console.error('Falha ao salvar lote pendente:', err);
       setErrorMsg('Ocorreu um erro ao salvar o lote pendente. Por favor, tente novamente.');
     } finally {
-      setIsUploading(false);
+      setIsSavingLater(false);
+      setBatchSaveProgress(null);
     }
   };
 
@@ -1557,16 +1589,56 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                         ))}
                       </div>
 
-                      {/* Botão de Disparo Analisar tudo */}
-                      <div className="pt-4 flex justify-end">
+                      {/* Processamento de Salvamento em Lote com Barra de Progresso se salvo de antemão */}
+                      {batchSaveProgress && (
+                        <div className="w-full bg-slate-50 border border-slate-150 p-4 rounded-2xl flex flex-col gap-2.5" id="batch-save-progress-box-step2">
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-700 font-sans">
+                            <span className="flex items-center gap-1.5 uppercase tracking-wide text-[10px] text-indigo-700">
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                              Salvando e Catalogando Lote de Imagens ({batchSaveProgress.current}/{batchSaveProgress.total})
+                            </span>
+                            <span className="font-mono text-[11px] font-extrabold text-slate-800">
+                              {Math.round((batchSaveProgress.current / batchSaveProgress.total) * 100)}% concluído
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full overflow-hidden bg-slate-200">
+                            <div 
+                              className="h-full bg-gradient-to-r from-amber-500 to-indigo-600 transition-all duration-300 rounded-full"
+                              style={{ width: `${(batchSaveProgress.current / batchSaveProgress.total) * 100}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Botões de Ação do Lote */}
+                      <div className="pt-4 flex flex-col sm:flex-row items-center justify-end gap-3 w-full">
+                        <button
+                          type="button"
+                          onClick={handleBatchSaveLater}
+                          disabled={isSavingLater || isSavingAll || batchItems.some(i => i.status === 'compressing')}
+                          className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide h-12"
+                        >
+                          {isSavingLater ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                              <span>Salvando lote...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Layers className="w-4 h-4 text-white shrink-0" />
+                              <span>Salvar para Analisar Depois</span>
+                            </>
+                          )}
+                        </button>
+
                         <button
                           type="button"
                           onClick={analyzeBatchAll}
-                          disabled={batchItems.some(i => i.status === 'compressing')}
-                          className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-8 py-3.5 rounded-xl text-xs font-bold transition duration-150 cursor-pointer shadow-md inline-flex items-center justify-center gap-2 disabled:bg-slate-300 disabled:cursor-not-allowed uppercase tracking-wider"
+                          disabled={isSavingLater || isSavingAll || batchItems.some(i => i.status === 'compressing')}
+                          className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-8 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide h-12"
                         >
-                          <Sparkles className="w-4 h-4 text-white shrink-0" />
-                          <span>Analisar Lote ({batchItems.length} Fotos)</span>
+                          <Sparkles className="w-4 h-4 text-white shrink-0 animate-pulse" />
+                          <span>Analisar Lote com IA ({batchItems.length} Fotos)</span>
                         </button>
                       </div>
                     </div>
@@ -2010,12 +2082,34 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 })}
               </div>
 
+              {/* Processamento de Salvamento em Lote com Barra de Progresso */}
+              {batchSaveProgress && (
+                <div className="mt-4 w-full bg-slate-50 border border-slate-150 p-4 rounded-2xl flex flex-col gap-2.5" id="batch-save-progress-box">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-700 font-sans">
+                    <span className="flex items-center gap-1.5 uppercase tracking-wide text-[10px] text-indigo-700">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-600" />
+                      Processando e Enviando Lote de Registros ({batchSaveProgress.current}/{batchSaveProgress.total})
+                    </span>
+                    <span className="font-mono text-[11px] font-extrabold text-slate-800">
+                      {Math.round((batchSaveProgress.current / batchSaveProgress.total) * 100)}% concluído
+                    </span>
+                  </div>
+                  <div className="w-full h-2 rounded-full overflow-hidden bg-slate-200">
+                    <div 
+                      className="h-full bg-gradient-to-r from-amber-500 to-indigo-600 transition-all duration-300 rounded-full"
+                      style={{ width: `${(batchSaveProgress.current / batchSaveProgress.total) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
               {/* Botão de submissão em Lote final */}
               <div className="pt-6 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <button
                   type="button"
+                  disabled={isSavingLater || isSavingAll}
                   onClick={() => setStep(2)}
-                  className="w-full sm:w-auto text-xs font-extrabold text-slate-400 hover:text-slate-850 transition duration-155 cursor-pointer inline-flex items-center justify-center gap-1 py-3"
+                  className="w-full sm:w-auto text-xs font-extrabold text-slate-400 hover:text-slate-850 disabled:text-slate-300 transition duration-155 cursor-pointer inline-flex items-center justify-center gap-1 py-3"
                 >
                   &larr; Voltar para Fotos
                 </button>
@@ -2024,17 +2118,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                   <button
                     type="button"
                     onClick={handleBatchSaveLater}
-                    disabled={isUploading || batchItems.length === 0}
-                    className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
+                    disabled={isSavingLater || isSavingAll || batchItems.length === 0}
+                    className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
                   >
-                    {isUploading ? (
+                    {isSavingLater ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                         <span>Salvando lote...</span>
                       </>
                     ) : (
                       <>
-                        <Layers className="w-4 h-4 text-amber-105 shrink-0" />
+                        <Layers className="w-4 h-4 text-white shrink-0" />
                         <span>Salvar para Analisar Depois</span>
                       </>
                     )}
@@ -2043,10 +2137,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                   <button
                     type="button"
                     onClick={handleBatchSaveAll}
-                    disabled={isUploading || batchItems.length === 0}
-                    className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-10 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
+                    disabled={isSavingLater || isSavingAll || batchItems.length === 0}
+                    className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-10 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
                   >
-                    {isUploading ? (
+                    {isSavingAll ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin shrink-0" />
                         <span>Salvando todos...</span>

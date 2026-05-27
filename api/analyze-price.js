@@ -13,6 +13,31 @@ export default async function handler(req, res) {
 
     if (!imageBase64) return res.status(400).json({ error: 'imageBase64 ausente.' });
 
+    let finalImageBase64 = imageBase64;
+    let finalMediaType = mediaType || 'image/jpeg';
+
+    if (imageBase64.startsWith("http")) {
+      try {
+        const fetchRes = await fetch(imageBase64);
+        const arrayBuffer = await fetchRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        finalImageBase64 = buffer.toString("base64");
+        const contentType = fetchRes.headers.get("content-type");
+        if (contentType) {
+          finalMediaType = contentType;
+        }
+      } catch (fetchErr) {
+        console.error("Error fetching image URL:", fetchErr);
+        return res.status(400).json({ error: 'Erro ao obter imagem a partir da URL fornecida.' });
+      }
+    } else {
+      const matchesImg = imageBase64.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+      if (matchesImg) {
+        finalMediaType = matchesImg[1];
+        finalImageBase64 = matchesImg[2];
+      }
+    }
+
     const apiKey = process.env.ANTHROPIC_API_KEY || process.env.VITE_ANTHROPIC_API_KEY;
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY não configurada.' });
 
@@ -85,8 +110,8 @@ export default async function handler(req, res) {
               type: 'image',
               source: {
                 type: 'base64',
-                media_type: mediaType || 'image/jpeg',
-                data: imageBase64
+                media_type: finalMediaType,
+                data: finalImageBase64
               }
             },
             {

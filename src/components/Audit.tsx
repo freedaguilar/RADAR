@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon } from 'lucide-react';
+import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { PriceRecord, Product, Chain } from '../types';
 import { parsePriceRecordMeta, searchAndRankProducts } from '../lib/textUtils';
 import { supabase } from '../lib/supabase';
@@ -41,6 +41,85 @@ export function Audit({
   const [pendingNotes, setPendingNotes] = useState('');
   const [pendingChainId, setPendingChainId] = useState('');
   const [showPendingDeleteConfirm, setShowPendingDeleteConfirm] = useState(false);
+
+  const [isAnalyzingPending, setIsAnalyzingPending] = useState(false);
+  const [aiFeedbackMessage, setAiFeedbackMessage] = useState<string | null>(null);
+  const [aiDetectedTextFromRecheck, setAiDetectedTextFromRecheck] = useState<string | null>(null);
+  const [aiSuggestedProductIdFromRecheck, setAiSuggestedProductIdFromRecheck] = useState<string | null>(null);
+
+  const handleReanalyzePending = async () => {
+    if (!pendingRecordToConfirm) return;
+    setIsAnalyzingPending(true);
+    setAiFeedbackMessage(null);
+    setAiDetectedTextFromRecheck(null);
+    setAiSuggestedProductIdFromRecheck(null);
+    try {
+      const response = await fetch('/api/analyze-price', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          image: pendingRecordToConfirm.imageUrl,
+          chainId: pendingChainId,
+          products: products.map(p => ({
+            id: p.id,
+            name: p.name,
+            brand: p.brand
+          }))
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha na resposta da API.');
+      }
+
+      const data = await response.json();
+      console.log("DEBUG/AUDIT_REANALYZE: Response from AI:", data);
+
+      if (data && data.price !== undefined) {
+        // Track the AI's suggestions for future smart corrections
+        setAiDetectedTextFromRecheck(data.produto || null);
+        setAiSuggestedProductIdFromRecheck(data.matchedProductId || null);
+
+        // Matched product from AI
+        let productMatched: Product | null = null;
+        if (data.matchedProductId) {
+          const matched = products.find(p => p.id === data.matchedProductId);
+          if (matched) productMatched = matched;
+        }
+
+        if (!productMatched && data.produto) {
+          const activeProducts = products.filter(p => p.active);
+          const fuzzyMatches = searchAndRankProducts(activeProducts, data.produto);
+          const exact = activeProducts.find(p => p.name.toLowerCase().trim() === data.produto.toLowerCase().trim());
+          if (exact) {
+            productMatched = exact;
+          } else if (fuzzyMatches.length > 0) {
+            productMatched = fuzzyMatches[0];
+          }
+        }
+
+        if (productMatched) {
+          setSelectedProductForPending(productMatched);
+          setPendingSearchQuery(productMatched.name);
+        } else if (data.produto) {
+          setSelectedProductForPending(null);
+          setPendingSearchQuery(data.produto);
+        }
+
+        setPendingPrice(data.price.toString().replace('.', ','));
+        setAiFeedbackMessage(`Leitura bem-sucedida! Produto: "${data.produto || 'Não decifrado'}". Preço: R$ ${data.price.toFixed(2)}.`);
+      } else {
+        setAiFeedbackMessage('⚠️ A IA não identificou um preço legível nesta imagem.');
+      }
+    } catch (err) {
+      console.error('Erro na re-análise assistida por IA:', err);
+      setAiFeedbackMessage('❌ Falha na conexão ou processamento da imagem pela IA.');
+    } finally {
+      setIsAnalyzingPending(false);
+    }
+  };
 
   const handleCloseLightbox = () => {
     setSelectedRecordId(null);
@@ -139,6 +218,12 @@ export function Audit({
     setPendingNotes(meta.originalNotes);
     setPendingChainId(rec.chainId);
     setShowPendingDeleteConfirm(false);
+    
+    // Reset AI analysis feedback
+    setAiFeedbackMessage(null);
+    setIsAnalyzingPending(false);
+    setAiDetectedTextFromRecheck(null);
+    setAiSuggestedProductIdFromRecheck(null);
   };
 
   // Compute fuzzy match list inside modal
@@ -407,21 +492,21 @@ export function Audit({
         <div
           id="pending-confirm-backdrop"
           onClick={() => setPendingRecordToConfirm(null)}
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer overflow-y-auto"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 cursor-pointer overflow-y-auto animate-fade-in"
         >
           <div
-            className="bg-white rounded-3xl max-w-3xl w-full border border-gray-100 overflow-hidden shadow-2xl relative cursor-default my-8"
+            className="bg-white rounded-3xl max-w-4xl w-[96vw] md:w-full border border-gray-100 overflow-hidden shadow-2xl relative cursor-default my-auto max-h-[94vh] md:max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
             id="pending-confirm-card"
           >
             {/* Header banner */}
-            <div className="bg-amber-50 border-b border-amber-100 px-6 py-4 flex items-center justify-between">
+            <div className="bg-amber-50 border-b border-amber-100 px-5 py-3.5 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="bg-amber-500 text-white p-2 rounded-xl">
                   <Sparkles className="w-4 h-4 text-white animate-pulse" />
                 </div>
                 <div>
-                  <h2 className="text-md font-extrabold text-amber-950 font-sans uppercase tracking-wider">
+                  <h2 className="text-sm font-extrabold text-amber-950 font-sans uppercase tracking-wider">
                     Confirmar Análise Provisória
                   </h2>
                   <p className="text-[10px] text-amber-800 mt-0.5 font-sans font-medium">
@@ -438,30 +523,57 @@ export function Audit({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2" id="pending-split-view">
+            <div className="grid grid-cols-1 md:grid-cols-12 flex-1 min-h-0 overflow-y-auto md:overflow-hidden" id="pending-split-view">
               {/* Image side content */}
-              <div className="bg-slate-50 p-6 border-r border-slate-100 flex flex-col justify-center items-center min-h-[300px]">
-                <div className="relative rounded-2xl overflow-hidden shadow-sm max-w-full bg-black max-h-[380px]">
+              <div className="bg-slate-50 p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between md:h-full md:overflow-y-auto col-span-12 md:col-span-5" id="pending-image-side">
+                <div className="relative rounded-2xl overflow-hidden shadow-sm max-w-full bg-black flex-1 flex items-center justify-center min-h-[160px] md:min-h-[220px] max-h-[260px] md:max-h-[300px]">
                   <img
                     src={pendingRecordToConfirm.imageUrl}
                     alt="Evidência provisória"
                     referrerPolicy="no-referrer"
-                    className="max-h-[360px] object-contain mx-auto"
+                    className="max-h-full max-w-full object-contain mx-auto"
                   />
                 </div>
-                <div className="mt-4 text-center">
+                <div className="mt-4 text-center w-full">
                   <span className="text-[9px] text-gray-400 font-mono font-semibold block">
                     Por: {pendingRecordToConfirm.userName} ({pendingRecordToConfirm.userEmail})
                   </span>
-                  <span className="text-[10px] text-slate-500 font-sans font-bold flex items-center justify-center gap-1 mt-1 justify-center">
+                  <span className="text-[10px] text-slate-500 font-sans font-bold flex items-center justify-center gap-1 mt-1">
                     <Calendar className="w-3.5 h-3.5" /> Coletado em: {formatDateBR(pendingRecordToConfirm.date)}
                   </span>
+
+                  {/* IA Action Button */}
+                  <div className="mt-4 pt-4 border-t border-slate-200">
+                    <button
+                      type="button"
+                      disabled={isAnalyzingPending}
+                      onClick={handleReanalyzePending}
+                      className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:from-amber-300 disabled:to-amber-400 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-xs transition-all cursor-pointer h-9 animate-pulse"
+                    >
+                      {isAnalyzingPending ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                          Consultando IA...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4 shrink-0 text-white animate-pulse" />
+                          Consultar IA p/ Nova Checagem
+                        </>
+                      )}
+                    </button>
+                    {aiFeedbackMessage && (
+                      <p className="mt-2 text-[10px] font-semibold text-center leading-relaxed text-slate-800 bg-slate-100 border border-slate-200 p-2.5 rounded-xl">
+                        {aiFeedbackMessage}
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* Form details input side */}
-              <div className="p-6 space-y-4 flex flex-col justify-between" id="pending-form-side">
-                <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
+              <div className="p-5 md:p-6 flex flex-col justify-between md:h-full min-h-0 col-span-12 md:col-span-7" id="pending-form-side">
+                <div className="space-y-4 md:overflow-y-auto pr-1 md:pr-2 flex-1 min-h-0 mb-4">
                   
                   {/* Select Chain (Network) */}
                   <div>
@@ -530,11 +642,11 @@ export function Audit({
                             onChange={(e) => setPendingSearchQuery(e.target.value)}
                             className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-sans font-bold text-slate-700 placeholder-slate-450 focus:outline-none focus:bg-white h-9"
                           />
-                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.8" />
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.8 font-extrabold" />
                         </div>
 
                         {/* Autocomplete selection dropdown */}
-                        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-100 rounded-xl shadow-lg z-50 max-h-44 overflow-y-auto">
+                        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-150 rounded-xl shadow-lg z-55 max-h-44 overflow-y-auto">
                           {pendingFilteredProducts.length > 0 ? (
                             pendingFilteredProducts.map(p => (
                               <button
@@ -547,7 +659,7 @@ export function Audit({
                                 className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center justify-between border-b border-slate-50 last:border-none cursor-pointer"
                               >
                                 <span>{p.name} {p.weight ? `(${p.weight})` : ''}</span>
-                                <span className="text-[8px] bg-slate-100 text-slate-500 font-mono px-1 rounded uppercase tracking-wider">{p.category}</span>
+                                <span className="text-[8px] bg-slate-150 text-slate-500 font-mono px-1 rounded uppercase tracking-wider">{p.category}</span>
                               </button>
                             ))
                           ) : (
@@ -594,11 +706,11 @@ export function Audit({
                 </div>
 
                 {/* Confirmations and action footer buttons inside modal */}
-                <div className="pt-4 border-t border-slate-100 flex items-center justify-between bg-white text-[10px]">
+                <div className="pt-4 border-t border-slate-100 flex items-center justify-between bg-white text-[10px] shrink-0 gap-3">
                   <button
                     type="button"
                     onClick={() => setShowPendingDeleteConfirm(true)}
-                    className="flex items-center gap-1 text-[10px] text-red-600 hover:text-red-700 font-extrabold uppercase tracking-wider cursor-pointer"
+                    className="flex items-center gap-1 text-[10px] text-red-650 hover:text-red-700 font-extrabold uppercase tracking-wider cursor-pointer py-2 shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" /> Descartar Foto
                   </button>
@@ -612,20 +724,35 @@ export function Audit({
                       
                       // Save correction silently if user matched/corrected the AI suggestion
                       const meta = parsePriceRecordMeta(pendingRecordToConfirm.notes);
-                      if (meta.aiProductSuggested) {
+                      const suggestedName = aiDetectedTextFromRecheck || meta.aiProductSuggested;
+                      const suggestedProdId = aiDetectedTextFromRecheck
+                        ? aiSuggestedProductIdFromRecheck
+                        : (products.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim())?.id || null);
+
+                      if (suggestedName) {
                         const correctProdId = selectedProductForPending!.id;
-                        const exactMatch = products.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
-                        const suggestedProdId = exactMatch ? exactMatch.id : null;
 
                         if (correctProdId !== suggestedProdId) {
-                          supabase.from('ai_corrections').insert({
+                          console.log("DEBUG/AUDIT: Attempting to save correction from audit panel...", {
                             chain_id: pendingChainId,
-                            detected_text: meta.aiProductSuggested,
+                            detected_text: suggestedName,
                             correct_product_id: correctProdId,
                             correct_product_name: selectedProductForPending!.name,
                             created_by: pendingRecordToConfirm.userEmail || 'vendas@radar.com'
-                          }).then(({ error }) => {
-                            if (error) console.error("Error inserting correction from audit:", error);
+                          });
+
+                          supabase.from('ai_corrections').insert({
+                            chain_id: pendingChainId,
+                            detected_text: suggestedName,
+                            correct_product_id: correctProdId,
+                            correct_product_name: selectedProductForPending!.name,
+                            created_by: pendingRecordToConfirm.userEmail || 'vendas@radar.com'
+                          }).select().then(({ data, error }) => {
+                            if (error) {
+                              console.error("DEBUG/AUDIT: Error inserting correction from audit:", error.code, error.message, error.details);
+                            } else {
+                              console.log("DEBUG/AUDIT: Correction saved successfully from audit card! Res:", data);
+                            }
                           });
                         }
                       }
@@ -640,7 +767,7 @@ export function Audit({
                       onUpdateRecord?.(updatedRecord);
                       setPendingRecordToConfirm(null);
                     }}
-                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-2.5 rounded-xl text-[10px] font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition uppercase shadow-sm flex items-center gap-1.5 cursor-pointer font-sans"
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl text-[10px] font-extrabold disabled:bg-slate-350 disabled:cursor-not-allowed transition uppercase shadow-sm flex items-center gap-1.5 cursor-pointer font-sans h-10 tracking-wider shrink"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-100" />
                     Confirmar & Auditoria OK

@@ -2239,7 +2239,9 @@ export function Products({
                 return { chain, latestRecord };
               });
 
-              const pricedRecords = currentPricesList.filter((item) => item.latestRecord !== undefined);
+              const pricedRecords = currentPricesList
+                .filter((item) => item.latestRecord !== undefined)
+                .sort((a, b) => a.latestRecord!.price - b.latestRecord!.price);
               
               let averagePrice = 0;
               let minPriceItem: typeof currentPricesList[number] | null = null;

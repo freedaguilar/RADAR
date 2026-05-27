@@ -71,9 +71,28 @@ async function startServer() {
       const client = getGeminiClient();
 
       // Parse image data
-      const matchesImg = targetImage.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
-      const mimeType = matchesImg ? matchesImg[1] : "image/jpeg";
-      const base64Data = matchesImg ? matchesImg[2] : targetImage;
+      let mimeType = "image/jpeg";
+      let base64Data = "";
+
+      if (targetImage.startsWith("http")) {
+        try {
+          const fetchRes = await fetch(targetImage);
+          const arrayBuffer = await fetchRes.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          base64Data = buffer.toString("base64");
+          const contentType = fetchRes.headers.get("content-type");
+          if (contentType) {
+            mimeType = contentType;
+          }
+        } catch (fetchErr) {
+          console.error("Error fetching image URL:", fetchErr);
+          return res.status(400).json({ error: "Erro ao baixar imagem da URL informada." });
+        }
+      } else {
+        const matchesImg = targetImage.match(/^data:(image\/[a-z+]+);base64,(.+)$/);
+        mimeType = matchesImg ? matchesImg[1] : "image/jpeg";
+        base64Data = matchesImg ? matchesImg[2] : targetImage;
+      }
 
       // Format products catalog list for the model prompt
       const catalogText = Array.isArray(products) 
