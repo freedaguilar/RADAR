@@ -41,6 +41,7 @@ export function Audit({
   const [pendingNotes, setPendingNotes] = useState('');
   const [pendingChainId, setPendingChainId] = useState('');
   const [showPendingDeleteConfirm, setShowPendingDeleteConfirm] = useState(false);
+  const [isPendingDropdownOpen, setIsPendingDropdownOpen] = useState(false);
 
   const [isAnalyzingPending, setIsAnalyzingPending] = useState(false);
   const [aiFeedbackMessage, setAiFeedbackMessage] = useState<string | null>(null);
@@ -218,6 +219,7 @@ export function Audit({
     setPendingNotes(meta.originalNotes);
     setPendingChainId(rec.chainId);
     setShowPendingDeleteConfirm(false);
+    setIsPendingDropdownOpen(false);
     
     // Reset AI analysis feedback
     setAiFeedbackMessage(null);
@@ -639,35 +641,56 @@ export function Audit({
                             type="text"
                             placeholder="Busque pelo nome, marca ou categoria..."
                             value={pendingSearchQuery}
-                            onChange={(e) => setPendingSearchQuery(e.target.value)}
+                            onFocus={() => setIsPendingDropdownOpen(true)}
+                            onBlur={() => setTimeout(() => setIsPendingDropdownOpen(false), 200)}
+                            onChange={(e) => {
+                              setPendingSearchQuery(e.target.value);
+                              setIsPendingDropdownOpen(true);
+                            }}
                             className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-sans font-bold text-slate-700 placeholder-slate-450 focus:outline-none focus:bg-white h-9"
                           />
                           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.8 font-extrabold" />
                         </div>
 
                         {/* Autocomplete selection dropdown */}
-                        <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-150 rounded-xl shadow-lg z-55 max-h-44 overflow-y-auto">
-                          {pendingFilteredProducts.length > 0 ? (
-                            pendingFilteredProducts.map(p => (
-                              <button
-                                key={p.id}
-                                type="button"
-                                onClick={() => {
-                                  setSelectedProductForPending(p);
-                                  setPendingSearchQuery(p.name);
-                                }}
-                                className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center justify-between border-b border-slate-50 last:border-none cursor-pointer"
-                              >
-                                <span>{p.name} {p.weight ? `(${p.weight})` : ''}</span>
-                                <span className="text-[8px] bg-slate-150 text-slate-500 font-mono px-1 rounded uppercase tracking-wider">{p.category}</span>
-                              </button>
-                            ))
-                          ) : (
-                            <div className="p-3 text-[10px] text-gray-400 italic text-center font-sans">
-                              Nenhum produto correspondente cadastrado.
-                            </div>
-                          )}
-                        </div>
+                        {isPendingDropdownOpen && (
+                          <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-150 rounded-xl shadow-lg z-55 max-h-44 overflow-y-auto">
+                            {pendingFilteredProducts.length > 0 ? (
+                              pendingFilteredProducts.map(p => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedProductForPending(p);
+                                    setPendingSearchQuery(p.name);
+                                    setIsPendingDropdownOpen(false);
+                                  }}
+                                  className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center justify-between border-b border-slate-100 last:border-none cursor-pointer"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    {p.imageUrl ? (
+                                      <img
+                                        src={p.imageUrl}
+                                        alt={p.name}
+                                        className="w-6 h-6 rounded object-contain bg-white border border-slate-100 shrink-0"
+                                      />
+                                    ) : (
+                                      <div className="w-6 h-6 rounded bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                                        <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
+                                      </div>
+                                    )}
+                                    <span className="truncate">{p.name} {p.weight ? `(${p.weight})` : ''}</span>
+                                  </div>
+                                  <span className="text-[8px] bg-slate-150 text-slate-600 font-mono px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 ml-1.5">{p.category}</span>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="p-3 text-[10px] text-gray-400 italic text-center font-sans">
+                                Nenhum produto correspondente cadastrado.
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
