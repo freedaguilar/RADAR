@@ -20,7 +20,9 @@ import {
   Clock,
   Package,
   Camera,
+  Download,
 } from "lucide-react";
+import * as XLSX from "xlsx";
 import { Product, Chain, PriceRecord } from "../types";
 import { normalizeString } from "../lib/textUtils";
 import { getOutdatedProducts } from "../lib/productUtils";
@@ -102,6 +104,251 @@ export function Products({
   const [displayMode, setDisplayMode] = useState<"grid" | "list">("grid");
   const [productPhotoModal, setProductPhotoModal] = useState<{ url: string; name: string } | null>(null);
   const [showRegisterPriceModal, setShowRegisterPriceModal] = useState(false);
+
+  // Excel Export Modal states
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportChainIds, setExportChainIds] = useState<string[]>(["Todas"]);
+  const [exportCategories, setExportCategories] = useState<string[]>(["Todas"]);
+  const [exportBrandTypes, setExportBrandTypes] = useState<string[]>([
+    "propria-oetker",
+    "propria-mavalerio",
+    "concorrentes",
+  ]);
+  const [exportIncludeHistory, setExportIncludeHistory] = useState<boolean>(true);
+  const [exportIsGenerating, setExportIsGenerating] = useState<boolean>(false);
+
+  const handleExecuteExcelExport = () => {
+    setExportIsGenerating(true);
+    try {
+      // 1. Filter products based on selected categories and brands
+      const filteredProds = products.filter((p) => {
+        if (!p.active) return false;
+
+        // Category check
+        if (!exportCategories.includes("Todas") && !exportCategories.includes(p.category)) {
+          return false;
+        }
+
+        // Brand checks
+        let matchesBrandType = false;
+        if (exportBrandTypes.includes("propria-oetker") && !p.isCompetitor && p.brand === "Dr. Oetker") {
+          matchesBrandType = true;
+        }
+        if (
+          exportBrandTypes.includes("propria-mavalerio") &&
+          !p.isCompetitor &&
+          (p.brand?.toLowerCase().includes("mavalerio") || p.brand?.toLowerCase().includes("mavalério"))
+        ) {
+          matchesBrandType = true;
+        }
+        if (exportBrandTypes.includes("concorrentes") && p.isCompetitor) {
+          matchesBrandType = true;
+        }
+
+        return matchesBrandType;
+      });
+
+      // 2. Select matching records
+      const prodIdsSet = new Set(filteredProds.map((p) => p.id));
+      let matchingRecords = records.filter((r) => prodIdsSet.has(r.productId));
+
+      // Network check
+      if (!exportChainIds.includes("Todas")) {
+        matchingRecords = matchingRecords.filter((r) => exportChainIds.includes(r.chainId));
+      }
+
+      // If NOT including full history, we only want the LATEST record per (productId, chainId)
+      if (!exportIncludeHistory) {
+        // Group by productId + chainId
+        const latestMap = new Map<string, PriceRecord>();
+        matchingRecords.forEach((r) => {
+          const key = `${r.productId}_${r.chainId}`;
+          const currentLatest = latestMap.get(key);
+          if (!currentLatest || r.date.localeCompare(currentLatest.date) > 0) {
+            latestMap.set(key, r);
+          }
+        });
+        matchingRecords = Array.from(latestMap.values());
+      }
+
+      // 3. Prepare Sheet 1: "Relatório de Auditoria"
+      // Sort matchingRecords chronologically descending (newest first)
+      const sortedRecordsForSheet = [...matchingRecords].sort((a, b) => b.date.localeCompare(a.date));
+
+      const rowsAudit = sortedRecordsForSheet.map((r, idx) => {
+        const prod = products.find((p) => p.id === r.productId);
+        const ch = chains.find((c) => c.id === r.chainId);
+
+        return {
+          "Nº": idx + 1,
+          "Data do Registro": formatDateBR(r.date),
+          "Rede (PDV)": ch ? ch.name : "N/A",
+          "Produto": prod ? prod.name : "N/A",
+          "Marca": prod ? prod.brand : "N/A",
+          "Categoria": prod ? prod.category : "N/A",
+          "Subcategoria": prod ? (prod.subcategory || "") : "N/A",
+          "Gramatura": prod ? (prod.weight || "") : "N/A",
+          "Preço Unitário (R$)": r.price,
+          "Tipo de Registro": prod ? (prod.isCompetitor ? "Competidor" : "Própria") : "N/A",
+          "Preço Base (R$)": prod ? prod.basePrice : 0,
+          "Auditor": r.userName,
+          "Email do Auditor": r.userEmail,
+          "Observações": r.notes || "Sem observações",
+        };
+      });
+
+      // 4. Prepare Sheet 2: "Matriz de Comparação" (Latest prices side-by-side)
+      const selectedChains = exportChainIds.includes("Todas")
+        ? chains
+        : chains.filter((c) => exportChainIds.includes(c.id));
+
+      const rowsPivot = filteredProds.map((prod) => {
+        // Get prices across selected chains
+        const pricesMap = (latestPricePerChainMap[prod.id] || {}) as Record<string, number>;
+
+        // Filter price values to selected chains only
+        const activePrices: number[] = [];
+        const chainColumns: Record<string, any> = {};
+
+        selectedChains.forEach((ch) => {
+          const price = pricesMap[ch.id];
+          if (price !== undefined) {
+            chainColumns[ch.name] = price;
+            activePrices.push(price);
+          } else {
+            chainColumns[ch.name] = "-";
+          }
+        });
+
+        const avgVal = activePrices.length > 0 ? activePrices.reduce((a, b) => a + b, 0) / activePrices.length : 0;
+        const minVal = activePrices.length > 0 ? Math.min(...activePrices) : 0;
+        const maxVal = activePrices.length > 0 ? Math.max(...activePrices) : 0;
+        const dispersion = minVal > 0 ? ((maxVal - minVal) / minVal) * 100 : 0;
+
+        return {
+          "Código": prod.id.split("-")[0].toUpperCase(),
+          "Produto": prod.name,
+          "Marca": prod.brand || "Dr. Oetker",
+          "Categoria": prod.category,
+          "Subcategoria": prod.subcategory || "",
+          "Gramatura": prod.weight || "",
+          "Tipo": prod.isCompetitor ? "Concorrente" : "Própria",
+          ...chainColumns,
+          "Preço Médio (R$)": avgVal > 0 ? Number(avgVal.toFixed(2)) : "N/A",
+          "Preço Mínimo (R$)": minVal > 0 ? Number(minVal.toFixed(2)) : "N/A",
+          "Preço Máximo (R$)": maxVal > 0 ? Number(maxVal.toFixed(2)) : "N/A",
+          "Dispersão Máx/Mín (%)": dispersion > 0 ? `${dispersion.toFixed(1)}%` : "0%",
+        };
+      });
+
+      if (rowsAudit.length === 0 && rowsPivot.length === 0) {
+        alert("Nenhum preço ou produto encontrado com os filtros selecionados.");
+        setExportIsGenerating(false);
+        return;
+      }
+
+      // Create workbook
+      const wb = XLSX.utils.book_new();
+
+      // Create Sheet 1
+      if (rowsAudit.length > 0) {
+        const wsAudit = XLSX.utils.json_to_sheet(rowsAudit);
+
+        // Add basic column widths to make it clean
+        const wscolsAudit = [
+          { wch: 5 }, // Nº
+          { wch: 18 }, // Data do Registro
+          { wch: 25 }, // Rede (PDV)
+          { wch: 35 }, // Produto
+          { wch: 15 }, // Marca
+          { wch: 18 }, // Categoria
+          { wch: 15 }, // Subcategoria
+          { wch: 12 }, // Gramatura
+          { wch: 20 }, // Preço Unitário (R$)
+          { wch: 18 }, // Tipo de Registro
+          { wch: 15 }, // Preço Base (R$)
+          { wch: 18 }, // Auditor
+          { wch: 25 }, // Email do Auditor
+          { wch: 35 }, // Observações
+        ];
+        wsAudit["!cols"] = wscolsAudit;
+        XLSX.utils.book_append_sheet(wb, wsAudit, "Registro Histórico");
+      }
+
+      // Create Sheet 2 (Matriz)
+      if (rowsPivot.length > 0) {
+        const wsPivot = XLSX.utils.json_to_sheet(rowsPivot);
+        XLSX.utils.book_append_sheet(wb, wsPivot, "Painel Comparativo");
+      }
+
+      // Write file and save!
+      const fileNameStr = `exportacao_precos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      XLSX.writeFile(wb, fileNameStr);
+      setShowExportModal(false);
+    } catch (err: any) {
+      console.error("Erro ao exportar excel:", err);
+      alert("Houve um erro ao processar a planilha. Detalhes: " + err.message);
+    } finally {
+      setExportIsGenerating(false);
+    }
+  };
+
+  const handleToggleChain = (chainId: string) => {
+    if (chainId === "Todas") {
+      setExportChainIds(["Todas"]);
+    } else {
+      if (exportChainIds.includes("Todas")) {
+        // "Todas" is checked. Selecting a specific chain deselects all others and keeps only this one.
+        setExportChainIds([chainId]);
+      } else {
+        let updated = [...exportChainIds];
+        if (updated.includes(chainId)) {
+          updated = updated.filter((id) => id !== chainId);
+        } else {
+          updated.push(chainId);
+        }
+        if (updated.length === 0 || updated.length === chains.length) {
+          setExportChainIds(["Todas"]);
+        } else {
+          setExportChainIds(updated);
+        }
+      }
+    }
+  };
+
+  const handleToggleCategory = (catName: string) => {
+    const availableCategories = categories.filter((c) => c !== "Todas");
+    if (catName === "Todas") {
+      setExportCategories(["Todas"]);
+    } else {
+      if (exportCategories.includes("Todas")) {
+        // "Todas" is checked. Selecting a specific category deselects all others and keeps only this one.
+        setExportCategories([catName]);
+      } else {
+        let updated = [...exportCategories];
+        if (updated.includes(catName)) {
+          updated = updated.filter((c) => c !== catName);
+        } else {
+          updated.push(catName);
+        }
+        if (updated.length === 0 || updated.length === availableCategories.length) {
+          setExportCategories(["Todas"]);
+        } else {
+          setExportCategories(updated);
+        }
+      }
+    }
+  };
+
+  const handleToggleBrandType = (type: string) => {
+    if (exportBrandTypes.includes(type)) {
+      if (exportBrandTypes.length > 1) {
+        setExportBrandTypes(exportBrandTypes.filter((t) => t !== type));
+      }
+    } else {
+      setExportBrandTypes([...exportBrandTypes, type]);
+    }
+  };
 
   // O(1) map of record.id to its index in the original records list to determine insertion order
   const recordIndexMap = useMemo(() => {
@@ -804,6 +1051,26 @@ export function Products({
                 Acompanhe o portfólio monitorado nas principais redes e pontos
                 de venda.
               </p>
+            </div>
+
+            {/* Export Action Button */}
+            <div className="flex items-center gap-3 self-start md:self-center">
+              <button
+                id="export-excel-btn"
+                type="button"
+                onClick={() => {
+                  // Reset checkboxes on open to prefill nicely
+                  setExportChainIds(["Todas"]);
+                  setExportCategories(["Todas"]);
+                  setExportBrandTypes(["propria-oetker", "propria-mavalerio", "concorrentes"]);
+                  setExportIncludeHistory(true);
+                  setShowExportModal(true);
+                }}
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-xs hover:shadow-md transition-all text-xs sm:text-sm cursor-pointer select-none font-sans"
+              >
+                <Download className="w-4 h-4 text-white" />
+                <span>Exportar Preços (Excel)</span>
+              </button>
             </div>
           </div>
 
@@ -3281,6 +3548,272 @@ export function Products({
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Customizable Export Modal */}
+      {showExportModal && (
+        <div
+          id="custom-excel-export-modal"
+          onClick={() => setShowExportModal(false)}
+          className="fixed inset-0 z-55 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer"
+        >
+          <div
+            className="bg-white rounded-3xl max-w-2xl w-full border border-gray-150 overflow-hidden shadow-2xl relative cursor-default flex flex-col max-h-[90vh]"
+            onClick={(e) => e.stopPropagation()}
+            id="excel-export-modal-card"
+          >
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-[#F5F5F5]">
+              <div className="flex items-center gap-2.5">
+                <div className="bg-emerald-600 text-white p-2.5 rounded-xl">
+                  <Download className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-extrabold text-[#1A1A1A] font-sans uppercase tracking-wider">
+                    Configurar Exportação em Excel
+                  </h3>
+                  <p className="text-[10px] text-gray-500 mt-0.5 font-sans font-semibold">
+                    Selecione quais dados e segmentações deseja incluir na planilha baixada
+                  </p>
+                </div>
+              </div>
+              <button
+                id="close-export-modal-btn"
+                onClick={() => setShowExportModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 cursor-pointer focus:outline-none"
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="p-6 space-y-6 overflow-y-auto flex-1 font-sans">
+              
+              {/* Step 1: Chains (Redes) */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono">
+                    1. Filtrar por Redes (PDV)
+                  </span>
+                  <span className="text-[9px] text-gray-400 font-bold">
+                    {exportChainIds.includes("Todas") ? "Todas as redes selecionadas" : `${exportChainIds.length} selecionada(s)`}
+                  </span>
+                </div>
+                
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                    exportChainIds.includes("Todas")
+                      ? "border-emerald-500 ring-1 ring-emerald-500/20"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={exportChainIds.includes("Todas")}
+                      onChange={() => handleToggleChain("Todas")}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-extrabold text-slate-800">Todas as Redes</span>
+                  </label>
+                  
+                  {chains.map((ch) => (
+                    <label
+                      key={ch.id}
+                      className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                        exportChainIds.includes(ch.id) || exportChainIds.includes("Todas")
+                          ? "border-emerald-500 ring-1 ring-emerald-500/20"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={exportChainIds.includes(ch.id) || exportChainIds.includes("Todas")}
+                        onChange={() => handleToggleChain(ch.id)}
+                        className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-bold text-slate-700 truncate">{ch.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Step 2: Categories */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono">
+                    2. Filtrar por Categorias
+                  </span>
+                  <span className="text-[9px] text-gray-400 font-bold">
+                    {exportCategories.includes("Todas") ? "Todas as categorias" : `${exportCategories.length} selecionada(s)`}
+                  </span>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none col-span-1 sm:col-span-2 ${
+                    exportCategories.includes("Todas")
+                      ? "border-emerald-500 ring-1 ring-emerald-500/20"
+                      : "border-slate-200 hover:border-emerald-500"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={exportCategories.includes("Todas")}
+                      onChange={() => handleToggleCategory("Todas")}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-extrabold text-slate-800">Todas as Categorias</span>
+                  </label>
+
+                  {categories
+                    .filter((cat) => cat !== "Todas")
+                    .map((cat) => (
+                      <label
+                        key={cat}
+                        className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                          exportCategories.includes(cat) || exportCategories.includes("Todas")
+                            ? "border-emerald-500 ring-1 ring-emerald-500/20"
+                            : "border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={exportCategories.includes(cat) || exportCategories.includes("Todas")}
+                          onChange={() => handleToggleCategory(cat)}
+                          className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                        />
+                        <span className="text-xs font-bold text-slate-700 truncate">{cat}</span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+
+              {/* Step 3: Brands (Marcas) */}
+              <div className="space-y-2.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono block">
+                  3. Filtrar por Marcas
+                </span>
+                
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150/80 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <label
+                    className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                      exportBrandTypes.includes("propria-oetker")
+                        ? "border-emerald-500 bg-emerald-50/5 ring-1 ring-emerald-500/20"
+                        : "border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={exportBrandTypes.includes("propria-oetker")}
+                      onChange={() => handleToggleBrandType("propria-oetker")}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-extrabold text-slate-800">Dr. Oetker</span>
+                      <span className="text-[8px] text-slate-400 font-medium font-semibold">Marca Própria</span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                      exportBrandTypes.includes("propria-mavalerio")
+                        ? "border-emerald-500 bg-emerald-50/5 ring-1 ring-emerald-500/20"
+                        : "border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={exportBrandTypes.includes("propria-mavalerio")}
+                      onChange={() => handleToggleBrandType("propria-mavalerio")}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-extrabold text-slate-800">Mavalério</span>
+                      <span className="text-[8px] text-slate-400 font-medium font-semibold">Marca Própria</span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                      exportBrandTypes.includes("concorrentes")
+                        ? "border-emerald-500 bg-emerald-50/5 ring-1 ring-emerald-500/20"
+                        : "border-slate-200 hover:border-slate-300"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={exportBrandTypes.includes("concorrentes")}
+                      onChange={() => handleToggleBrandType("concorrentes")}
+                      className="w-4 h-4 text-emerald-605 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-xs font-extrabold text-slate-800">Concorrentes</span>
+                      <span className="text-[8px] text-slate-400 font-medium font-semibold">Todas concorrentes</span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Step 4: Include History Toggle */}
+              <div className="space-y-2.5">
+                <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono block">
+                  4. Detalhes e Histórico
+                </span>
+                
+                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-150/80 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div className="flex-1">
+                    <p className="text-xs font-bold text-slate-800">Histórico de Visitas Completo</p>
+                    <p className="text-[10px] text-slate-400 font-medium mt-0.5 leading-relaxed">
+                      Se ativado, cada alteração e pesquisa cadastrada gerará uma linha inteira na primeira aba. Se desativado, pegaremos apenas o último preço gôndola vigente de cada produto por rede.
+                    </p>
+                  </div>
+                  <div className="shrink-0 flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200">
+                    <span className="text-[10px] font-bold text-[#111827] uppercase tracking-wide">
+                      {exportIncludeHistory ? "Histórico Completo" : "Último Apenas"}
+                    </span>
+                    <label className="relative inline-flex items-center cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={exportIncludeHistory}
+                        onChange={(e) => setExportIncludeHistory(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-350 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-6 py-4.5 border-t border-gray-100 flex justify-end gap-3 bg-slate-50">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-800 transition shadow-2xs hover:bg-slate-50 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={exportIsGenerating}
+                onClick={handleExecuteExcelExport}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-400 text-white rounded-xl text-xs font-bold shadow hover:shadow-md transition cursor-pointer flex items-center gap-2"
+              >
+                {exportIsGenerating ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Processando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-4 h-4 text-white" />
+                    <span>Baixar Planilha Excel</span>
+                  </>
+                )}
+              </button>
+            </div>
+
           </div>
         </div>
       )}
