@@ -22,7 +22,6 @@ import {
   Camera,
   Download,
 } from "lucide-react";
-import * as XLSX from "xlsx";
 import { Product, Chain, PriceRecord } from "../types";
 import { normalizeString } from "../lib/textUtils";
 import { getOutdatedProducts } from "../lib/productUtils";
@@ -117,7 +116,7 @@ export function Products({
   const [exportIncludeHistory, setExportIncludeHistory] = useState<boolean>(true);
   const [exportIsGenerating, setExportIsGenerating] = useState<boolean>(false);
 
-  const handleExecuteExcelExport = () => {
+  const handleExecuteExcelExport = async () => {
     setExportIsGenerating(true);
     try {
       // 1. Filter products based on selected categories and brands
@@ -247,43 +246,43 @@ export function Products({
         return;
       }
 
-      // Create workbook
-      const wb = XLSX.utils.book_new();
+      // Montar payload para a API
+      const payload = {
+        rows_audit: rowsAudit,
+        rows_pivot: rowsPivot,
+        meta: {
+          data_geracao: new Date().toLocaleString('pt-BR'),
+          redes_selecionadas: exportChainIds.includes("Todas")
+            ? "Todas"
+            : chains.filter(c => exportChainIds.includes(c.id)).map(c => c.name).join(", "),
+          categorias_selecionadas: exportCategories.includes("Todas")
+            ? "Todas"
+            : exportCategories.join(", "),
+          marcas_selecionadas: exportBrandTypes
+            .map(t => t === "propria-oetker" ? "Dr. Oetker" : t === "propria-mavalerio" ? "Mavalério" : "Concorrentes")
+            .join(", "),
+        }
+      };
 
-      // Create Sheet 1
-      if (rowsAudit.length > 0) {
-        const wsAudit = XLSX.utils.json_to_sheet(rowsAudit);
+      // Chamar API e fazer download
+      const response = await fetch('/api/export-excel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
-        // Add basic column widths to make it clean
-        const wscolsAudit = [
-          { wch: 5 }, // Nº
-          { wch: 18 }, // Data do Registro
-          { wch: 25 }, // Rede (PDV)
-          { wch: 35 }, // Produto
-          { wch: 15 }, // Marca
-          { wch: 18 }, // Categoria
-          { wch: 15 }, // Subcategoria
-          { wch: 12 }, // Gramatura
-          { wch: 20 }, // Preço Unitário (R$)
-          { wch: 18 }, // Tipo de Registro
-          { wch: 15 }, // Preço Base (R$)
-          { wch: 18 }, // Auditor
-          { wch: 25 }, // Email do Auditor
-          { wch: 35 }, // Observações
-        ];
-        wsAudit["!cols"] = wscolsAudit;
-        XLSX.utils.book_append_sheet(wb, wsAudit, "Registro Histórico");
-      }
+      if (!response.ok) throw new Error('Falha na geração do arquivo');
 
-      // Create Sheet 2 (Matriz)
-      if (rowsPivot.length > 0) {
-        const wsPivot = XLSX.utils.json_to_sheet(rowsPivot);
-        XLSX.utils.book_append_sheet(wb, wsPivot, "Painel Comparativo");
-      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pesquisa_precos_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
 
-      // Write file and save!
-      const fileNameStr = `exportacao_precos_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      XLSX.writeFile(wb, fileNameStr);
       setShowExportModal(false);
     } catch (err: any) {
       console.error("Erro ao exportar excel:", err);

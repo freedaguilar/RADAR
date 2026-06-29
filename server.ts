@@ -5,6 +5,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import cors from "cors";
+import exportExcelHandler from "./api/export-excel";
 
 dotenv.config();
 
@@ -210,6 +211,16 @@ ${uniqueCorrections.map(corr => `- Quando identificar "${corr.detected_text}", o
     } catch (error: any) {
       console.error("Erro na análise de preço via Gemini:", error);
       res.status(500).json({ error: error.message || "Falha no processamento Inteligente de Preço." });
+    }
+  });
+
+  // API endpoint for exporting excel report with ExcelJS
+  app.post("/api/export-excel", async (req, res) => {
+    try {
+      await exportExcelHandler(req, res);
+    } catch (error: any) {
+      console.error("Erro no endpoint express de exportação:", error);
+      res.status(500).json({ error: error.message || "Falha na geração do arquivo Excel." });
     }
   });
 
