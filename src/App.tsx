@@ -588,7 +588,12 @@ export default function App() {
     { id: "registrar", label: "Registrar Preço", icon: Camera },
     { id: "auditoria", label: "Auditoria", icon: FileCheck2 },
     { id: "settings", label: "Configurações", icon: SettingsIcon },
-  ];
+  ].filter(item => {
+    if (state.currentUser?.role === 'promotor') {
+      return item.id !== 'auditoria';
+    }
+    return true;
+  });
 
   return (
     <div
@@ -696,7 +701,7 @@ export default function App() {
                   {state.currentUser.name}
                 </p>
                 <p className="text-[10px] text-gray-500 truncate lowercase">
-                  {state.currentUser.role === "gestor" ? "Gestor/Administrador" : "Vendedor / Campo"}
+                  {state.currentUser.role === "gestor" ? "Gestor/Administrador" : state.currentUser.role === "promotor" ? "Promotor" : "Vendedor / Campo"}
                 </p>
               </div>
             </div>
@@ -829,13 +834,15 @@ export default function App() {
             chains={state.chains}
             records={state.records}
             onSaveRecord={handleSavePriceRecord}
+            onUpdateRecord={handleUpdatePriceRecord}
+            onDeleteRecord={handleDeletePriceRecord}
             currentUser={state.currentUser}
             onNavigate={handleNavigate}
             pageParams={registerPageParams}
           />
         )}
 
-        {activeTab === "auditoria" && (
+        {activeTab === "auditoria" && state.currentUser?.role !== 'promotor' && (
           <Audit
             records={state.records}
             products={state.products}

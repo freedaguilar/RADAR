@@ -9,9 +9,11 @@ import { normalizeString, searchAndRankProducts, safeParseJSON, serializePending
 interface BatchItem {
   id: string;
   imagePreview: string; // compressed base64
+  imageUrl?: string;    // uploaded supabase storage url
+  recordId?: string;    // corresponding price_record id
   originalSizeKB: number;
   compressedSizeKB: number;
-  status: 'pending' | 'compressing' | 'analyzing' | 'success' | 'failed';
+  status: 'pending' | 'compressing' | 'uploading' | 'analyzing' | 'success' | 'failed';
   
   // Analyzed fields
   selectedProductId: string;
@@ -141,6 +143,8 @@ interface RegisterPriceProps {
   chains: Chain[];
   records?: PriceRecord[];
   onSaveRecord: (newRecord: PriceRecord) => void;
+  onUpdateRecord?: (updatedRecord: PriceRecord) => void;
+  onDeleteRecord?: (recordId: string) => void;
   currentUser: User | null;
   onNavigate?: (page: string, params?: any) => void;
   pageParams?: {
@@ -150,7 +154,7 @@ interface RegisterPriceProps {
   } | null;
 }
 
-export function RegisterPrice({ products, chains, records = [], onSaveRecord, currentUser, onNavigate, pageParams }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, records = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, pageParams }: RegisterPriceProps) {
   // Navigation Steps
   const [step, setStep] = useState<1 | 2 | 3>(1);
 
@@ -250,8 +254,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysisMessage, setAiAnalysisMessage] = useState('');
 
-  // Batch Mode States
-  const [registrationMode, setRegistrationMode] = useState<'single' | 'batch'>('single');
+  // Batch Mode Constant
+  const registrationMode = 'batch';
   const [fullscreenProductPhoto, setFullscreenProductPhoto] = useState<{ url: string; name: string } | null>(null);
   const [batchItems, setBatchItems] = useState<BatchItem[]>([]);
   const [batchProductSearches, setBatchProductSearches] = useState<Record<string, string>>({});
@@ -383,16 +387,61 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     }
   };
 
+  // Synchronizes changes from a batch item to the Supabase database in real-time
+  const updateBatchItem = (itemId: string, updates: Partial<BatchItem>) => {
+    setBatchItems(prev => {
+      const updatedList = prev.map(item => {
+        if (item.id === itemId) {
+          const updatedItem = { ...item, ...updates };
+          
+          // Trigger DB update in background if it has a recordId
+          if (updatedItem.recordId && onUpdateRecord) {
+            const todayStr = new Date().toISOString().split('T')[0];
+            const cleanPrice = updatedItem.price ? updatedItem.price.replace(',', '.') : '0';
+            let priceNum = parseFloat(cleanPrice);
+            if (isNaN(priceNum) || priceNum <= 0) {
+              priceNum = 0;
+            }
+
+            const aiProductSuggested = updatedItem.productSearch || '';
+            const aiPriceSuggested = priceNum;
+            const finalNotes = serializePendingMeta(aiProductSuggested, aiPriceSuggested, updatedItem.notes);
+
+            const updatedRecord: PriceRecord = {
+              id: updatedItem.recordId,
+              productId: updatedItem.selectedProductId || '',
+              chainId: updatedItem.selectedChainId || selectedChainId,
+              price: priceNum,
+              date: todayStr,
+              imageUrl: updatedItem.imageUrl || '',
+              notes: finalNotes,
+              userName: currentUser?.name || 'Vendedor Autônomo',
+              userEmail: currentUser?.email || 'vendas@radar.com'
+            };
+
+            onUpdateRecord(updatedRecord);
+          }
+          return updatedItem;
+        }
+        return item;
+      });
+      return updatedList;
+    });
+  };
+
+  // Removes a batch item from the UI and deletes its pending record from Supabase
+  const removeBatchItem = (item: BatchItem) => {
+    setBatchItems(prev => prev.filter(i => i.id !== item.id));
+    if (item.recordId && onDeleteRecord) {
+      onDeleteRecord(item.recordId);
+    }
+  };
+
   // Batch Mode Utility: compress target file using promise and limits
   const handleBatchFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setErrorMsg('');
     const files = Array.from(e.target.files || []) as File[];
     if (files.length === 0) return;
-
-    if (batchItems.length + files.length > 10) {
-      setErrorMsg('O lote de fotos está limitado a no máximo 10 imagens.');
-      return;
-    }
 
     files.forEach((file: File) => {
       if (!file.type.startsWith('image/')) {
@@ -425,18 +474,49 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         try {
           // Comprime a imagem para 800x800 antes da API como exigido
           const comp = await compressSingleImagePromise(result, file.size);
+          
           setBatchItems(prev => prev.map(item => item.id === tempId ? {
             ...item,
             imagePreview: comp.compressedBase64,
             originalSizeKB: comp.originalSizeKB,
             compressedSizeKB: comp.compressedSizeKB,
-            status: 'pending' as const
+            status: 'uploading' as const
           } : item));
-        } catch (err) {
-          console.error('File compression failed for batch item:', err);
+
+          // Realiza o upload automático imediato para armazenamento
+          const finalImageUrl = await uploadToSupabaseStorage(comp.compressedBase64, 'images');
+
+          // Registra na auditoria imediatamente (como pendente de preenchimento)
+          const todayStr = new Date().toISOString().split('T')[0];
+          const recordId = `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+          const finalNotes = serializePendingMeta('', 0, '');
+
+          const newRecord: PriceRecord = {
+            id: recordId,
+            productId: '',
+            chainId: selectedChainId,
+            price: 0,
+            date: todayStr,
+            imageUrl: finalImageUrl || '',
+            notes: finalNotes,
+            userName: currentUser?.name || 'Vendedor Autônomo',
+            userEmail: currentUser?.email || 'vendas@radar.com'
+          };
+
+          onSaveRecord(newRecord);
+
           setBatchItems(prev => prev.map(item => item.id === tempId ? {
             ...item,
+            imageUrl: finalImageUrl,
+            recordId: recordId,
             status: 'pending' as const
+          } : item));
+
+        } catch (err) {
+          console.error('File compression/upload/save failed for batch item:', err);
+          setBatchItems(prev => prev.map(item => item.id === tempId ? {
+            ...item,
+            status: 'failed' as const
           } : item));
         }
       };
@@ -447,10 +527,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   // Captura foto sequencial da câmera em lote e comprime em background
   const captureBatchFrame = async () => {
     if (!videoRef.current || !canvasRef.current) return;
-    if (batchItems.length >= 10) {
-      setErrorMsg('Limite máximo de 10 fotos no lote atingido.');
-      return;
-    }
 
     const cw = videoRef.current.videoWidth || 640;
     const ch = videoRef.current.videoHeight || 480;
@@ -484,18 +560,49 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
     try {
       const comp = await compressSingleImagePromise(dataUrl, originalBytes);
+      
       setBatchItems(prev => prev.map(item => item.id === tempId ? {
         ...item,
         imagePreview: comp.compressedBase64,
         originalSizeKB: comp.originalSizeKB,
         compressedSizeKB: comp.compressedSizeKB,
-        status: 'pending' as const
+        status: 'uploading' as const
       } : item));
-    } catch (err) {
-      console.error('Camera frame compression failed:', err);
+
+      // Realiza o upload automático imediato para armazenamento
+      const finalImageUrl = await uploadToSupabaseStorage(comp.compressedBase64, 'images');
+
+      // Registra na auditoria imediatamente (como pendente de preenchimento)
+      const todayStr = new Date().toISOString().split('T')[0];
+      const recordId = `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const finalNotes = serializePendingMeta('', 0, '');
+
+      const newRecord: PriceRecord = {
+        id: recordId,
+        productId: '',
+        chainId: selectedChainId,
+        price: 0,
+        date: todayStr,
+        imageUrl: finalImageUrl || '',
+        notes: finalNotes,
+        userName: currentUser?.name || 'Vendedor Autônomo',
+        userEmail: currentUser?.email || 'vendas@radar.com'
+      };
+
+      onSaveRecord(newRecord);
+
       setBatchItems(prev => prev.map(item => item.id === tempId ? {
         ...item,
+        imageUrl: finalImageUrl,
+        recordId: recordId,
         status: 'pending' as const
+      } : item));
+
+    } catch (err) {
+      console.error('Camera frame compression/upload/save failed:', err);
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        status: 'failed' as const
       } : item));
     }
   };
@@ -612,8 +719,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             msg = `A IA leu produto: "${data.produto || 'Não identificado'}" sem correspondência.`;
           }
 
-          setBatchItems(prev => prev.map(i => i.id === item.id ? {
-            ...i,
+          updateBatchItem(item.id, {
             status: 'success' as const,
             selectedProductId: matchedProdId,
             productSearch: matchedProdName || data.produto || '',
@@ -623,7 +729,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             aiAnalysisMessage: msg,
             aiSuggestedProductId: productMatched ? matchedProdId : undefined,
             aiDetectedText: data.produto || data.detectedText || undefined
-          } : i));
+          });
 
           // Atualiza também os campos de busca textuais
           if (matchedProdName || data.produto) {
@@ -637,12 +743,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           throw new Error('Falha no JSON da IA');
         }
       } catch (err) {
-        setBatchItems(prev => prev.map(i => i.id === item.id ? {
-          ...i,
+        updateBatchItem(item.id, {
           status: 'failed' as const,
           aiAnalysisMessage: 'Não foi possível identificar — preencha manualmente',
           confidence: 'low' as const
-        } : i));
+        });
       } finally {
         completedCount++;
         setBatchAnalysisProgress(`Analisando ${completedCount} de ${totalCount} fotos...`);
@@ -677,10 +782,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       let idx = 0;
       for (const item of batchItems) {
         setBatchSaveProgress({ current: idx + 1, total: batchItems.length });
-        let finalImageUrl = '';
-        if (item.imagePreview) {
-          finalImageUrl = await uploadToSupabaseStorage(item.imagePreview, 'images');
-        }
 
         let finalNotes = item.notes.trim();
         if (item.aiAnalysisMessage) {
@@ -689,17 +790,40 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
 
         const priceNum = parseFloat(item.price.replace(',', '.'));
 
-        const newRecord: PriceRecord = {
-          id: `rec-usr-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          productId: item.selectedProductId,
-          chainId: item.selectedChainId || selectedChainId,
-          price: priceNum,
-          date: todayStr,
-          imageUrl: finalImageUrl || undefined,
-          notes: finalNotes || undefined,
-          userName: currentUser?.name || 'Vendedor Autônomo',
-          userEmail: currentUser?.email || 'vendas@radar.com'
-        };
+        if (item.recordId && onUpdateRecord) {
+          // Update existing pending record in database to make it final (stripping __PENDING_METADATA__)
+          const updatedRecord: PriceRecord = {
+            id: item.recordId,
+            productId: item.selectedProductId,
+            chainId: item.selectedChainId || selectedChainId,
+            price: priceNum,
+            date: todayStr,
+            imageUrl: item.imageUrl || '',
+            notes: finalNotes || undefined,
+            userName: currentUser?.name || 'Vendedor Autônomo',
+            userEmail: currentUser?.email || 'vendas@radar.com'
+          };
+
+          onUpdateRecord(updatedRecord);
+        } else {
+          // Fallback if not saved in background
+          let finalImageUrl = item.imageUrl || '';
+          if (!finalImageUrl && item.imagePreview) {
+            finalImageUrl = await uploadToSupabaseStorage(item.imagePreview, 'images');
+          }
+          const newRecord: PriceRecord = {
+            id: `rec-usr-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            productId: item.selectedProductId,
+            chainId: item.selectedChainId || selectedChainId,
+            price: priceNum,
+            date: todayStr,
+            imageUrl: finalImageUrl || undefined,
+            notes: finalNotes || undefined,
+            userName: currentUser?.name || 'Vendedor Autônomo',
+            userEmail: currentUser?.email || 'vendas@radar.com'
+          };
+          onSaveRecord(newRecord);
+        }
 
         // Save correction silently in background if user altered the AI's suggested product in the batch item
         if (item.aiDetectedText) {
@@ -718,7 +842,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
           }
         }
 
-        onSaveRecord(newRecord);
         idx++;
       }
 
@@ -747,51 +870,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   const handleBatchSaveLater = async () => {
     setErrorMsg('');
     setIsSavingLater(true);
-    setBatchSaveProgress({ current: 0, total: batchItems.length });
-    let countSaved = 0;
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-
-      let idx = 0;
-      for (const item of batchItems) {
-        setBatchSaveProgress({ current: idx + 1, total: batchItems.length });
-        let finalImageUrl = '';
-        if (item.imagePreview) {
-          finalImageUrl = await uploadToSupabaseStorage(item.imagePreview, 'images');
-        }
-
-        // Parse suggested price or zero
-        const cleanPrice = item.price ? item.price.replace(',', '.') : '0';
-        let priceNum = parseFloat(cleanPrice);
-        if (isNaN(priceNum) || priceNum <= 0) {
-          priceNum = 0;
-        }
-
-        // Serialize metadata inside notes field using serializePendingMeta
-        const aiProductSuggested = item.productSearch || '';
-        const aiPriceSuggested = priceNum;
-        const finalNotes = serializePendingMeta(aiProductSuggested, aiPriceSuggested, item.notes);
-
-        const newRecord: PriceRecord = {
-          id: `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          productId: '', // Sem produto vinculado (salva como null no banco)
-          chainId: item.selectedChainId || selectedChainId,
-          price: priceNum, // Preço provisório
-          date: todayStr,
-          imageUrl: finalImageUrl || '',
-          notes: finalNotes,
-          userName: currentUser?.name || 'Vendedor Autônomo',
-          userEmail: currentUser?.email || 'vendas@radar.com'
-        };
-
-        onSaveRecord(newRecord);
-        countSaved++;
-        idx++;
-      }
-
-      setSavedLaterCount(countSaved);
+      // Como os registros já foram salvos no banco de dados em tempo real no background,
+      // nós apenas confirmamos e limpamos a tela de lote.
+      setSavedLaterCount(batchItems.length);
       
-      // Limpa os dados do lote corporativo
       setBatchItems([]);
       setBatchProductSearches({});
       setBatchShowSearchDropdowns({});
@@ -806,7 +889,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       setErrorMsg('Ocorreu um erro ao salvar o lote pendente. Por favor, tente novamente.');
     } finally {
       setIsSavingLater(false);
-      setBatchSaveProgress(null);
     }
   };
 
@@ -817,13 +899,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
   };
 
   const handleBatchItemProductSelect = (itemId: string, selectedProduct: Product) => {
-    setBatchItems(prev =>
-      prev.map(item =>
-        item.id === itemId
-          ? { ...item, selectedProductId: selectedProduct.id, productSearch: selectedProduct.name }
-          : item
-      )
-    );
+    updateBatchItem(itemId, { selectedProductId: selectedProduct.id, productSearch: selectedProduct.name });
     setBatchProductSearches(prev => ({
       ...prev,
       [itemId]: selectedProduct.name
@@ -920,7 +996,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
         setCompressedSizeKB(Math.round(originalBytes / 1024));
         setCompressionRatio(0);
         setIsCompressing(false);
-        analyzeImage(base64Str);
+        if (currentUser?.role === 'promotor') {
+          setStep(3);
+        } else {
+          analyzeImage(base64Str);
+        }
         return;
       }
 
@@ -956,7 +1036,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       const savedPct = Math.round((1 - (actualCompressedBytes / originalBytes)) * 100);
       setCompressionRatio(savedPct > 0 ? savedPct : 0);
       setIsCompressing(false);
-      analyzeImage(compressedBase64);
+      
+      if (currentUser?.role === 'promotor') {
+        setStep(3);
+      } else {
+        analyzeImage(compressedBase64);
+      }
     };
   };
 
@@ -1089,9 +1174,15 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
     }
 
     const priceNum = parseFloat(price.replace(',', '.'));
-    if (isNaN(priceNum) || priceNum <= 0 || price === '0,00') {
-      setErrorMsg('O preço de gôndola não pode ser R$ 0,00. Por favor, insira um preço válido.');
-      return;
+    
+    // Promotores salvam sem preço, com status pendente para auditoria
+    if (currentUser?.role === 'promotor') {
+      // Ignorar validação de preço
+    } else {
+      if (isNaN(priceNum) || priceNum <= 0 || price === '0,00') {
+        setErrorMsg('O preço de gôndola não pode ser R$ 0,00. Por favor, insira um preço válido.');
+        return;
+      }
     }
 
     // Check duplicate: same product, same chain, same day (YYYY-MM-DD)
@@ -1119,6 +1210,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
       let finalNotes = notes.trim();
       if (aiAnalysisMessage) {
         finalNotes = finalNotes ? `[IA] ${finalNotes}` : '[IA] Monitorado via Scanner Inteligente';
+      }
+      
+      // Se for promotor, sempre injeta o metadata "Pendente" para auditoria,
+      // mesmo se o modo single for usado, para que não passe do fluxo de auditoria
+      if (currentUser?.role === 'promotor') {
+        finalNotes = serializePendingMeta(selectedProductId, priceNum || 0, finalNotes);
       }
 
       const newRecord: PriceRecord = {
@@ -1339,161 +1436,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             )}
           </div>
 
-          {/* Seletor de modo: Único vs Lote no topo da etapa como exigido */}
-          {!useCamera && !isAnalyzing && !isAnalyzingBatch && (
-            <div className="flex bg-slate-50 p-1 border border-slate-100 rounded-xl select-none" id="batch-toggle-tab-bar">
-              <button 
-                type="button" 
-                id="toggle-mode-single"
-                onClick={() => { 
-                  setRegistrationMode('single'); 
-                  setBatchItems([]); 
-                }} 
-                className={`flex-1 text-center py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${registrationMode === 'single' ? 'bg-white text-slate-800 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-700'}`}
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                Registrar 1 preço
-              </button>
-              <button 
-                type="button" 
-                id="toggle-mode-batch"
-                onClick={() => { 
-                  setRegistrationMode('batch'); 
-                  setImagePreview(null); 
-                }} 
-                className={`flex-1 text-center py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${registrationMode === 'batch' ? 'bg-white text-[#D40511] shadow-sm font-black border border-red-100' : 'text-slate-400 hover:text-slate-700'}`}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                Registrar vários preços ({batchItems.length}/10)
-              </button>
-            </div>
-          )}
-
-          {/* FLUXO REGISTRO ÚNICO (Comportamento original preservado) */}
-          {registrationMode === 'single' && (
-            <>
-              {!useCamera && !isAnalyzing ? (
-                <div className="space-y-6" id="photo-triggers-container">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-                    {/* Abrir Câmera */}
-                    <button
-                      id="btn-open-camera"
-                      type="button"
-                      onClick={startCamera}
-                      className="p-8 rounded-2xl bg-[#D40511] hover:bg-[#b0040e] text-white flex flex-col items-center justify-center gap-4 transition-all duration-300 group shadow-sm hover:shadow-md cursor-pointer"
-                    >
-                      <div className="p-4 bg-white/10 rounded-full group-hover:scale-105 transition-transform">
-                        <Camera className="w-8 h-8 text-white" />
-                      </div>
-                      <div className="text-center">
-                        <h3 className="font-extrabold text-base">Abrir Câmera</h3>
-                        <p className="text-xs text-white/70 mt-1 max-w-[160px] mx-auto font-medium leading-relaxed">
-                          Capture uma foto em tempo real para análise manual
-                        </p>
-                      </div>
-                    </button>
-
-                    {/* Selecionar Galeria */}
-                    <label
-                      id="label-select-gallery"
-                      className="p-8 rounded-2xl bg-white border border-slate-200 hover:border-[#D40511]/40 text-slate-800 flex flex-col items-center justify-center gap-4 transition-all duration-300 group shadow-2xs hover:shadow-xs cursor-pointer"
-                    >
-                      <div className="p-4 bg-slate-50 border border-slate-100 group-hover:bg-slate-100 group-hover:border-[#D40511]/20 rounded-full group-hover:scale-105 transition-all">
-                        <Image className="w-8 h-8 text-slate-500 group-hover:text-[#D40511]" />
-                      </div>
-                      <div className="text-center">
-                        <h3 className="font-extrabold text-base text-slate-800">Selecionar Galeria</h3>
-                        <p className="text-xs text-slate-400 mt-1 max-w-[160px] mx-auto font-medium leading-relaxed">
-                          Selecione um arquivo de imagem local do aparelho
-                        </p>
-                      </div>
-                      <input
-                        id="register-photo-file-picker"
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                    </label>
-                  </div>
-
-                  <div className="flex flex-col items-center gap-4 pt-4 border-t border-slate-50 text-center">
-                    <button
-                      id="btn-skip-photo"
-                      type="button"
-                      onClick={() => {
-                        setImagePreview(null);
-                        setAiAnalysisMessage('');
-                        setIsAnalyzing(false);
-                        setSelectedProductId('');
-                        setProductSearch('');
-                        setPrice('0,00');
-                        setNotes('');
-                        setStep(3);
-                      }}
-                      className="text-xs text-slate-500 hover:text-[#D40511] font-bold transition-colors inline-flex items-center gap-1 cursor-pointer"
-                    >
-                      Registrar sem foto →
-                    </button>
-                  </div>
-                </div>
-              ) : useCamera ? (
-                /* Live Camera view screen */
-                <div className="space-y-5" id="live-camera-feed-box-camera">
-                  <div className="relative rounded-2xl overflow-hidden bg-black aspect-video max-h-72 shadow-inner border border-slate-800">
-                    <video ref={videoRef} className="w-full h-full object-cover" playsInline muted></video>
-                    <canvas ref={canvasRef} className="hidden"></canvas>
-                    {/* Overlay bounding box effect */}
-                    <div className="absolute inset-x-6 inset-y-8 border border-dashed border-violet-400/50 rounded-lg pointer-events-none flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-violet-400 animate-pulse absolute"></div>
-                      <span className="text-[10px] text-violet-300 font-mono tracking-widest font-extrabold uppercase bg-black/65 px-2.5 py-0.5 rounded border border-violet-500/20">Ajuste o Enquadramento</span>
-                    </div>
-                  </div>
-                  <div className="flex justify-center gap-3">
-                    <button
-                      id="capture-shutter-btn"
-                      type="button"
-                      onClick={captureFrame}
-                      className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer shadow-sm"
-                    >
-                      <CheckCircle2 className="w-4 h-4 shrink-0" />
-                      <span>Capturar Foto</span>
-                    </button>
-                    <button
-                      id="cancel-camera-stream-btn"
-                      type="button"
-                      onClick={stopCamera}
-                      className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <XCircle className="w-4 h-4 shrink-0" />
-                      <span>Cancelar</span>
-                    </button>
-                  </div>
-                </div>
-              ) : isAnalyzing ? (
-                /* AI Scanner Processing animation screen */
-                <div className="flex flex-col items-center justify-center gap-4 py-12 text-center" id="ai-scanning-progress">
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-full border-4 border-slate-50 border-t-violet-600 animate-spin"></div>
-                    <Sparkles className="w-6 h-6 text-violet-600 animate-pulse absolute top-5 left-5" />
-                  </div>
-                  <div>
-                    <h4 className="font-extrabold text-slate-800 text-sm">Scanner Inteligente Ativo</h4>
-                    <p className="text-xs text-slate-400 mt-1 animate-pulse font-medium">Lendo produto e preço da prateleira por Inteligência Artificial...</p>
-                  </div>
-                  {imagePreview && (
-                    <div className="mt-4 max-w-xs relative rounded-xl overflow-hidden border border-slate-100 shadow-2xs">
-                      <img src={imagePreview} alt="Enviado" className="max-h-36 object-contain opacity-70" referrerPolicy="no-referrer" />
-                    </div>
-                  )}
-                </div>
-              ) : null}
-            </>
-          )}
-
           {/* FLUXO REGISTRO EM LOTE (Novos Elementos) */}
-          {registrationMode === 'batch' && (
-            <div className="space-y-6" id="batch-workspace">
+          <div className="space-y-6" id="batch-workspace">
               {!useCamera && !isAnalyzingBatch ? (
                 <div className="space-y-6">
                   {/* Triggers de entrada do Lote */}
@@ -1518,7 +1462,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                       className="p-6 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 flex flex-col items-center justify-center gap-2.5 transition duration-150 cursor-pointer shadow-2xs hover:shadow-xs"
                     >
                       <Image className="w-6 h-6 text-emerald-600" />
-                      <span className="text-xs font-bold">Importar Múltiplas Imagens (Max 10)</span>
+                      <span className="text-xs font-bold">Importar Múltiplas Imagens</span>
                       <span className="text-[10px] text-slate-400 font-medium font-sans">Selecione lote de fotos da galeria técnica</span>
                       <input
                         id="register-batch-file-selector"
@@ -1539,6 +1483,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                         <button
                           type="button"
                           onClick={() => {
+                            batchItems.forEach(item => {
+                              if (item.recordId && onDeleteRecord) {
+                                onDeleteRecord(item.recordId);
+                              }
+                            });
                             setBatchItems([]);
                             setBatchProductSearches({});
                             setBatchShowSearchDropdowns({});
@@ -1579,7 +1528,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                             <button
                               type="button"
                               onClick={() => {
-                                setBatchItems(prev => prev.filter(i => i.id !== item.id));
+                                removeBatchItem(item);
                               }}
                               className="absolute top-1.5 right-1.5 p-1.5 bg-black/60 rounded-full text-white hover:bg-rose-600 hover:scale-115 cursor-pointer transition-all shadow-md shrink-0"
                             >
@@ -1631,22 +1580,24 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                           )}
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={analyzeBatchAll}
-                          disabled={isSavingLater || isSavingAll || batchItems.some(i => i.status === 'compressing')}
-                          className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-8 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide h-12"
-                        >
-                          <Sparkles className="w-4 h-4 text-white shrink-0 animate-pulse" />
-                          <span>Analisar Lote com IA ({batchItems.length} Fotos)</span>
-                        </button>
+                        {currentUser?.role !== 'promotor' && (
+                          <button
+                            type="button"
+                            onClick={analyzeBatchAll}
+                            disabled={isSavingLater || isSavingAll || batchItems.some(i => i.status === 'compressing')}
+                            className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-8 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide h-12"
+                          >
+                            <Sparkles className="w-4 h-4 text-white shrink-0 animate-pulse" />
+                            <span>Analisar Lote com IA ({batchItems.length} Fotos)</span>
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (
                     <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3">
                       <Layers className="w-10 h-10 text-slate-300 animate-pulse" />
                       <p className="font-bold text-slate-500 text-sm">Nenhuma foto adicionada ao lote</p>
-                      <p className="max-w-sm text-[11px] text-slate-400 font-medium font-sans">Adicione até 10 fotos de gôndola. O sistema reduzirá automaticamente a resolução de cada imagem para 800x800 antes da análise inteligente.</p>
+                      <p className="max-w-sm text-[11px] text-slate-400 font-medium font-sans">Adicione fotos de gôndola ao lote. O sistema reduzirá automaticamente a resolução de cada imagem para 800x800 antes da análise inteligente.</p>
                     </div>
                   )}
                 </div>
@@ -1658,7 +1609,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                     {/* Live indicator of bulk shots */}
                     <div className="absolute top-4 left-4 z-10 bg-black/75 backdrop-blur-md text-white border border-[#D40511]/45 rounded-lg px-3 py-1 text-xs font-extrabold font-mono flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse shrink-0"></span>
-                      <span>Lote: {batchItems.length}/10 Fotos Capturadas</span>
+                      <span>Lote: {batchItems.length} {batchItems.length === 1 ? 'Foto Capturada' : 'Fotos Capturadas'}</span>
                     </div>
 
                     {/* Scanner aesthetic target */}
@@ -1671,11 +1622,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                     <button
                       type="button"
                       onClick={captureBatchFrame}
-                      disabled={batchItems.length >= 10}
                       className="px-6 py-3 bg-[#D40511] hover:bg-[#b0040e] text-white rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed uppercase"
                     >
                       <Camera className="w-4 h-4 shrink-0" />
-                      <span>{batchItems.length >= 10 ? 'Lote Cheio' : 'Tirar Foto (Adicionar)'}</span>
+                      <span>Tirar Foto (Adicionar)</span>
                     </button>
 
                     <button
@@ -1715,7 +1665,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 </div>
               ) : null}
             </div>
-          )}
 
           <div className="pt-4 border-t border-slate-50 flex justify-between items-center">
             <button
@@ -1754,7 +1703,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
             )}
           </div>
 
-          {registrationMode === 'batch' ? (
+          <>
             /* CONFIGURAÇÃO EM FILA DE CARDS PARA O MODO EM LOTE */
             <div className="space-y-6 animate-fade-in" id="batch-confirmation-queue">
               <div className="p-4 bg-violet-50/50 border border-violet-100 rounded-xl flex items-start gap-3">
@@ -1807,7 +1756,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                           <button
                             type="button"
                             onClick={() => {
-                              setBatchItems(prev => prev.filter(i => i.id !== item.id));
+                              removeBatchItem(item);
                             }}
                             className="text-slate-400 hover:text-rose-600 p-1 rounded-lg transition shrink-0 cursor-pointer hover:bg-slate-50"
                             title="Remover esta foto do lote"
@@ -1862,7 +1811,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                   setBatchProductSearches(prev => ({ ...prev, [item.id]: val }));
                                   setBatchShowSearchDropdowns(prev => ({ ...prev, [item.id]: true }));
                                   if (!val) {
-                                    setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, selectedProductId: '' } : i));
+                                    updateBatchItem(item.id, { selectedProductId: '' });
                                   }
                                 }}
                                 onFocus={() => {
@@ -1875,7 +1824,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                   type="button"
                                   onClick={() => {
                                     setBatchProductSearches(prev => ({ ...prev, [item.id]: '' }));
-                                    setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, selectedProductId: '' } : i));
+                                    updateBatchItem(item.id, { selectedProductId: '' });
                                     setBatchShowSearchDropdowns(prev => ({ ...prev, [item.id]: true }));
                                   }}
                                   className="absolute right-3.5 top-3 text-[10px] text-slate-400 hover:text-slate-600 font-bold cursor-pointer bg-white px-1.5"
@@ -2006,7 +1955,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                   value={item.price || '0,00'}
                                   onChange={(e) => {
                                     const val = formatToCalculatorPrice(e.target.value);
-                                    setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, price: val } : i));
+                                    updateBatchItem(item.id, { price: val });
                                   }}
                                   className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-slate-800 focus:outline-none focus:bg-white focus:border-[#D40511]"
                                   required
@@ -2038,7 +1987,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                                 value={item.selectedChainId || selectedChainId}
                                 onChange={(e) => {
                                   const cId = e.target.value;
-                                  setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, selectedChainId: cId } : i));
+                                  updateBatchItem(item.id, { selectedChainId: cId });
                                 }}
                                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-sans font-extrabold text-slate-700 focus:outline-none focus:bg-white focus:border-[#D40511] h-9"
                                 required
@@ -2061,7 +2010,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                               value={item.notes}
                               onChange={(e) => {
                                 const val = e.target.value;
-                                setBatchItems(prev => prev.map(i => i.id === item.id ? { ...i, notes: val } : i));
+                                updateBatchItem(item.id, { notes: val });
                               }}
                               className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-[#D40511]"
                             />
@@ -2155,290 +2104,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, cu
                 </div>
               </div>
             </div>
-          ) : (
-            /* CONFIGURAÇÃO ORIGINAL PRESERVADA DO MODO UNITÁRIO */
-            <form onSubmit={handleSubmit} className="space-y-6" id="single-form-workspace">
-              {/* AI Banner feedback if image exists */}
-              {imagePreview && (
-                <div className="p-4 bg-violet-50/45 border border-violet-100/50 rounded-xl flex flex-col sm:flex-row gap-4 items-start sm:items-center" id="ai-feedback-banner">
-                  {/* Miniature Thumbnail of the taken photo */}
-                  <div 
-                    className="w-20 h-20 rounded-lg bg-white border border-slate-200 overflow-hidden shrink-0 flex items-center justify-center cursor-pointer hover:ring-2 hover:ring-[#D40511] transition-all relative group shadow-2xs select-none"
-                    onClick={() => {
-                      setFullscreenProductPhoto({ url: imagePreview, name: "Foto do Rótulo de Gôndola" });
-                    }}
-                    title="Clique para ver a foto em tela cheia"
-                  >
-                    <img 
-                      src={imagePreview} 
-                      alt="Foto da Gôndola" 
-                      className="w-full h-full object-contain"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                      <Search className="w-4 h-4 text-white" />
-                    </div>
-                  </div>
-
-                  <div className="flex-1 space-y-3 min-w-0 w-full">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-violet-50/20 p-1 rounded-lg">
-                      <div className="flex items-start gap-2.5 min-w-0">
-                        <Sparkles className="w-5 h-5 text-violet-600 shrink-0 mt-0.5 animate-pulse" />
-                        <div className="min-w-0">
-                          <h4 className="text-xs font-bold text-violet-900">Leitura Inteligente Concluída</h4>
-                          <p className="text-xs text-violet-700/90 mt-0.5 leading-relaxed">{aiAnalysisMessage || 'Valores preenchidos sob os rótulos de gôndola.'}</p>
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => analyzeImage(imagePreview)}
-                        className="sm:self-center shrink-0 flex items-center justify-center gap-1 text-[9px] bg-violet-600 hover:bg-violet-700 text-white font-extrabold py-1.5 px-3 rounded-lg font-mono transition cursor-pointer"
-                      >
-                        <RefreshCw className="w-2.5 h-2.5 animate-spin-hover" />
-                        Reanalisar
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Inputs */}
-              <div className="space-y-5" id="form-fields-grid">
-                
-                {/* Product combo picker */}
-                <div className="relative" id="product-search-combobox">
-                  <label className="block text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-2">
-                    Produto Auditado *
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="register-product-search-input"
-                      type="text"
-                      placeholder="Digite o nome, marca ou peso do produto..."
-                      value={productSearch}
-                      onChange={(e) => {
-                        setProductSearch(e.target.value);
-                        setShowSearchDropdown(true);
-                      }}
-                      onFocus={() => setShowSearchDropdown(true)}
-                      className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all"
-                      required
-                    />
-                    {productSearch && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProductSearch('');
-                          setSelectedProductId('');
-                          setShowSearchDropdown(true);
-                        }}
-                        className="absolute right-4 top-3 text-xs text-slate-400 hover:text-slate-600 font-bold"
-                      >
-                        Limpar
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Visual preview of selected product with photo */}
-                  {selectedProduct && (
-                    <div className="mt-2.5 p-3.5 bg-slate-50 border border-slate-100/80 rounded-xl flex items-center justify-between gap-3 animate-fade-in" id="selected-product-preview-card">
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        <div 
-                          className={`w-12 h-12 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-slate-200 shrink-0 select-none ${
-                            selectedProduct.imageUrl ? 'cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative' : ''
-                          }`}
-                          onClick={() => {
-                            if (selectedProduct.imageUrl) {
-                              setFullscreenProductPhoto({ url: selectedProduct.imageUrl, name: selectedProduct.name });
-                            }
-                          }}
-                          title={selectedProduct.imageUrl ? "Clique para ver foto do produto em tela cheia" : undefined}
-                        >
-                          {selectedProduct.imageUrl ? (
-                            <>
-                              <img
-                                src={selectedProduct.imageUrl}
-                                alt={selectedProduct.name}
-                                className="w-full h-full object-contain"
-                                referrerPolicy="no-referrer"
-                              />
-                              <div className="absolute inset-0 bg-black/25 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                <Search className="w-4 h-4 text-white" />
-                              </div>
-                            </>
-                          ) : (
-                            <span className="text-[10px] text-slate-300 font-bold uppercase font-sans">Sem Foto</span>
-                          )}
-                        </div>
-                        <div className="min-w-0">
-                          <h4 className="text-xs font-bold text-slate-800 truncate">{selectedProduct.name}</h4>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="text-[10px] text-slate-400 font-medium font-sans">
-                              {selectedProduct.category} {selectedProduct.subcategory ? `• ${selectedProduct.subcategory}` : ''} {selectedProduct.weight ? `• ${selectedProduct.weight}` : ''}
-                            </span>
-                            <span className={`text-[9px] font-extrabold border rounded px-1.5 py-0.2 whitespace-nowrap uppercase font-mono tracking-wide ${
-                              (selectedProduct.brand?.toLowerCase().includes('mavalerio') || selectedProduct.brand?.toLowerCase().includes('mavalério'))
-                                ? 'bg-violet-50 text-violet-800 border-violet-100'
-                                : selectedProduct.isCompetitor
-                                  ? 'bg-rose-50 text-rose-700 border-rose-100'
-                                  : 'bg-emerald-50 text-emerald-800 border-emerald-150'
-                            }`}>
-                              {selectedProduct.brand || 'Dr. Oetker'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      {selectedChainId && (
-                        <div className="shrink-0 text-right">
-                           <span className="block text-[9px] text-slate-400 font-bold uppercase tracking-wider">Último</span>
-                           <span className="font-mono text-xs text-slate-800 font-bold">
-                            {getLatestPrice(selectedProduct.id, selectedChainId) 
-                              ? `R$ ${getLatestPrice(selectedProduct.id, selectedChainId)?.toFixed(2).replace('.', ',')}` 
-                              : '---'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Combobox autocomplete selections list */}
-                  {showSearchDropdown && (
-                    <div className="absolute z-10 w-full left-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto pointer-events-auto" id="autocomplete-list" onClick={(e) => e.stopPropagation()}>
-                      {filteredProductsBySearch.map((prod) => (
-                        <div
-                          id={`autocomplete-item-${prod.id}`}
-                          key={prod.id}
-                          onClick={() => handleProductSelect(prod)}
-                          className="px-4 py-3 hover:bg-slate-50 text-xs text-slate-800 cursor-pointer flex items-center justify-between pointer-events-auto border-b border-slate-50/50 last:border-0"
-                        >
-                          <div className="flex items-center gap-3 min-w-0 pr-2">
-                            {/* Auto-suggest product image preview */}
-                            <div className="w-9 h-9 rounded-md bg-white overflow-hidden flex items-center justify-center border border-slate-100 shrink-0">
-                              {prod.imageUrl ? (
-                                <img
-                                  src={prod.imageUrl}
-                                  alt={prod.name}
-                                  className="w-full h-full object-contain"
-                                  referrerPolicy="no-referrer"
-                                />
-                              ) : (
-                                <span className="text-[9px] text-slate-300 font-bold uppercase">SF</span>
-                              )}
-                            </div>
-                            <div className="flex flex-col min-w-0 flex-1">
-                              <span className="font-bold text-slate-850 truncate">
-                                <span>{prod.name}</span>
-                                {(() => {
-                                  const latest = selectedChainId ? getLatestPrice(prod.id, selectedChainId) : null;
-                                  return latest ? (
-                                    <span className="text-[10px] text-slate-450 font-normal ml-2 font-sans select-none">
-                                      Último: R$ {latest.toFixed(2).replace('.', ',')}
-                                    </span>
-                                  ) : null;
-                                })()}
-                              </span>
-                              <span className="text-[10px] text-slate-400 mt-0.5 font-sans">
-                                {prod.category} {prod.subcategory ? `• ${prod.subcategory}` : ''} {prod.weight ? `• ${prod.weight}` : ''}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex flex-col items-end gap-1 shrink-0">
-                            {selectedChainId && (
-                              <span className="font-mono text-[10px] text-slate-500 font-bold">
-                                {getLatestPrice(prod.id, selectedChainId) 
-                                  ? `R$ ${getLatestPrice(prod.id, selectedChainId)?.toFixed(2).replace('.', ',')}` 
-                                  : '---'}
-                              </span>
-                            )}
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {prod.isCompetitor ? (
-                                <span className="text-[8px] font-extrabold bg-rose-50 text-rose-700 border border-rose-100 rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide">
-                                  {prod.brand}
-                                </span>
-                              ) : (
-                                <span className={`text-[8px] font-extrabold border rounded-md px-2 py-0.5 whitespace-nowrap uppercase font-mono tracking-wide ${
-                                  (prod.brand?.toLowerCase().includes('mavalerio') || prod.brand?.toLowerCase().includes('mavalério'))
-                                    ? 'bg-violet-50 text-violet-800 border-violet-100'
-                                    : 'bg-emerald-50 text-emerald-800 border-emerald-150'
-                                }`}>
-                                  {prod.brand || 'Dr. Oetker'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                      {filteredProductsBySearch.length === 0 && (
-                        <div className="p-4 text-center text-xs text-slate-400 italic">Nenhum produto correspondente encontrado.</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Price field */}
-                <div>
-                  <label className="block text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-2">
-                    Preço de Gôndola (R$) *
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-4 top-3 text-sm text-slate-400 font-mono font-bold">R$</span>
-                    <input
-                      id="register-price-input"
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0,00"
-                      value={price || '0,00'}
-                      onChange={(e) => setPrice(formatToCalculatorPrice(e.target.value))}
-                      className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-bold text-slate-800 font-mono focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all"
-                      required
-                    />
-                  </div>
-                </div>
-
-                {/* Observations text field */}
-                <div>
-                  <label className="block text-xs font-extrabold uppercase tracking-widest text-slate-400 mb-2">
-                    Observações Técnicas <span className="text-slate-400 font-medium lowercase">(opcional)</span>
-                  </label>
-                  <textarea
-                    id="register-notes-textarea"
-                    placeholder="Destaques na gôndola, ruptura de estoque, preços promocionais, campanhas, etc."
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-sm font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#D40511] focus:bg-white focus:ring-1 focus:ring-[#D40511] transition-all h-24 resize-none"
-                  ></textarea>
-                </div>
-
-              </div>
-
-              {/* Stepper bottom control buttons */}
-              <div className="pt-4 border-t border-slate-50 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <button
-                  type="button"
-                  onClick={() => setStep(2)}
-                  className="w-full sm:w-auto text-xs font-extrabold text-[#D40511] hover:text-red-800 transition duration-150 cursor-pointer inline-flex items-center justify-center gap-1 py-3"
-                >
-                  &larr; Voltar para Foto
-                </button>
-
-                <button
-                  id="submit-register-price-form"
-                  type="submit"
-                  disabled={isUploading}
-                  className="w-full sm:w-auto bg-[#D40511] hover:bg-[#b0040e] text-white px-8 py-3.5 rounded-xl text-sm font-bold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-sm flex items-center justify-center gap-2"
-                >
-                  {isUploading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                      <span>Hospedando Imagem...</span>
-                    </>
-                  ) : (
-                    <span>Confirmar Auditoria de Preço</span>
-                  )}
-                </button>
-              </div>
-            </form>
-          )}
+          </>
         </div>
       )}
 

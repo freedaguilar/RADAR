@@ -109,7 +109,7 @@ export function Audit({
           setPendingSearchQuery(data.produto);
         }
 
-        setPendingPrice(data.price.toString().replace('.', ','));
+        setPendingPrice(data.price.toFixed(2).replace('.', ','));
         setAiFeedbackMessage(`Leitura bem-sucedida! Produto: "${data.produto || 'Não decifrado'}". Preço: R$ ${data.price.toFixed(2)}.`);
       } else {
         setAiFeedbackMessage('⚠️ A IA não identificou um preço legível nesta imagem.');
@@ -195,6 +195,46 @@ export function Audit({
       }); // descending by date & insertion/ID order
   }, [auditedRecords, selectedProductId, selectedChainId, searchNotes, filterPeriodDays]);
 
+  // Calculator-style price formatter (digit input from right to left)
+  const formatToCalculatorPrice = (inputValue: string): string => {
+    const digits = inputValue.replace(/\D/g, '');
+    if (!digits) return '0,00';
+    const cents = parseInt(digits, 10);
+    return (cents / 100).toFixed(2).replace('.', ',');
+  };
+
+  // Helper to find latest price for a product in a specific chain
+  const getLatestPriceForProductInChain = (productId: string, chainId: string) => {
+    const chainRecords = records.filter(r => {
+      if (r.productId !== productId || r.chainId !== chainId) return false;
+      const { isPending } = parsePriceRecordMeta(r.notes);
+      return !isPending;
+    });
+    if (chainRecords.length === 0) return null;
+    chainRecords.sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return b.id.localeCompare(a.id);
+    });
+    return chainRecords[0].price;
+  };
+
+  // Helper to find latest price record for a product in a specific chain
+  const getLatestPriceRecordForProductInChain = (productId: string, chainId: string) => {
+    const chainRecords = records.filter(r => {
+      if (r.productId !== productId || r.chainId !== chainId) return false;
+      const { isPending } = parsePriceRecordMeta(r.notes);
+      return !isPending;
+    });
+    if (chainRecords.length === 0) return null;
+    chainRecords.sort((a, b) => {
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return b.id.localeCompare(a.id);
+    });
+    return chainRecords[0];
+  };
+
   // Handler to open pending confirmation modal
   const handleOpenPendingConfirm = (rec: PriceRecord) => {
     const meta = parsePriceRecordMeta(rec.notes);
@@ -215,7 +255,7 @@ export function Audit({
       setSelectedProductForPending(null);
     }
     
-    setPendingPrice(meta.aiPriceSuggested > 0 ? meta.aiPriceSuggested.toString().replace('.', ',') : '');
+    setPendingPrice(meta.aiPriceSuggested > 0 ? meta.aiPriceSuggested.toFixed(2).replace('.', ',') : '0,00');
     setPendingNotes(meta.originalNotes);
     setPendingChainId(rec.chainId);
     setShowPendingDeleteConfirm(false);
@@ -679,7 +719,21 @@ export function Audit({
                                         <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
                                       </div>
                                     )}
-                                    <span className="truncate">{p.name} {p.weight ? `(${p.weight})` : ''}</span>
+                                    <div className="flex flex-col min-w-0">
+                                      <span className="truncate">{p.name} {p.weight ? `(${p.weight})` : ''}</span>
+                                      {(() => {
+                                        const latestPrice = getLatestPriceForProductInChain(p.id, pendingChainId);
+                                        return latestPrice !== null ? (
+                                          <span className="text-[9px] text-[#D40511] font-mono mt-0.5 font-bold">
+                                            Preço Atual: R$ {latestPrice.toFixed(2).replace('.', ',')}
+                                          </span>
+                                        ) : (
+                                          <span className="text-[9px] text-slate-400 mt-0.5 italic font-medium">
+                                            Sem histórico nesta rede
+                                          </span>
+                                        );
+                                      })()}
+                                    </div>
                                   </div>
                                   <span className="text-[8px] bg-slate-150 text-slate-600 font-mono px-1.5 py-0.5 rounded uppercase tracking-wider shrink-0 ml-1.5">{p.category}</span>
                                 </button>
@@ -696,20 +750,56 @@ export function Audit({
                   </div>
 
                   {/* Confirmed Price */}
-                  <div>
-                    <label className="block text-[10px] font-extrabold uppercase tracking-widest text-[#D40511] mb-1.5 font-sans">
-                      3. Confirmar Preço do Produto *
-                    </label>
-                    <div className="relative rounded-lg h-9">
-                      <span className="absolute left-3 top-2 px-1 text-[10px] font-extrabold text-[#D40511] font-sans">R$</span>
-                      <input
-                        type="text"
-                        placeholder="0,00"
-                        value={pendingPrice}
-                        onChange={(e) => setPendingPrice(e.target.value)}
-                        className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-[#D40511] focus:outline-none focus:bg-white focus:border-[#D40511] h-9 placeholder-slate-400"
-                      />
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-[10px] font-extrabold uppercase tracking-widest text-[#D40511] mb-1.5 font-sans">
+                        3. Confirmar Preço do Produto *
+                      </label>
+                      <div className="relative rounded-lg h-9">
+                        <span className="absolute left-3 top-2 px-1 text-[10px] font-extrabold text-[#D40511] font-sans">R$</span>
+                        <input
+                          type="text"
+                          placeholder="0,00"
+                          value={pendingPrice}
+                          onChange={(e) => setPendingPrice(formatToCalculatorPrice(e.target.value))}
+                          className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-[#D40511] focus:outline-none focus:bg-white focus:border-[#D40511] h-9 placeholder-slate-400"
+                        />
+                      </div>
                     </div>
+
+                    {/* Latest price historical details visible below price field after product is selected */}
+                    {selectedProductForPending && (
+                      <div className="p-2.5 bg-slate-50 border border-slate-150 rounded-xl text-[11px] font-sans">
+                        <span className="block text-[9px] font-extrabold uppercase tracking-widest text-slate-400 mb-1">
+                          Histórico de Preço nesta Rede
+                        </span>
+                        {(() => {
+                          const latestRecord = getLatestPriceRecordForProductInChain(selectedProductForPending.id, pendingChainId);
+                          return latestRecord ? (
+                            <div className="flex items-center justify-between font-medium text-slate-700">
+                              <div>
+                                <span>Último preço: </span>
+                                <strong className="text-slate-800 font-extrabold font-mono text-xs">
+                                  R$ {latestRecord.price.toFixed(2).replace('.', ',')}
+                                </strong>
+                                <span className="text-slate-400 text-[10px]">
+                                  {" "}(coletado em {formatDateBR(latestRecord.date)})
+                                </span>
+                              </div>
+                              {latestRecord.userName && (
+                                <span className="text-[9px] text-slate-400 italic truncate max-w-[120px]" title={latestRecord.userName}>
+                                  por {latestRecord.userName}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <p className="text-slate-400 italic text-[10px]">
+                              Nenhum registro anterior encontrado para este produto na rede selecionada.
+                            </p>
+                          );
+                        })()}
+                      </div>
+                    )}
                   </div>
 
                   {/* Technical observations notes edit */}
