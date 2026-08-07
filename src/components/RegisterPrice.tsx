@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { supabase, uploadToSupabaseStorage } from '../lib/supabase';
@@ -264,6 +264,143 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [isAnalyzingBatch, setIsAnalyzingBatch] = useState(false);
   const [batchAnalysisProgress, setBatchAnalysisProgress] = useState('');
 
+  // Count occurrences per product from price records
+  const productRecordCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (records && records.length > 0) {
+      records.forEach(r => {
+        if (r.productId) {
+          counts[r.productId] = (counts[r.productId] || 0) + 1;
+        }
+      });
+    }
+    return counts;
+  }, [records]);
+
+  // Category ordering priority rank
+  const getCategoryRank = (categoryName?: string) => {
+    if (!categoryName) return 50;
+    const cat = categoryName.trim().toLowerCase();
+    
+    if (cat.includes('gelatina')) return 1;
+    if (cat.includes('sobremesa')) return 2;
+    if (cat.includes('fermento')) return 3;
+    if (cat.includes('cobertura')) return 999;
+    
+    return 50;
+  };
+
+  // Helper to get last registered price for a product in selected chain
+  const getLastPriceForProductInChain = (productId: string, chainId: string) => {
+    if (!records || records.length === 0 || !productId) return null;
+
+    let matching = records.filter(r => r.productId === productId && r.price > 0);
+    if (chainId) {
+      const chainMatching = matching.filter(r => r.chainId === chainId);
+      if (chainMatching.length > 0) {
+        matching = chainMatching;
+      }
+    }
+
+    if (matching.length === 0) return null;
+
+    const sorted = [...matching].sort((a, b) => {
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
+
+    return sorted[0];
+  };
+
+  // Top Frequent Products Queue State for Guided Camera Auditing
+  const frequentProductsList = useMemo(() => {
+    if (!products || products.length === 0) return [];
+
+    const activeProds = products.filter(p => p.active);
+
+    // 1. Sort active products strictly by record count (frequency) DESC, then name ASC
+    const byFrequency = [...activeProds].sort((a, b) => {
+      const countA = productRecordCounts[a.id] || 0;
+      const countB = productRecordCounts[b.id] || 0;
+      if (countB !== countA) return countB - countA;
+      return a.name.localeCompare(b.name);
+    });
+
+    // 2. Filter products that actually have price records (count > 0)
+    const productsWithRecords = byFrequency.filter(p => (productRecordCounts[p.id] || 0) > 0);
+
+    // 3. Select top candidates (up to 30 most frequent). Fall back to all active if no records exist at all.
+    const topCandidates = productsWithRecords.length > 0
+      ? productsWithRecords.slice(0, 30)
+      : byFrequency.slice(0, 30);
+
+    // 4. Now group/order these top 30 frequent products by Category Rank (Gelatinas -> Sobremesas -> Fermento -> Other categories alphabetically -> Coberturas), then by record count DESC, then name ASC
+    return [...topCandidates].sort((a, b) => {
+      const catA = a.category || 'Outros';
+      const catB = b.category || 'Outros';
+
+      const rankA = getCategoryRank(catA);
+      const rankB = getCategoryRank(catB);
+
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+
+      if (catA !== catB) {
+        return catA.localeCompare(catB);
+      }
+
+      const countA = productRecordCounts[a.id] || 0;
+      const countB = productRecordCounts[b.id] || 0;
+      if (countB !== countA) return countB - countA;
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [products, productRecordCounts]);
+
+  const [guidedQueue, setGuidedQueue] = useState<Product[]>([]);
+  const [outOfStockProductIds, setOutOfStockProductIds] = useState<string[]>([]);
+  const [useGuidedMode, setUseGuidedMode] = useState<boolean>(true);
+
+  // Active item in guided camera queue
+  const currentGuidedProduct = useMemo(() => {
+    if (!useGuidedMode || guidedQueue.length === 0) return null;
+    return guidedQueue[0];
+  }, [useGuidedMode, guidedQueue]);
+
+  // Guided Queue Action Handlers
+  const handleCaptureGuidedProduct = async () => {
+    const targetProduct = currentGuidedProduct;
+    await captureBatchFrame(targetProduct || undefined);
+
+    if (targetProduct) {
+      // Remove captured product from guided queue so next item automatically appears
+      setGuidedQueue(prev => prev.filter(p => p.id !== targetProduct.id));
+    }
+  };
+
+  const handleSkipGuidedProduct = () => {
+    if (!currentGuidedProduct) return;
+    const current = currentGuidedProduct;
+    // Move current product to the end of the queue
+    setGuidedQueue(prev => {
+      const remaining = prev.filter(p => p.id !== current.id);
+      return [...remaining, current];
+    });
+  };
+
+  const handleMarkOutOfStock = () => {
+    if (!currentGuidedProduct) return;
+    const currentId = currentGuidedProduct.id;
+    setOutOfStockProductIds(prev => [...prev, currentId]);
+    // Permanently remove from current queue
+    setGuidedQueue(prev => prev.filter(p => p.id !== currentId));
+  };
+
+  const handleResetGuidedQueue = () => {
+    setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id)));
+    setUseGuidedMode(true);
+  };
+
   const analyzeImage = async (base64Image: string) => {
     setIsAnalyzing(true);
     setAiAnalysisMessage('Iniciando análise inteligente da imagem...');
@@ -526,7 +663,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   };
 
   // Captura foto sequencial da câmera em lote e comprime em background
-  const captureBatchFrame = async () => {
+  const captureBatchFrame = async (targetProduct?: Product) => {
     if (!videoRef.current || !canvasRef.current) return;
 
     // Trigger visual flash shutter effect
@@ -552,18 +689,27 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     const originalBytes = dataUrl.length * 0.75;
 
     const tempId = `batch-img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // If target product is passed, pre-fill item fields directly
+    const selectedProdId = targetProduct ? targetProduct.id : '';
+    const prodSearch = targetProduct ? targetProduct.name : '';
+    const initialPrice = targetProduct && targetProduct.basePrice > 0
+      ? targetProduct.basePrice.toFixed(2).replace('.', ',')
+      : '0,00';
+    const initialConfidence = targetProduct ? 'high' : 'low';
+
     const newItem: BatchItem = {
       id: tempId,
       imagePreview: dataUrl,
       originalSizeKB: Math.round(originalBytes / 1024),
       compressedSizeKB: Math.round(originalBytes / 1024),
       status: 'compressing',
-      selectedProductId: '',
-      productSearch: '',
-      price: '0,00',
-      notes: '',
+      selectedProductId: selectedProdId,
+      productSearch: prodSearch,
+      price: initialPrice,
+      notes: targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '',
       selectedChainId: selectedChainId,
-      confidence: 'low'
+      confidence: initialConfidence
     };
 
     setBatchItems(prev => [...prev, newItem]);
@@ -582,16 +728,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       // Realiza o upload automático imediato para armazenamento
       const finalImageUrl = await uploadToSupabaseStorage(comp.compressedBase64, 'images');
 
-      // Registra na auditoria imediatamente (como pendente de preenchimento)
+      // Registra na auditoria imediatamente (como pendente de preenchimento ou já vinculado)
       const todayStr = new Date().toISOString().split('T')[0];
       const recordId = `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-      const finalNotes = serializePendingMeta('', 0, '');
+      const numPrice = parseFloat(initialPrice.replace(',', '.')) || 0;
+      const finalNotes = serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '');
 
       const newRecord: PriceRecord = {
         id: recordId,
-        productId: '',
+        productId: selectedProdId,
         chainId: selectedChainId,
-        price: 0,
+        price: numPrice,
         date: todayStr,
         imageUrl: finalImageUrl || '',
         notes: finalNotes,
@@ -1086,6 +1233,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const startCamera = async () => {
     setErrorMsg('');
     setUseCamera(true);
+
+    // Initialize guided queue with frequent products list
+    setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id)));
+    setUseGuidedMode(true);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' }, // favor secondary mobile camera
@@ -1616,7 +1768,125 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 </div>
               ) : useCamera ? (
                 /* Sequential camera views for bulk registering */
-                <div className="space-y-5" id="batch-camera-feed">
+                <div className="space-y-4" id="batch-camera-feed">
+
+                  {/* GUIDED PRODUCT AUDIT PROMPT BANNER */}
+                  {currentGuidedProduct ? (
+                    <motion.div
+                      key={currentGuidedProduct.id}
+                      initial={{ opacity: 0, y: -8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      className="bg-slate-900 border-2 border-[#D40511]/40 rounded-2xl p-4 shadow-xl text-white relative overflow-hidden"
+                    >
+                      {/* Top Header */}
+                      <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
+                        <div className="flex items-center gap-2">
+                          <span className="flex h-2.5 w-2.5 relative">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+                          </span>
+                          <span className="text-xs font-black uppercase tracking-wider text-red-400 font-mono">
+                            PRODUTO A AUDITAR ({frequentProductsList.length - guidedQueue.length + 1}/{frequentProductsList.length})
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setUseGuidedMode(false)}
+                          className="text-[11px] text-slate-400 hover:text-white font-bold transition cursor-pointer"
+                        >
+                          Modo Livre
+                        </button>
+                      </div>
+
+                      {/* Product Main Detail Row */}
+                      <div className="flex items-center gap-3.5 mt-3">
+                        {currentGuidedProduct.imageUrl ? (
+                          <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-700 bg-white shrink-0 p-0.5">
+                            <img
+                              src={currentGuidedProduct.imageUrl}
+                              alt={currentGuidedProduct.name}
+                              className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                        ) : (
+                          <div className="w-14 h-14 rounded-xl border border-dashed border-slate-700 bg-slate-800/80 flex items-center justify-center shrink-0">
+                            <Package className="w-6 h-6 text-red-400" />
+                          </div>
+                        )}
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest block font-mono">
+                              {currentGuidedProduct.brand || 'Marca'}
+                            </span>
+                            {currentGuidedProduct.category && (
+                              <span className="text-[10px] font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700 font-mono">
+                                {currentGuidedProduct.category}
+                              </span>
+                            )}
+                            {(() => {
+                              const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId);
+                              if (lastRec) {
+                                return (
+                                  <span className="text-[10px] font-bold text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-800/80 font-mono">
+                                    Último na rede: R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                                  </span>
+                                );
+                              } else {
+                                return (
+                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700 font-mono">
+                                    Sem preço anterior na rede
+                                  </span>
+                                );
+                              }
+                            })()}
+                          </div>
+                          <h3 className="text-sm sm:text-base font-extrabold text-white truncate leading-snug mt-0.5">
+                            {currentGuidedProduct.name}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-slate-300 font-medium">
+                              {currentGuidedProduct.weight || 'Sem peso'}
+                            </span>
+                            {currentGuidedProduct.basePrice > 0 && (
+                              <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 rounded-md">
+                                Ref: R$ {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ) : useGuidedMode && frequentProductsList.length > 0 ? (
+                    <div className="bg-emerald-950/80 border border-emerald-800/80 rounded-2xl p-4 shadow-xl text-white flex flex-col sm:flex-row items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-emerald-900/80 text-emerald-300 rounded-xl border border-emerald-700/60 shrink-0">
+                          <CheckCircle2 className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs sm:text-sm font-extrabold text-emerald-200">
+                            Todos os itens frequentes foram percorridos!
+                          </h4>
+                          <p className="text-[11px] text-emerald-300/80 font-medium">
+                            Você pode continuar tirando fotos livres de mais produtos para auditar depois.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleResetGuidedQueue}
+                        className="w-full sm:w-auto px-3.5 py-2.5 bg-emerald-900 hover:bg-emerald-800 text-emerald-100 rounded-xl text-xs font-bold border border-emerald-700/80 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reiniciar Lista</span>
+                      </button>
+                    </div>
+                  ) : null}
+
                   <div className="relative rounded-2xl overflow-hidden bg-black aspect-4/3 max-h-[380px] shadow-lg border border-slate-800 flex items-center justify-center">
                     <video ref={videoRef} className="w-full h-full object-cover" playsInline autoPlay muted></video>
                     <canvas ref={canvasRef} className="hidden" />
@@ -1670,26 +1940,53 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   </div>
 
                   {/* Actions Bar */}
-                  <div className="flex flex-col sm:flex-row items-center gap-3">
-                    <button
-                      type="button"
-                      id="btn-capture-batch-frame"
-                      onClick={captureBatchFrame}
-                      className="w-full sm:flex-1 py-4 bg-[#D40511] hover:bg-[#b0040e] active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13"
-                    >
-                      <Camera className="w-5 h-5 shrink-0" />
-                      <span>📸 Tirar Foto ({batchItems.length + 1})</span>
-                    </button>
+                  <div className="space-y-2.5">
+                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                      <button
+                        type="button"
+                        id="btn-capture-batch-frame"
+                        onClick={handleCaptureGuidedProduct}
+                        className="w-full sm:flex-1 py-4 bg-[#D40511] hover:bg-[#b0040e] active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13"
+                      >
+                        <Camera className="w-5 h-5 shrink-0" />
+                        <span>📸 {currentGuidedProduct ? `Tirar Foto (${currentGuidedProduct.name})` : `Tirar Foto (${batchItems.length + 1})`}</span>
+                      </button>
 
-                    <button
-                      type="button"
-                      id="btn-stop-camera"
-                      onClick={stopCamera}
-                      className="w-full sm:w-auto px-6 py-4 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-2xl text-xs font-bold transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow h-13 shrink-0"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Concluir ({batchItems.length})</span>
-                    </button>
+                      <button
+                        type="button"
+                        id="btn-stop-camera"
+                        onClick={stopCamera}
+                        className="w-full sm:w-auto px-6 py-4 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-2xl text-xs font-bold transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow h-13 shrink-0"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>Concluir ({batchItems.length})</span>
+                      </button>
+                    </div>
+
+                    {/* Secondary Guided Buttons: Skip & Out of Stock */}
+                    {currentGuidedProduct && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSkipGuidedProduct}
+                          className="py-3 px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-250 shadow-2xs"
+                          title="Deixar para tirar foto depois dos outros produtos"
+                        >
+                          <FastForward className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                          <span>Pular (Tirar depois)</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleMarkOutOfStock}
+                          className="py-3 px-3 bg-rose-50/80 hover:bg-rose-100/80 active:scale-98 text-rose-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-rose-200/80 shadow-2xs"
+                          title="Marca que o produto não está disponível nesta loja"
+                        >
+                          <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>Não tem na loja</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : isAnalyzingBatch ? (
