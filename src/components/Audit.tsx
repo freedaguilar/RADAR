@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react';
-import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2 } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, X, Maximize2 } from 'lucide-react';
 import { PriceRecord, Product, Chain } from '../types';
 import { parsePriceRecordMeta, searchAndRankProducts } from '../lib/textUtils';
 import { supabase } from '../lib/supabase';
@@ -42,6 +42,177 @@ export function Audit({
   const [pendingChainId, setPendingChainId] = useState('');
   const [showPendingDeleteConfirm, setShowPendingDeleteConfirm] = useState(false);
   const [isPendingDropdownOpen, setIsPendingDropdownOpen] = useState(false);
+
+  // Image zoom state for pending record confirmation modal
+  const [isImageZoomed, setIsImageZoomed] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [inlineZoomScale, setInlineZoomScale] = useState(1);
+
+  // Image pan/drag state
+  const [inlinePan, setInlinePan] = useState({ x: 0, y: 0 });
+  const [isDraggingInline, setIsDraggingInline] = useState(false);
+  const inlineDragRef = useRef({ startX: 0, startY: 0, panX: 0, panY: 0, moved: false });
+
+  const [fullscreenPan, setFullscreenPan] = useState({ x: 0, y: 0 });
+  const [isDraggingFullscreen, setIsDraggingFullscreen] = useState(false);
+  const fullscreenDragRef = useRef({ startX: 0, startY: 0, panX: 0, panY: 0, moved: false });
+
+  // Inline Drag Handlers
+  const handleInlineMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    inlineDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: inlinePan.x,
+      panY: inlinePan.y,
+      moved: false,
+    };
+    setIsDraggingInline(true);
+  };
+
+  const handleInlineMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingInline) return;
+    const dx = e.clientX - inlineDragRef.current.startX;
+    const dy = e.clientY - inlineDragRef.current.startY;
+    if (Math.hypot(dx, dy) > 3) {
+      inlineDragRef.current.moved = true;
+    }
+    setInlinePan({
+      x: inlineDragRef.current.panX + dx,
+      y: inlineDragRef.current.panY + dy,
+    });
+  };
+
+  const handleInlineMouseUp = () => {
+    setIsDraggingInline(false);
+  };
+
+  const handleInlineTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    inlineDragRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      panX: inlinePan.x,
+      panY: inlinePan.y,
+      moved: false,
+    };
+    setIsDraggingInline(true);
+  };
+
+  const handleInlineTouchMove = (e: React.TouchEvent) => {
+    if (!isDraggingInline || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - inlineDragRef.current.startX;
+    const dy = touch.clientY - inlineDragRef.current.startY;
+    if (Math.hypot(dx, dy) > 3) {
+      inlineDragRef.current.moved = true;
+    }
+    setInlinePan({
+      x: inlineDragRef.current.panX + dx,
+      y: inlineDragRef.current.panY + dy,
+    });
+  };
+
+  const handleInlineTouchEnd = () => {
+    setIsDraggingInline(false);
+  };
+
+  const handleInlineClick = () => {
+    if (inlineDragRef.current.moved) return;
+    setInlineZoomScale(prev => {
+      const next = prev === 1 ? 2.2 : prev === 2.2 ? 3.2 : 1;
+      if (next === 1) setInlinePan({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  // Fullscreen Drag Handlers
+  const handleFullscreenMouseDown = (e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    fullscreenDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      panX: fullscreenPan.x,
+      panY: fullscreenPan.y,
+      moved: false,
+    };
+    setIsDraggingFullscreen(true);
+  };
+
+  const handleFullscreenMouseMove = (e: React.MouseEvent) => {
+    if (!isDraggingFullscreen) return;
+    const dx = e.clientX - fullscreenDragRef.current.startX;
+    const dy = e.clientY - fullscreenDragRef.current.startY;
+    if (Math.hypot(dx, dy) > 3) {
+      fullscreenDragRef.current.moved = true;
+    }
+    setFullscreenPan({
+      x: fullscreenDragRef.current.panX + dx,
+      y: fullscreenDragRef.current.panY + dy,
+    });
+  };
+
+  const handleFullscreenMouseUp = () => {
+    setIsDraggingFullscreen(false);
+  };
+
+  const handleFullscreenTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    fullscreenDragRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      panX: fullscreenPan.x,
+      panY: fullscreenPan.y,
+      moved: false,
+    };
+    setIsDraggingFullscreen(true);
+  };
+
+  const handleFullscreenTouchMove = (e: React.TouchEvent) => {
+    if (!isDraggingFullscreen || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const dx = touch.clientX - fullscreenDragRef.current.startX;
+    const dy = touch.clientY - fullscreenDragRef.current.startY;
+    if (Math.hypot(dx, dy) > 3) {
+      fullscreenDragRef.current.moved = true;
+    }
+    setFullscreenPan({
+      x: fullscreenDragRef.current.panX + dx,
+      y: fullscreenDragRef.current.panY + dy,
+    });
+  };
+
+  const handleFullscreenTouchEnd = () => {
+    setIsDraggingFullscreen(false);
+  };
+
+  const handleFullscreenClick = () => {
+    if (fullscreenDragRef.current.moved) return;
+    setZoomScale(prev => {
+      const next = prev >= 2.5 ? 1 : prev === 1 ? 1.8 : 2.5;
+      if (next === 1) setFullscreenPan({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  // Handle ESC key to close image zoom or pending modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isImageZoomed) {
+          setIsImageZoomed(false);
+        } else if (showPendingDeleteConfirm) {
+          setShowPendingDeleteConfirm(false);
+        } else if (pendingRecordToConfirm) {
+          setPendingRecordToConfirm(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isImageZoomed, showPendingDeleteConfirm, pendingRecordToConfirm]);
 
   const [isAnalyzingPending, setIsAnalyzingPending] = useState(false);
   const [aiFeedbackMessage, setAiFeedbackMessage] = useState<string | null>(null);
@@ -260,6 +431,11 @@ export function Audit({
     setPendingChainId(rec.chainId);
     setShowPendingDeleteConfirm(false);
     setIsPendingDropdownOpen(false);
+    setIsImageZoomed(false);
+    setZoomScale(1);
+    setInlineZoomScale(1);
+    setInlinePan({ x: 0, y: 0 });
+    setFullscreenPan({ x: 0, y: 0 });
     
     // Reset AI analysis feedback
     setAiFeedbackMessage(null);
@@ -568,13 +744,103 @@ export function Audit({
             <div className="grid grid-cols-1 md:grid-cols-12 flex-1 min-h-0 overflow-y-auto md:overflow-hidden" id="pending-split-view">
               {/* Image side content */}
               <div className="bg-slate-50 p-5 border-b md:border-b-0 md:border-r border-slate-100 flex flex-col justify-between md:h-full md:overflow-y-auto col-span-12 md:col-span-5" id="pending-image-side">
-                <div className="relative rounded-2xl overflow-hidden shadow-sm max-w-full bg-black flex-1 flex items-center justify-center min-h-[160px] md:min-h-[220px] max-h-[260px] md:max-h-[300px]">
-                  <img
-                    src={pendingRecordToConfirm.imageUrl}
-                    alt="Evidência provisória"
-                    referrerPolicy="no-referrer"
-                    className="max-h-full max-w-full object-contain mx-auto"
-                  />
+                <div
+                  className="relative rounded-2xl overflow-hidden shadow-sm max-w-full bg-black flex-1 flex flex-col items-center justify-center min-h-[220px] max-h-[300px] md:min-h-[260px] md:max-h-[360px] group border border-slate-800 transition-all select-none"
+                >
+                  {/* Scrollable image viewport with drag/pan support */}
+                  <div 
+                    className={`w-full h-full flex items-center justify-center p-2 overflow-hidden relative touch-none select-none ${
+                      inlineZoomScale > 1
+                        ? isDraggingInline ? 'cursor-grabbing' : 'cursor-grab'
+                        : 'cursor-zoom-in'
+                    }`}
+                    onMouseDown={handleInlineMouseDown}
+                    onMouseMove={handleInlineMouseMove}
+                    onMouseUp={handleInlineMouseUp}
+                    onMouseLeave={handleInlineMouseUp}
+                    onTouchStart={handleInlineTouchStart}
+                    onTouchMove={handleInlineTouchMove}
+                    onTouchEnd={handleInlineTouchEnd}
+                    onClick={handleInlineClick}
+                    title={inlineZoomScale > 1 ? "Clique e arraste para mover a imagem ou clique para alterar o zoom" : "Clique na foto para dar zoom"}
+                  >
+                    <img
+                      src={pendingRecordToConfirm.imageUrl}
+                      alt="Evidência provisória"
+                      draggable={false}
+                      referrerPolicy="no-referrer"
+                      style={{ 
+                        transform: `translate(${inlinePan.x}px, ${inlinePan.y}px) scale(${inlineZoomScale})`,
+                        transformOrigin: 'center center' 
+                      }}
+                      className={`max-h-full max-w-full object-contain mx-auto select-none pointer-events-none ${
+                        isDraggingInline ? 'transition-none' : 'transition-transform duration-200 ease-out'
+                      }`}
+                    />
+                  </div>
+
+                  {/* Top-Left: Inline Zoom Controls */}
+                  <div 
+                    className="absolute top-2.5 left-2.5 flex items-center gap-1 bg-black/80 backdrop-blur-md text-white px-2 py-1 rounded-xl text-[10px] font-extrabold border border-white/10 shadow-lg z-10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setInlineZoomScale(prev => {
+                        const next = Math.max(1, parseFloat((prev - 0.5).toFixed(1)));
+                        if (next === 1) setInlinePan({ x: 0, y: 0 });
+                        return next;
+                      })}
+                      disabled={inlineZoomScale <= 1}
+                      className="p-1 hover:text-amber-400 disabled:opacity-30 disabled:hover:text-white transition cursor-pointer"
+                      title="Reduzir zoom interno"
+                    >
+                      <ZoomOut className="w-3.5 h-3.5" />
+                    </button>
+                    {inlineZoomScale > 1 && (
+                      <span className="font-mono text-amber-400 min-w-[36px] text-center px-0.5">
+                        {Math.round(inlineZoomScale * 100)}%
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setInlineZoomScale(prev => Math.min(3.5, parseFloat((prev + 0.5).toFixed(1))))}
+                      disabled={inlineZoomScale >= 3.5}
+                      className="p-1 hover:text-amber-400 disabled:opacity-30 disabled:hover:text-white transition cursor-pointer"
+                      title="Aumentar zoom interno"
+                    >
+                      <ZoomIn className="w-3.5 h-3.5" />
+                    </button>
+                    {inlineZoomScale > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInlineZoomScale(1);
+                          setInlinePan({ x: 0, y: 0 });
+                        }}
+                        className="p-1 ml-0.5 hover:text-rose-400 text-slate-300 transition cursor-pointer"
+                        title="Resetar zoom"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Top-Right: Fullscreen Button */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsImageZoomed(true);
+                      setZoomScale(inlineZoomScale > 1 ? inlineZoomScale : 1.8);
+                      setFullscreenPan({ x: 0, y: 0 });
+                    }}
+                    className="absolute top-2.5 right-2.5 bg-black/80 hover:bg-amber-600 backdrop-blur-md text-white text-[10px] font-extrabold px-2.5 py-1 rounded-xl flex items-center gap-1.5 border border-white/10 shadow-lg transition-colors cursor-pointer z-10"
+                    title="Abrir foto em tela inteira"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5 text-amber-400 group-hover:text-white" />
+                    <span className="hidden sm:inline">Tela Inteira</span>
+                  </button>
                 </div>
                 <div className="mt-4 text-center w-full">
                   <span className="text-[9px] text-gray-400 font-mono font-semibold block">
@@ -916,6 +1182,127 @@ export function Audit({
                 </div>
 
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULLSCREEN IMAGE ZOOM OVERLAY FOR PENDING RECORD */}
+      {isImageZoomed && pendingRecordToConfirm && (
+        <div 
+          className="fixed inset-0 z-[100] bg-black/92 backdrop-blur-md flex flex-col items-center justify-between p-3 sm:p-5 animate-fade-in select-none"
+          onClick={() => setIsImageZoomed(false)}
+        >
+          {/* Top Controls Header */}
+          <div 
+            className="w-full max-w-3xl flex items-center justify-between py-2.5 px-4 bg-slate-900/90 border border-slate-800 rounded-2xl backdrop-blur-md text-white shadow-xl z-10 shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-2">
+              <ZoomIn className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-extrabold font-sans text-amber-50">Zoom da Foto em Alta Resolução</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Zoom Out Button */}
+              <button
+                type="button"
+                onClick={() => setZoomScale(prev => {
+                  const next = Math.max(1, parseFloat((prev - 0.5).toFixed(1)));
+                  if (next === 1) setFullscreenPan({ x: 0, y: 0 });
+                  return next;
+                })}
+                disabled={zoomScale <= 1}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white transition cursor-pointer"
+                title="Reduzir Zoom"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+
+              {zoomScale > 1 && (
+                <span className="text-xs font-mono font-bold min-w-10 text-center text-amber-400 px-0.5">
+                  {Math.round(zoomScale * 100)}%
+                </span>
+              )}
+
+              {/* Zoom In Button */}
+              <button
+                type="button"
+                onClick={() => setZoomScale(prev => Math.min(3.5, parseFloat((prev + 0.5).toFixed(1))))}
+                disabled={zoomScale >= 3.5}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed text-white transition cursor-pointer"
+                title="Aumentar Zoom"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+
+              {/* Reset Zoom */}
+              <button
+                type="button"
+                onClick={() => {
+                  setZoomScale(1);
+                  setFullscreenPan({ x: 0, y: 0 });
+                }}
+                className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer text-xs font-extrabold px-2.5 flex items-center gap-1"
+                title="Resetar Zoom"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Reset</span>
+              </button>
+
+              <div className="w-px h-5 bg-slate-700 mx-1" />
+
+              {/* Close Overlay */}
+              <button
+                type="button"
+                onClick={() => setIsImageZoomed(false)}
+                className="p-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition cursor-pointer font-bold flex items-center gap-1 text-xs px-2.5"
+                title="Fechar Zoom"
+              >
+                <X className="w-4 h-4" />
+                <span className="hidden sm:inline">Fechar</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Center Image Display Area with Drag Support */}
+          <div 
+            className={`flex-1 w-full flex items-center justify-center overflow-hidden p-2 sm:p-4 my-2 relative touch-none select-none ${
+              zoomScale > 1 
+                ? isDraggingFullscreen ? 'cursor-grabbing' : 'cursor-grab'
+                : 'cursor-zoom-in'
+            }`}
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !fullscreenDragRef.current.moved) {
+                setIsImageZoomed(false);
+              }
+            }}
+            onMouseDown={handleFullscreenMouseDown}
+            onMouseMove={handleFullscreenMouseMove}
+            onMouseUp={handleFullscreenMouseUp}
+            onMouseLeave={handleFullscreenMouseUp}
+            onTouchStart={handleFullscreenTouchStart}
+            onTouchMove={handleFullscreenTouchMove}
+            onTouchEnd={handleFullscreenTouchEnd}
+          >
+            <div 
+              className={`max-w-full max-h-full flex items-center justify-center ${
+                isDraggingFullscreen ? 'transition-none' : 'transition-transform duration-200 ease-out'
+              }`}
+              style={{ 
+                transform: `translate(${fullscreenPan.x}px, ${fullscreenPan.y}px) scale(${zoomScale})`,
+                transformOrigin: 'center center'
+              }}
+              onClick={handleFullscreenClick}
+              title={zoomScale > 1 ? "Clique e arraste para mover a foto ou clique para alternar o zoom" : "Clique na foto para dar zoom"}
+            >
+              <img
+                src={pendingRecordToConfirm.imageUrl}
+                alt="Evidência ampliada"
+                draggable={false}
+                referrerPolicy="no-referrer"
+                className="max-h-[75vh] max-w-[88vw] object-contain rounded-2xl shadow-2xl border border-slate-800 pointer-events-none select-none"
+              />
             </div>
           </div>
         </div>

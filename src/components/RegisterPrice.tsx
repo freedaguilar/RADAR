@@ -253,6 +253,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   // IA pricing analyzer state
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [aiAnalysisMessage, setAiAnalysisMessage] = useState('');
+  const [shutterEffect, setShutterEffect] = useState(false);
 
   // Batch Mode Constant
   const registrationMode = 'batch';
@@ -527,6 +528,15 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   // Captura foto sequencial da câmera em lote e comprime em background
   const captureBatchFrame = async () => {
     if (!videoRef.current || !canvasRef.current) return;
+
+    // Trigger visual flash shutter effect
+    setShutterEffect(true);
+    setTimeout(() => setShutterEffect(false), 120);
+
+    // Trigger haptic vibration feedback on mobile devices if supported
+    if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+      try { window.navigator.vibrate(40); } catch (_) {}
+    }
 
     const cw = videoRef.current.videoWidth || 640;
     const ch = videoRef.current.videoHeight || 480;
@@ -1442,28 +1452,31 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 <div className="space-y-6">
                   {/* Triggers de entrada do Lote */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <label
-                      className="p-6 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 flex flex-col items-center justify-center gap-2.5 transition duration-150 cursor-pointer shadow-2xs hover:shadow-xs text-center"
+                    <button
+                      type="button"
+                      id="btn-open-continuous-camera"
+                      onClick={startCamera}
+                      className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100/80 hover:from-red-50/50 hover:to-red-50/20 text-slate-700 border border-slate-200 hover:border-[#D40511]/30 flex flex-col items-center justify-center gap-2.5 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-md text-center group"
                     >
-                      <Camera className="w-6 h-6 text-[#D40511]" />
-                      <span className="text-xs font-bold">Tirar Foto (Adicionar)</span>
-                      <span className="text-[10px] text-slate-400 font-medium font-sans">Abra a câmera e tire fotos consecutivas para o lote</span>
-                      <input
-                        id="register-batch-camera-capture"
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        onChange={handleBatchFilesChange}
-                        className="hidden"
-                      />
-                    </label>
+                      <div className="p-3 bg-red-100/80 text-[#D40511] rounded-2xl group-hover:scale-110 group-hover:bg-[#D40511] group-hover:text-white transition-all duration-200 shadow-xs">
+                        <Camera className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-black text-slate-800 block">Tirar Fotos (Câmera do App)</span>
+                        <span className="text-[10px] text-slate-400 font-medium font-sans mt-0.5 block">Abra a câmera e tire várias fotos em sequência continuamente</span>
+                      </div>
+                    </button>
 
                     <label
-                      className="p-6 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-250 flex flex-col items-center justify-center gap-2.5 transition duration-150 cursor-pointer shadow-2xs hover:shadow-xs"
+                      className="p-6 rounded-2xl bg-gradient-to-br from-slate-50 to-slate-100/80 hover:from-emerald-50/50 hover:to-emerald-50/20 text-slate-700 border border-slate-200 hover:border-emerald-500/30 flex flex-col items-center justify-center gap-2.5 transition-all duration-200 cursor-pointer shadow-2xs hover:shadow-md text-center group"
                     >
-                      <Image className="w-6 h-6 text-emerald-600" />
-                      <span className="text-xs font-bold">Importar Múltiplas Imagens</span>
-                      <span className="text-[10px] text-slate-400 font-medium font-sans">Selecione lote de fotos da galeria técnica</span>
+                      <div className="p-3 bg-emerald-100/80 text-emerald-600 rounded-2xl group-hover:scale-110 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-200 shadow-xs">
+                        <Image className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-black text-slate-800 block">Importar da Galeria / Arquivos</span>
+                        <span className="text-[10px] text-slate-400 font-medium font-sans mt-0.5 block">Selecione lote de fotos já salvas no dispositivo</span>
+                      </div>
                       <input
                         id="register-batch-file-selector"
                         type="file"
@@ -1603,38 +1616,79 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 </div>
               ) : useCamera ? (
                 /* Sequential camera views for bulk registering */
-                <div className="space-y-4" id="batch-camera-feed">
-                  <div className="relative rounded-2xl overflow-hidden bg-black aspect-video max-h-72 shadow-inner border border-slate-800">
-                    <video ref={videoRef} className="w-full h-full object-cover" playsInline muted></video>
-                    {/* Live indicator of bulk shots */}
-                    <div className="absolute top-4 left-4 z-10 bg-black/75 backdrop-blur-md text-white border border-[#D40511]/45 rounded-lg px-3 py-1 text-xs font-extrabold font-mono flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse shrink-0"></span>
-                      <span>Lote: {batchItems.length} {batchItems.length === 1 ? 'Foto Capturada' : 'Fotos Capturadas'}</span>
+                <div className="space-y-5" id="batch-camera-feed">
+                  <div className="relative rounded-2xl overflow-hidden bg-black aspect-4/3 max-h-[380px] shadow-lg border border-slate-800 flex items-center justify-center">
+                    <video ref={videoRef} className="w-full h-full object-cover" playsInline autoPlay muted></video>
+                    <canvas ref={canvasRef} className="hidden" />
+
+                    {/* Visual Shutter Flash Effect */}
+                    {shutterEffect && (
+                      <div className="absolute inset-0 bg-white z-20 pointer-events-none transition-opacity duration-150" />
+                    )}
+
+                    {/* Live Badge & Close button overlay */}
+                    <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
+                      <div className="bg-black/75 backdrop-blur-md text-white border border-red-500/40 rounded-full px-3 py-1 text-xs font-extrabold font-mono flex items-center gap-2 shadow-md">
+                        <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse shrink-0"></span>
+                        <span>CÂMERA ATIVA | Lote: {batchItems.length} {batchItems.length === 1 ? 'Foto' : 'Fotos'}</span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={stopCamera}
+                        className="pointer-events-auto p-2 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur-sm transition cursor-pointer"
+                        title="Fechar Câmera"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
                     </div>
 
-                    {/* Scanner aesthetic target */}
-                    <div className="absolute inset-x-8 inset-y-10 border border-dashed border-red-500/40 rounded-lg pointer-events-none flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-red-500 animate-pulse absolute"></div>
+                    {/* Scanner aesthetic target frame */}
+                    <div className="absolute inset-x-8 inset-y-8 border-2 border-dashed border-red-500/40 rounded-2xl pointer-events-none flex items-center justify-center">
+                      <div className="w-full h-0.5 bg-red-500/50 animate-pulse absolute"></div>
                     </div>
+
+                    {/* Horizontal carousel of photos taken in this camera session */}
+                    {batchItems.length > 0 && (
+                      <div className="absolute bottom-3 inset-x-3 z-10 bg-black/70 backdrop-blur-md p-2 rounded-xl flex items-center gap-2 overflow-x-auto scrollbar-none border border-white/10">
+                        <span className="text-[10px] text-white/90 font-bold uppercase font-mono px-1 shrink-0">Capturadas ({batchItems.length}):</span>
+                        {batchItems.map((item, idx) => (
+                          <div key={item.id} className="relative w-12 h-12 rounded-lg border-2 border-white/90 overflow-hidden shrink-0 bg-slate-900 group shadow-sm">
+                            <img src={item.imagePreview} alt={`Captura ${idx+1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <button
+                              type="button"
+                              onClick={() => removeBatchItem(item)}
+                              className="absolute top-0 right-0 p-0.5 bg-black/80 text-white rounded-bl hover:bg-rose-600 transition"
+                              title="Remover foto"
+                            >
+                              <XCircle className="w-3 h-3" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="flex flex-wrap justify-center gap-3">
+                  {/* Actions Bar */}
+                  <div className="flex flex-col sm:flex-row items-center gap-3">
                     <button
                       type="button"
+                      id="btn-capture-batch-frame"
                       onClick={captureBatchFrame}
-                      className="px-6 py-3 bg-[#D40511] hover:bg-[#b0040e] text-white rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer shadow-md disabled:bg-slate-300 disabled:cursor-not-allowed uppercase"
+                      className="w-full sm:flex-1 py-4 bg-[#D40511] hover:bg-[#b0040e] active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13"
                     >
-                      <Camera className="w-4 h-4 shrink-0" />
-                      <span>Tirar Foto (Adicionar)</span>
+                      <Camera className="w-5 h-5 shrink-0" />
+                      <span>📸 Tirar Foto ({batchItems.length + 1})</span>
                     </button>
 
                     <button
                       type="button"
+                      id="btn-stop-camera"
                       onClick={stopCamera}
-                      className="px-6 py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition duration-150 inline-flex items-center gap-1.5 cursor-pointer shadow"
+                      className="w-full sm:w-auto px-6 py-4 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-2xl text-xs font-bold transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow h-13 shrink-0"
                     >
                       <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Concluir Capturas ({batchItems.length})</span>
+                      <span>Concluir ({batchItems.length})</span>
                     </button>
                   </div>
                 </div>

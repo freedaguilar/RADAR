@@ -531,6 +531,10 @@ export function Products({
     } else if (pageParams?.filter === "outdated") {
       setIsOutdatedFilter(true);
       setActiveView("list");
+    } else if (pageParams?.chainId) {
+      setIsOutdatedFilter(false);
+      setSelectedChainId(pageParams.chainId);
+      setActiveView("list");
     } else {
       setIsOutdatedFilter(false);
       setActiveView("list");
