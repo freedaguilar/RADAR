@@ -9,6 +9,7 @@ export interface Product {
   basePrice: number; // For initial mock histories
   isCompetitor?: boolean; // True for adversary products
   brand?: string; // Brand name, eg. "Dr. Oetker", "Royal", "Dona Benta"
+  internalCode?: string; // Código interno para produtos de marca própria (Dr. Oetker e Mavalério)
 }
 
 export interface Chain {

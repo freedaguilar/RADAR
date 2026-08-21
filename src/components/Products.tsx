@@ -183,6 +183,7 @@ export function Products({
           "Data do Registro": formatDateBR(r.date),
           "Rede (PDV)": ch ? ch.name : "N/A",
           "Produto": prod ? prod.name : "N/A",
+          "Código Interno": prod?.internalCode || "",
           "Marca": prod ? prod.brand : "N/A",
           "Categoria": prod ? prod.category : "N/A",
           "Subcategoria": prod ? (prod.subcategory || "") : "N/A",
@@ -225,7 +226,7 @@ export function Products({
         const dispersion = minVal > 0 ? ((maxVal - minVal) / minVal) * 100 : 0;
 
         return {
-          "Código": prod.id.split("-")[0].toUpperCase(),
+          "Código": prod.internalCode || prod.id.split("-")[0].toUpperCase(),
           "Produto": prod.name,
           "Marca": prod.brand || "Dr. Oetker",
           "Categoria": prod.category,
@@ -495,6 +496,7 @@ export function Products({
   const [newProdBasePrice, setNewProdBasePrice] = useState("0.00");
   const [newProdIsCompetitor, setNewProdIsCompetitor] = useState(false);
   const [newProdBrand, setNewProdBrand] = useState("Dr. Oetker");
+  const [newProdInternalCode, setNewProdInternalCode] = useState("");
   const [formFeedback, setFormFeedback] = useState<{ type: 'success' | 'error', message: string } | null>(null);
 
   useEffect(() => {
@@ -509,6 +511,7 @@ export function Products({
       setNewProdBasePrice("0.00");
       setNewProdIsCompetitor(false);
       setNewProdBrand("Dr. Oetker");
+      setNewProdInternalCode("");
     } else if (pageParams?.action === "edit" && pageParams.productId) {
       setIsOutdatedFilter(false);
       const prod = products.find((p) => p.id === pageParams.productId);
@@ -523,6 +526,7 @@ export function Products({
         setNewProdBasePrice(prod.basePrice.toString());
         setNewProdIsCompetitor(prod.isCompetitor || false);
         setNewProdBrand(prod.brand || "Dr. Oetker");
+        setNewProdInternalCode(prod.internalCode || "");
       }
     } else if (pageParams?.action === "detail" && pageParams.productId) {
       setIsOutdatedFilter(false);
@@ -689,7 +693,8 @@ export function Products({
         const subcategoryMatch = prod.subcategory ? normalizeString(prod.subcategory).includes(term) : false;
         const brandMatch = prod.brand ? normalizeString(prod.brand).includes(term) : false;
         const weightMatch = prod.weight ? normalizeString(prod.weight).includes(term) : false;
-        return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch;
+        const internalCodeMatch = prod.internalCode ? normalizeString(prod.internalCode).includes(term) : false;
+        return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch || internalCodeMatch;
       });
 
       const matchesCategory =
@@ -1459,6 +1464,11 @@ export function Products({
                               >
                                 {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
                               </span>
+                              {prod.internalCode && (
+                                <span className="text-[9px] font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 rounded px-1 py-0.5 select-none shrink-0" title="Código Interno">
+                                  {prod.internalCode}
+                                </span>
+                              )}
                               <span className="text-[9px] font-mono text-gray-400 bg-gray-50 border border-gray-150/50 rounded px-1 py-0.5 select-none shrink-0" title="Gramatura">
                                 {prod.weight || "N/A"}
                               </span>
@@ -1726,6 +1736,11 @@ export function Products({
                           >
                             {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
                           </span>
+                          {prod.internalCode && (
+                            <span className="text-[9px] font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 rounded px-1 select-none" title="Código Interno">
+                              {prod.internalCode}
+                            </span>
+                          )}
                           {prod.weight && (
                             <span className="text-[9px] font-mono text-gray-500 bg-gray-50 border border-gray-150/55 rounded px-1 select-none">
                               {prod.weight}
@@ -2141,6 +2156,14 @@ export function Products({
                   </div>
 
                   <div className="w-full border-t border-[#F5F5F5] pt-4 mt-4 space-y-2 text-left text-xs text-gray-500">
+                    {selectedProduct.internalCode && (
+                      <div className="flex justify-between items-center">
+                        <span>Cód. Interno:</span>
+                        <span className="text-[#1A1A1A] font-bold font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
+                          {selectedProduct.internalCode}
+                        </span>
+                      </div>
+                    )}
                     {selectedProduct.weight && (
                       <div className="flex justify-between">
                         <span>Gramatura:</span>
@@ -3190,6 +3213,7 @@ export function Products({
                         basePrice: parseFloat(newProdBasePrice) || 0,
                         isCompetitor: newProdIsCompetitor,
                         brand: newProdBrand,
+                        internalCode: newProdInternalCode.trim() || undefined,
                       });
                     }
                     setFormFeedback({ type: 'success', message: 'Produto editado com sucesso!' });
@@ -3208,11 +3232,13 @@ export function Products({
                       basePrice: parseFloat(newProdBasePrice) || 0,
                       isCompetitor: newProdIsCompetitor,
                       brand: newProdBrand,
+                      internalCode: newProdInternalCode.trim() || undefined,
                     });
                     setFormFeedback({ type: 'success', message: 'Produto cadastrado com sucesso!' });
                   }
                   setNewProdName("");
                   setNewProdBasePrice("0.00");
+                  setNewProdInternalCode("");
                 } catch (error) {
                   setFormFeedback({ type: 'error', message: 'Erro ao processar produto. Tente novamente.' });
                 }
@@ -3232,6 +3258,19 @@ export function Products({
                     onChange={(e) => setNewProdName(e.target.value)}
                     className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
                     placeholder="Ex: Gelatina de Morango 20g"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-gray-700 flex items-center justify-between">
+                    <span>CÓDIGO INTERNO (MARCA PRÓPRIA)</span>
+                    <span className="text-[10px] text-gray-400 font-normal">Dr. Oetker / Mavalério</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newProdInternalCode}
+                    onChange={(e) => setNewProdInternalCode(e.target.value)}
+                    className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
+                    placeholder="Ex: OET-1029 ou MAV-4401"
                   />
                 </div>
                 <div className="space-y-1">

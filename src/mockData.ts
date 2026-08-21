@@ -13,7 +13,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 4.80,
     isCompetitor: false,
-    brand: 'Dr. Oetker'
+    brand: 'Dr. Oetker',
+    internalCode: 'OET-1001'
   },
   {
     id: 'prod-2',
@@ -25,7 +26,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 1.89,
     isCompetitor: false,
-    brand: 'Dr. Oetker'
+    brand: 'Dr. Oetker',
+    internalCode: 'OET-2001'
   },
   {
     id: 'prod-3',
@@ -37,7 +39,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 2.45,
     isCompetitor: false,
-    brand: 'Dr. Oetker'
+    brand: 'Dr. Oetker',
+    internalCode: 'OET-3001'
   },
   {
     id: 'prod-4',
@@ -49,7 +52,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 3.99,
     isCompetitor: false,
-    brand: 'Dr. Oetker'
+    brand: 'Dr. Oetker',
+    internalCode: 'OET-4001'
   },
   {
     id: 'prod-5',
@@ -61,7 +65,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 6.20,
     isCompetitor: false,
-    brand: 'Dr. Oetker'
+    brand: 'Dr. Oetker',
+    internalCode: 'OET-5001'
   },
   {
     id: 'prod-6',
@@ -73,7 +78,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 22.90,
     isCompetitor: false,
-    brand: 'Dr. Oetker'
+    brand: 'Dr. Oetker',
+    internalCode: 'OET-6001'
   },
   // --- OWN PRODUCT PORTFOLIO ("Mavalério") ---
   {
@@ -86,7 +92,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 4.25,
     isCompetitor: false,
-    brand: 'Mavalério'
+    brand: 'Mavalério',
+    internalCode: 'MAV-1001'
   },
   {
     id: 'prod-8',
@@ -98,7 +105,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 11.40,
     isCompetitor: false,
-    brand: 'Mavalério'
+    brand: 'Mavalério',
+    internalCode: 'MAV-2001'
   },
   {
     id: 'prod-9',
@@ -110,7 +118,8 @@ export const INITIAL_PRODUCTS: Product[] = [
     active: true,
     basePrice: 27.90,
     isCompetitor: false,
-    brand: 'Mavalério'
+    brand: 'Mavalério',
+    internalCode: 'MAV-3001'
   },
 
   // --- COMPETITOR PORTFOLIO ---

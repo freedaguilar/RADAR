@@ -91,6 +91,7 @@ export default function App() {
                   base_price: p.basePrice,
                   is_competitor: p.isCompetitor,
                   brand: p.brand,
+                  internal_code: p.internalCode || null,
                 }));
                 await supabase.from("products").insert(productsToInsert);
               }
@@ -210,6 +211,7 @@ export default function App() {
           base_price: newProduct.basePrice,
           is_competitor: newProduct.isCompetitor,
           brand: newProduct.brand,
+          internal_code: newProduct.internalCode || null,
         });
         if (error) console.error("Error inserting product:", error);
       }
@@ -239,6 +241,7 @@ export default function App() {
             base_price: updatedProduct.basePrice,
             is_competitor: updatedProduct.isCompetitor,
             brand: updatedProduct.brand,
+            internal_code: updatedProduct.internalCode || null,
           })
           .eq("id", updatedProduct.id);
         if (error) console.error("Error updating product:", error);

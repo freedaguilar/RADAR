@@ -28,7 +28,8 @@ export function useSupabaseSync() {
       active: p.active,
       basePrice: Number(p.base_price),
       isCompetitor: p.is_competitor,
-      brand: p.brand
+      brand: p.brand,
+      internalCode: p.internal_code || undefined
     })) as Product[];
 
     const chains = (chainsRes.data || []).map(c => ({

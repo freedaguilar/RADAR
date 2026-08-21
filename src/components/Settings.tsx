@@ -156,6 +156,7 @@ export function Settings({
   const [newProdBasePrice, setNewProdBasePrice] = useState("0.00");
   const [newProdIsCompetitor, setNewProdIsCompetitor] = useState(false);
   const [newProdBrand, setNewProdBrand] = useState("Dr. Oetker");
+  const [newProdInternalCode, setNewProdInternalCode] = useState("");
   const [formFeedback, setFormFeedback] = useState<{ type: 'success' | 'error', message: string } | null>(null);
   const [isUploadingProductImage, setIsUploadingProductImage] = useState(false);
 
@@ -350,7 +351,8 @@ export function Settings({
       const subcategoryMatch = p.subcategory ? normalizeString(p.subcategory).includes(term) : false;
       const brandMatch = p.brand ? normalizeString(p.brand).includes(term) : false;
       const weightMatch = p.weight ? normalizeString(p.weight).includes(term) : false;
-      return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch;
+      const internalCodeMatch = p.internalCode ? normalizeString(p.internalCode).includes(term) : false;
+      return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch || internalCodeMatch;
     });
   });
 
@@ -407,6 +409,7 @@ export function Settings({
             basePrice: priceNum,
             isCompetitor: newProdIsCompetitor,
             brand: newProdBrand,
+            internalCode: newProdInternalCode.trim() || undefined,
           });
           triggerSuccessMsg("Produto editado com sucesso!");
         }
@@ -425,11 +428,13 @@ export function Settings({
           basePrice: priceNum,
           isCompetitor: newProdIsCompetitor,
           brand: newProdBrand,
+          internalCode: newProdInternalCode.trim() || undefined,
         });
         triggerSuccessMsg("Produto cadastrado com sucesso!");
       }
       setProductView("list");
       setSelectedProductId(null);
+      setNewProdInternalCode("");
     } catch (err) {
       setFormFeedback({ type: "error", message: "Erro ao processar produto. Tente novamente." });
     }
@@ -743,6 +748,7 @@ export function Settings({
                           setNewProdBasePrice("0.00");
                           setNewProdIsCompetitor(false);
                           setNewProdBrand("");
+                          setNewProdInternalCode("");
                           setFormFeedback(null);
                           setAutoFilledFields({});
                           setUserModifiedFields({});
@@ -767,6 +773,7 @@ export function Settings({
                       <thead>
                         <tr className="border-b border-[#E0E0E0] text-[10px] text-gray-400 font-bold uppercase">
                           <th className="pb-3">Visual</th>
+                          <th className="pb-3">Cód. Interno</th>
                           <th className="pb-3">Nome do Produto</th>
                           <th className="pb-3">Categoria</th>
                           {currentUser?.role === "gestor" && <th className="pb-3 text-right">Ações</th>}
@@ -810,6 +817,7 @@ export function Settings({
                                   setNewProdBasePrice(prod.basePrice.toString());
                                   setNewProdIsCompetitor(prod.isCompetitor || false);
                                   setNewProdBrand(prod.brand || "");
+                                  setNewProdInternalCode(prod.internalCode || "");
                                   setFormFeedback(null);
                                   setAutoFilledFields({});
                                   setUserModifiedFields({});
@@ -823,6 +831,15 @@ export function Settings({
                                   referrerPolicy="no-referrer"
                                   className="w-8 h-8 rounded border border-[#E0E0E0] p-0.5 object-contain"
                                 />
+                              </td>
+                              <td className="py-2.5">
+                                {prod.internalCode ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-mono bg-slate-100 text-slate-700 border border-slate-200">
+                                    {prod.internalCode}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-gray-300 font-mono">-</span>
+                                )}
                               </td>
                               <td className="py-2.5 font-semibold text-gray-800">
                                 {prod.name}
@@ -845,6 +862,7 @@ export function Settings({
                                       setNewProdBasePrice(prod.basePrice.toString());
                                       setNewProdIsCompetitor(prod.isCompetitor || false);
                                       setNewProdBrand(prod.brand || "");
+                                      setNewProdInternalCode(prod.internalCode || "");
                                       setFormFeedback(null);
                                       setAutoFilledFields({});
                                       setUserModifiedFields({});
@@ -986,6 +1004,25 @@ export function Settings({
                             setAutoFilledFields((prev) => ({ ...prev, brand: false }));
                           }}
                           className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511]"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-bold text-gray-700">
+                            CÓDIGO INTERNO (MARCA PRÓPRIA)
+                          </label>
+                          {(!newProdIsCompetitor && (newProdBrand?.toLowerCase().includes('oetker') || newProdBrand?.toLowerCase().includes('maval'))) && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                              Marca Própria
+                            </span>
+                          )}
+                        </div>
+                        <input
+                          type="text"
+                          value={newProdInternalCode}
+                          onChange={(e) => setNewProdInternalCode(e.target.value)}
+                          className="w-full border border-[#E0E0E0] rounded-xl px-3 py-2 text-sm bg-[#F5F5F5] focus:outline-none focus:border-[#D40511] font-mono uppercase"
+                          placeholder="Ex: OET-1001, MAV-2001 ou cód. ERP"
                         />
                       </div>
                       <div className="space-y-1">
