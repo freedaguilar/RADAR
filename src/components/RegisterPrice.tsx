@@ -264,7 +264,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [isAnalyzingBatch, setIsAnalyzingBatch] = useState(false);
   const [batchAnalysisProgress, setBatchAnalysisProgress] = useState('');
 
-  // Count occurrences per product from price records
+  // Total count occurrences per product across all records (for global fallback)
   const productRecordCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     if (records && records.length > 0) {
@@ -277,6 +277,19 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     return counts;
   }, [records]);
 
+  // Count occurrences per product for the currently selected chain
+  const chainRecordCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (records && records.length > 0) {
+      records.forEach(r => {
+        if (r.productId && (!selectedChainId || r.chainId === selectedChainId)) {
+          counts[r.productId] = (counts[r.productId] || 0) + 1;
+        }
+      });
+    }
+    return counts;
+  }, [records, selectedChainId]);
+
   // Category ordering priority rank
   const getCategoryRank = (categoryName?: string) => {
     if (!categoryName) return 50;
@@ -288,6 +301,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     if (cat.includes('cobertura')) return 999;
     
     return 50;
+  };
+
+  // Subcategory ordering priority rank within each category
+  const getSubcategoryRank = (subcategoryName?: string) => {
+    if (!subcategoryName) return 50;
+    const sub = subcategoryName.trim().toLowerCase();
+    
+    // Regular / Tradicional / Químico / Em Pó -> Prioridade 1
+    if (sub.includes('regular') || sub.includes('tradicional') || sub.includes('químico') || sub.includes('quimico') || sub.includes('pó') || sub.includes('po')) return 1;
+    // Zero / Diet / Light / Sem Açúcar -> Prioridade 2
+    if (sub.includes('zero') || sub.includes('diet') || sub.includes('light') || sub.includes('sem açúcar') || sub.includes('sem acucar')) return 2;
+    // Premium / Gourmet / Especial -> Prioridade 3
+    if (sub.includes('premium') || sub.includes('gourmet') || sub.includes('especial')) return 3;
+    // Confeiteiro / Profissional -> Prioridade 4
+    if (sub.includes('confeiteiro') || sub.includes('profissional') || sub.includes('food service')) return 4;
+    
+    return 10;
   };
 
   // Helper to get last registered price for a product in selected chain
@@ -311,55 +341,84 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     return sorted[0];
   };
 
-  // Top Frequent Products Queue State for Guided Camera Auditing
+  // Queue List for Guided Camera Auditing based on selected chain and at least 1 record
   const frequentProductsList = useMemo(() => {
     if (!products || products.length === 0) return [];
 
     const activeProds = products.filter(p => p.active);
 
-    // 1. Sort active products strictly by record count (frequency) DESC, then name ASC
-    const byFrequency = [...activeProds].sort((a, b) => {
-      const countA = productRecordCounts[a.id] || 0;
-      const countB = productRecordCounts[b.id] || 0;
-      if (countB !== countA) return countB - countA;
-      return a.name.localeCompare(b.name);
-    });
+    // 1. Filtrar produtos ativos que possuem pelo menos 1 registro de preço na rede selecionada
+    let eligibleProducts = activeProds.filter(p => (chainRecordCounts[p.id] || 0) > 0);
 
-    // 2. Filter products that actually have price records (count > 0)
-    const productsWithRecords = byFrequency.filter(p => (productRecordCounts[p.id] || 0) > 0);
+    // Fallback: se a rede ainda não possuir nenhum registro de preço (ex: rede nova), exibe os produtos ativos com registros gerais ou todo o catálogo ativo
+    if (eligibleProducts.length === 0) {
+      const prodsWithAnyRecord = activeProds.filter(p => (productRecordCounts[p.id] || 0) > 0);
+      eligibleProducts = prodsWithAnyRecord.length > 0 ? prodsWithAnyRecord : activeProds;
+    }
 
-    // 3. Select top candidates (up to 30 most frequent). Fall back to all active if no records exist at all.
-    const topCandidates = productsWithRecords.length > 0
-      ? productsWithRecords.slice(0, 30)
-      : byFrequency.slice(0, 30);
-
-    // 4. Now group/order these top 30 frequent products by Category Rank (Gelatinas -> Sobremesas -> Fermento -> Other categories alphabetically -> Coberturas), then by record count DESC, then name ASC
-    return [...topCandidates].sort((a, b) => {
+    // 2. Ordenar por:
+    // - Hierarquia de Categoria (Gelatinas -> Sobremesas -> Fermentos -> Outras alfabeticamente -> Coberturas)
+    // - Hierarquia de Subcategoria (Regular/Tradicional -> Zero/Diet -> Premium -> Confeiteiro -> Demais)
+    // - Frequência de registros na rede (DESC)
+    // - Nome do produto (ASC)
+    return [...eligibleProducts].sort((a, b) => {
       const catA = a.category || 'Outros';
       const catB = b.category || 'Outros';
 
-      const rankA = getCategoryRank(catA);
-      const rankB = getCategoryRank(catB);
+      const rankCatA = getCategoryRank(catA);
+      const rankCatB = getCategoryRank(catB);
 
-      if (rankA !== rankB) {
-        return rankA - rankB;
+      if (rankCatA !== rankCatB) {
+        return rankCatA - rankCatB;
       }
 
       if (catA !== catB) {
-        return catA.localeCompare(catB);
+        const catCompare = catA.localeCompare(catB);
+        if (catCompare !== 0) return catCompare;
       }
 
-      const countA = productRecordCounts[a.id] || 0;
-      const countB = productRecordCounts[b.id] || 0;
+      // Hierarquia de Subcategoria
+      const subA = a.subcategory || '';
+      const subB = b.subcategory || '';
+      const rankSubA = getSubcategoryRank(subA);
+      const rankSubB = getSubcategoryRank(subB);
+
+      if (rankSubA !== rankSubB) {
+        return rankSubA - rankSubB;
+      }
+
+      if (subA !== subB) {
+        const subCompare = subA.localeCompare(subB);
+        if (subCompare !== 0) return subCompare;
+      }
+
+      // Frequência de auditoria na rede
+      const countA = chainRecordCounts[a.id] || 0;
+      const countB = chainRecordCounts[b.id] || 0;
       if (countB !== countA) return countB - countA;
 
       return a.name.localeCompare(b.name);
     });
-  }, [products, productRecordCounts]);
+  }, [products, chainRecordCounts, productRecordCounts]);
 
   const [guidedQueue, setGuidedQueue] = useState<Product[]>([]);
   const [outOfStockProductIds, setOutOfStockProductIds] = useState<string[]>([]);
+  const [capturedProductIds, setCapturedProductIds] = useState<string[]>([]);
   const [useGuidedMode, setUseGuidedMode] = useState<boolean>(true);
+
+  // Inicializa ou reinicia a fila guiada quando a rede muda
+  useEffect(() => {
+    setCapturedProductIds([]);
+    setOutOfStockProductIds([]);
+    setGuidedQueue(frequentProductsList);
+  }, [selectedChainId]);
+
+  // Inicializa a fila na primeira carga se estiver vazia
+  useEffect(() => {
+    if (guidedQueue.length === 0 && capturedProductIds.length === 0 && outOfStockProductIds.length === 0 && frequentProductsList.length > 0) {
+      setGuidedQueue(frequentProductsList);
+    }
+  }, [frequentProductsList]);
 
   // Active item in guided camera queue
   const currentGuidedProduct = useMemo(() => {
@@ -370,18 +429,18 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   // Guided Queue Action Handlers
   const handleCaptureGuidedProduct = async () => {
     const targetProduct = currentGuidedProduct;
-    await captureBatchFrame(targetProduct || undefined);
-
     if (targetProduct) {
-      // Remove captured product from guided queue so next item automatically appears
+      // Remove imediatamente o produto capturado da fila para exibir o próximo na tela
+      setCapturedProductIds(prev => [...prev, targetProduct.id]);
       setGuidedQueue(prev => prev.filter(p => p.id !== targetProduct.id));
     }
+    await captureBatchFrame(targetProduct || undefined);
   };
 
   const handleSkipGuidedProduct = () => {
     if (!currentGuidedProduct) return;
     const current = currentGuidedProduct;
-    // Move current product to the end of the queue
+    // Move o produto atual para o final da fila
     setGuidedQueue(prev => {
       const remaining = prev.filter(p => p.id !== current.id);
       return [...remaining, current];
@@ -392,12 +451,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     if (!currentGuidedProduct) return;
     const currentId = currentGuidedProduct.id;
     setOutOfStockProductIds(prev => [...prev, currentId]);
-    // Permanently remove from current queue
+    // Remove permanentemente da fila atual
     setGuidedQueue(prev => prev.filter(p => p.id !== currentId));
   };
 
   const handleResetGuidedQueue = () => {
-    setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id)));
+    setCapturedProductIds([]);
+    setOutOfStockProductIds([]);
+    setGuidedQueue(frequentProductsList);
     setUseGuidedMode(true);
   };
 
@@ -1234,8 +1295,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setErrorMsg('');
     setUseCamera(true);
 
-    // Initialize guided queue with frequent products list
-    setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id)));
+    // Initialize guided queue with frequent products list if starting fresh
+    if (guidedQueue.length === 0 && capturedProductIds.length === 0) {
+      setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id)));
+    }
     setUseGuidedMode(true);
 
     try {
@@ -1787,7 +1850,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
                           </span>
                           <span className="text-xs font-black uppercase tracking-wider text-red-400 font-mono">
-                            PRODUTO A AUDITAR ({frequentProductsList.length - guidedQueue.length + 1}/{frequentProductsList.length})
+                            PRODUTO A AUDITAR ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
                           </span>
                         </div>
 
@@ -1868,7 +1931,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
                         <div>
                           <h4 className="text-xs sm:text-sm font-extrabold text-emerald-200">
-                            Todos os itens frequentes foram percorridos!
+                            Todos os itens com registro nesta rede foram percorridos!
                           </h4>
                           <p className="text-[11px] text-emerald-300/80 font-medium">
                             Você pode continuar tirando fotos livres de mais produtos para auditar depois.
