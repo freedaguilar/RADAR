@@ -6,6 +6,48 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || import.meta.en
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
+ * Safely logs or updates AI recognition corrections for learning.
+ * Handled gracefully without throwing if RLS is enabled or restricted.
+ */
+export async function recordAiCorrection(params: {
+  chainId?: string;
+  detectedText?: string;
+  correctProductId?: string;
+  correctProductName?: string;
+  createdBy?: string;
+}): Promise<void> {
+  const { chainId, detectedText, correctProductId, correctProductName, createdBy } = params;
+  if (!detectedText || !correctProductId || !correctProductName) return;
+
+  const isConfigured = !!(supabaseUrl && supabaseAnonKey);
+  if (!isConfigured) return;
+
+  try {
+    const { error } = await supabase.from('ai_corrections').insert([
+      {
+        chain_id: chainId || null,
+        detected_text: detectedText,
+        correct_product_id: correctProductId,
+        correct_product_name: correctProductName,
+        created_by: createdBy || 'vendas@radar.com',
+      }
+    ]);
+
+    if (error) {
+      if (error.code === '42501' || error.message?.includes('violates row-level security policy') || error.message?.includes('permission denied')) {
+        // Table has RLS enabled without anon insert policy - ignore gracefully
+        console.debug("AI Corrections: Supabase RLS policy restricted insert for ai_corrections (skipping silently).");
+      } else {
+        console.debug("AI Corrections: Insert skipped:", error.message);
+      }
+    }
+  } catch (err) {
+    // Non-blocking catch
+    console.debug("AI Corrections recording caught exception:", err);
+  }
+}
+
+/**
  * Uploads a File or base64 data string to Supabase Storage inside the specified bucket.
  * Automatically tries to list/create the bucket first to ensure it's provisioned.
  * Falls back safely to base64/data URLs if credentials are not configured or if upload errors occur.

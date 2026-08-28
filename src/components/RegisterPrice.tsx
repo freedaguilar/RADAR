@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, ChevronsRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
-import { supabase, uploadToSupabaseStorage } from '../lib/supabase';
+import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta } from '../lib/textUtils';
 
 // Batch analysis list item structure
@@ -217,37 +217,13 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     correctProductName: string,
     createdBy: string
   ) => {
-    try {
-      if (!chainId || !detectedText || !correctProductId || !correctProductName) {
-        console.warn("DEBUG/CORRECTIONS: Insufficient fields to record correction:", { chainId, detectedText, correctProductId, correctProductName });
-        return;
-      }
-      
-      console.log("DEBUG/CORRECTIONS: Atemping to save correction to Supabase...", {
-        chain_id: chainId,
-        detected_text: detectedText,
-        correct_product_id: correctProductId,
-        correct_product_name: correctProductName,
-        created_by: createdBy
-      });
-
-      // Insert into Supabase with detailed error handling
-      const { data, error } = await supabase.from('ai_corrections').insert({
-        chain_id: chainId,
-        detected_text: detectedText,
-        correct_product_id: correctProductId,
-        correct_product_name: correctProductName,
-        created_by: createdBy
-      }).select();
-
-      if (error) {
-        console.error("DEBUG/CORRECTIONS: Supabase returned an insert error code:", error.code, "message:", error.message, "details:", error.details);
-      } else {
-        console.log("DEBUG/CORRECTIONS: Success! Saved AI Correction successfully. Data returned:", data);
-      }
-    } catch (e) {
-      console.error("DEBUG/CORRECTIONS: Critical exception during silent correction recording:", e);
-    }
+    await recordAiCorrection({
+      chainId,
+      detectedText,
+      correctProductId,
+      correctProductName,
+      createdBy,
+    });
   };
 
   // IA pricing analyzer state
@@ -320,6 +296,24 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     return 10;
   };
 
+  // Brand ordering priority rank (marca própria primeiro)
+  const getBrandRank = (p: Product) => {
+    if (!p.isCompetitor) {
+      const brandLower = (p.brand || '').toLowerCase();
+      if (brandLower.includes('oetker')) return 1;
+      if (brandLower.includes('mavalério') || brandLower.includes('mavalerio')) return 2;
+      return 3;
+    }
+    return 10;
+  };
+
+  const getBrandDisplayName = (p: Product) => {
+    if (!p.brand) {
+      return p.isCompetitor ? 'Concorrente' : 'Dr. Oetker';
+    }
+    return p.brand.trim();
+  };
+
   // Helper to get last registered price for a product in selected chain
   const getLastPriceForProductInChain = (productId: string, chainId: string) => {
     if (!records || records.length === 0 || !productId) return null;
@@ -359,6 +353,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     // 2. Ordenar por:
     // - Hierarquia de Categoria (Gelatinas -> Sobremesas -> Fermentos -> Outras alfabeticamente -> Coberturas)
     // - Hierarquia de Subcategoria (Regular/Tradicional -> Zero/Diet -> Premium -> Confeiteiro -> Demais)
+    // - Marca por Categoria/Subcategoria (Marca Própria Dr. Oetker/Mavalério PRIMEIRO, depois agrupado por marca concorrente)
     // - Frequência de registros na rede (DESC)
     // - Nome do produto (ASC)
     return [...eligibleProducts].sort((a, b) => {
@@ -390,6 +385,21 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       if (subA !== subB) {
         const subCompare = subA.localeCompare(subB);
         if (subCompare !== 0) return subCompare;
+      }
+
+      // Hierarquia de Marca (Marca própria primeiro, depois agrupado por marca)
+      const rankBrandA = getBrandRank(a);
+      const rankBrandB = getBrandRank(b);
+
+      if (rankBrandA !== rankBrandB) {
+        return rankBrandA - rankBrandB;
+      }
+
+      const brandA = getBrandDisplayName(a);
+      const brandB = getBrandDisplayName(b);
+      if (brandA !== brandB) {
+        const brandCompare = brandA.localeCompare(brandB);
+        if (brandCompare !== 0) return brandCompare;
       }
 
       // Frequência de auditoria na rede
@@ -444,6 +454,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setGuidedQueue(prev => {
       const remaining = prev.filter(p => p.id !== current.id);
       return [...remaining, current];
+    });
+  };
+
+  const handleSkipSubcategory = () => {
+    if (!currentGuidedProduct) return;
+    const currentCat = currentGuidedProduct.category || '';
+    const currentSub = currentGuidedProduct.subcategory || '';
+
+    // Move todos os produtos da mesma categoria e subcategoria atual para o final da fila
+    setGuidedQueue(prev => {
+      const currentGroup = prev.filter(
+        p => (p.category || '') === currentCat && (p.subcategory || '') === currentSub
+      );
+      const remaining = prev.filter(
+        p => !((p.category || '') === currentCat && (p.subcategory || '') === currentSub)
+      );
+      return [...remaining, ...currentGroup];
     });
   };
 
@@ -2026,27 +2053,37 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </button>
                     </div>
 
-                    {/* Secondary Guided Buttons: Skip & Out of Stock */}
+                    {/* Secondary Guided Buttons: Skip Item, Skip Category & Out of Stock */}
                     {currentGuidedProduct && (
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
                         <button
                           type="button"
                           onClick={handleSkipGuidedProduct}
-                          className="py-3 px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-250 shadow-2xs"
-                          title="Deixar para tirar foto depois dos outros produtos"
+                          className="py-3 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer border border-slate-250 shadow-2xs text-center"
+                          title="Pular este item individual e tirar foto depois"
                         >
                           <FastForward className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Pular (Tirar depois)</span>
+                          <span className="truncate">Pular item</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleSkipSubcategory}
+                          className="py-3 px-2 sm:px-3 bg-indigo-50/80 hover:bg-indigo-100/80 active:scale-98 text-indigo-700 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer border border-indigo-200/80 shadow-2xs text-center"
+                          title="Pular todos os itens desta categoria/subcategoria"
+                        >
+                          <ChevronsRight className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                          <span className="truncate">Pular categoria</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={handleMarkOutOfStock}
-                          className="py-3 px-3 bg-rose-50/80 hover:bg-rose-100/80 active:scale-98 text-rose-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-rose-200/80 shadow-2xs"
+                          className="py-3 px-2 sm:px-3 bg-rose-50/80 hover:bg-rose-100/80 active:scale-98 text-rose-700 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer border border-rose-200/80 shadow-2xs text-center"
                           title="Marca que o produto não está disponível nesta loja"
                         >
                           <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                          <span>Não tem na loja</span>
+                          <span className="truncate">Não tem na loja</span>
                         </button>
                       </div>
                     )}
