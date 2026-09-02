@@ -2043,31 +2043,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       <div className="w-full h-0.5 bg-red-500/50 animate-pulse absolute"></div>
                     </div>
 
-                    {/* Horizontal carousel of photos taken in this camera session */}
-                    {batchItems.length > 0 && (
-                      <div className={`absolute ${currentGuidedProduct ? 'bottom-16' : 'bottom-3'} inset-x-3 z-10 bg-black/75 backdrop-blur-md p-2 rounded-xl flex items-center gap-2 overflow-x-auto scrollbar-none border border-white/10 transition-all`}>
-                        <span className="text-[10px] text-white/90 font-bold uppercase font-mono px-1 shrink-0">Capturadas ({batchItems.length}):</span>
-                        {batchItems.map((item, idx) => (
-                          <div key={item.id} className={`relative w-12 h-12 rounded-lg border-2 ${item.isKeptPrice ? 'border-emerald-400' : 'border-white/90'} overflow-hidden shrink-0 bg-slate-900 group shadow-sm`}>
-                            <img src={item.imagePreview} alt={`Captura ${idx+1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            {item.isKeptPrice && (
-                              <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-white text-[7px] font-black text-center py-0.5 leading-none uppercase">
-                                Mantido
-                              </div>
-                            )}
-                            <button
-                              type="button"
-                              onClick={() => removeBatchItem(item)}
-                              className="absolute top-0 right-0 p-0.5 bg-black/80 text-white rounded-bl hover:bg-rose-600 transition cursor-pointer"
-                              title="Remover foto"
-                            >
-                              <XCircle className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
                     {/* Overlay inferior da Câmera: Último Preço & Opção de Manter Preço */}
                     {currentGuidedProduct && (() => {
                       const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId);
@@ -2187,6 +2162,51 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                           <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                           <span className="truncate">Não tem na loja</span>
                         </button>
+                      </div>
+                    )}
+
+                    {/* Horizontal carousel of photos taken in this camera session (placed below skip/out-of-stock options) */}
+                    {batchItems.length > 0 && (
+                      <div className="bg-slate-900 rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 overflow-x-auto scrollbar-none border border-slate-800 shadow-sm">
+                        <div className="flex flex-col shrink-0 pl-1 pr-2">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider font-mono">
+                            Capturadas:
+                          </span>
+                          <span className="text-xs sm:text-sm text-white font-black font-mono">
+                            {batchItems.length} {batchItems.length === 1 ? 'foto' : 'fotos'}
+                          </span>
+                        </div>
+                        <div className="h-9 w-px bg-slate-800 shrink-0" />
+                        <div className="flex items-center gap-2 min-w-0">
+                          {batchItems.map((item, idx) => (
+                            <div
+                              key={item.id}
+                              className={`relative w-12 h-12 rounded-xl border-2 ${
+                                item.isKeptPrice ? 'border-emerald-400 ring-1 ring-emerald-500/50' : 'border-slate-700'
+                              } overflow-hidden shrink-0 bg-slate-950 group shadow-sm`}
+                            >
+                              <img
+                                src={item.imagePreview}
+                                alt={`Captura ${idx + 1}`}
+                                className="w-full h-full object-cover"
+                                referrerPolicy="no-referrer"
+                              />
+                              {item.isKeptPrice && (
+                                <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-white text-[7px] font-black text-center py-0.5 leading-none uppercase tracking-tight">
+                                  Mantido
+                                </div>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => removeBatchItem(item)}
+                                className="absolute top-0 right-0 p-1 bg-black/85 text-white rounded-bl-lg hover:bg-rose-600 transition cursor-pointer"
+                                title="Remover foto"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
