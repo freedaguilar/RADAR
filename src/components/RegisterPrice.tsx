@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, ChevronsRight } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, ChevronsRight, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
-import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta } from '../lib/textUtils';
+import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta } from '../lib/textUtils';
 
 // Batch analysis list item structure
 interface BatchItem {
@@ -28,6 +28,10 @@ interface BatchItem {
   // Progressive learning tracking fields
   aiSuggestedProductId?: string;
   aiDetectedText?: string;
+
+  // Kept price flag (registered directly without pending audit)
+  isKeptPrice?: boolean;
+  keptPriceValue?: number;
 }
 
 // Asynchronous promise-based image compression utility (guarantees max 800x800 resolution)
@@ -318,7 +322,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const getLastPriceForProductInChain = (productId: string, chainId: string) => {
     if (!records || records.length === 0 || !productId) return null;
 
-    let matching = records.filter(r => r.productId === productId && r.price > 0);
+    let matching = records.filter(r => {
+      if (r.productId !== productId || r.price <= 0) return false;
+      const { isPending } = parsePriceRecordMeta(r.notes);
+      return !isPending;
+    });
+
     if (chainId) {
       const chainMatching = matching.filter(r => r.chainId === chainId);
       if (chainMatching.length > 0) {
@@ -329,7 +338,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     if (matching.length === 0) return null;
 
     const sorted = [...matching].sort((a, b) => {
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
+      const dateCompare = b.date.localeCompare(a.date);
+      if (dateCompare !== 0) return dateCompare;
+      return b.id.localeCompare(a.id);
     });
 
     return sorted[0];
@@ -415,12 +426,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [outOfStockProductIds, setOutOfStockProductIds] = useState<string[]>([]);
   const [capturedProductIds, setCapturedProductIds] = useState<string[]>([]);
   const [useGuidedMode, setUseGuidedMode] = useState<boolean>(true);
+  const [keepCurrentPrice, setKeepCurrentPrice] = useState<boolean>(false);
 
   // Inicializa ou reinicia a fila guiada quando a rede muda
   useEffect(() => {
     setCapturedProductIds([]);
     setOutOfStockProductIds([]);
     setGuidedQueue(frequentProductsList);
+    setKeepCurrentPrice(false);
   }, [selectedChainId]);
 
   // Inicializa a fila na primeira carga se estiver vazia
@@ -436,18 +449,29 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     return guidedQueue[0];
   }, [useGuidedMode, guidedQueue]);
 
+  // Reseta opção de manter preço quando o produto ativo mudar
+  useEffect(() => {
+    setKeepCurrentPrice(false);
+  }, [currentGuidedProduct?.id]);
+
   // Guided Queue Action Handlers
   const handleCaptureGuidedProduct = async () => {
     const targetProduct = currentGuidedProduct;
+    const shouldKeepPrice = keepCurrentPrice;
+    
+    // Por padrão, a opção sempre vem desmarcada para o próximo produto
+    setKeepCurrentPrice(false);
+
     if (targetProduct) {
       // Remove imediatamente o produto capturado da fila para exibir o próximo na tela
       setCapturedProductIds(prev => [...prev, targetProduct.id]);
       setGuidedQueue(prev => prev.filter(p => p.id !== targetProduct.id));
     }
-    await captureBatchFrame(targetProduct || undefined);
+    await captureBatchFrame(targetProduct || undefined, shouldKeepPrice);
   };
 
   const handleSkipGuidedProduct = () => {
+    setKeepCurrentPrice(false);
     if (!currentGuidedProduct) return;
     const current = currentGuidedProduct;
     // Move o produto atual para o final da fila
@@ -458,6 +482,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   };
 
   const handleSkipSubcategory = () => {
+    setKeepCurrentPrice(false);
     if (!currentGuidedProduct) return;
     const currentCat = currentGuidedProduct.category || '';
     const currentSub = currentGuidedProduct.subcategory || '';
@@ -475,6 +500,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   };
 
   const handleMarkOutOfStock = () => {
+    setKeepCurrentPrice(false);
     if (!currentGuidedProduct) return;
     const currentId = currentGuidedProduct.id;
     setOutOfStockProductIds(prev => [...prev, currentId]);
@@ -483,6 +509,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   };
 
   const handleResetGuidedQueue = () => {
+    setKeepCurrentPrice(false);
     setCapturedProductIds([]);
     setOutOfStockProductIds([]);
     setGuidedQueue(frequentProductsList);
@@ -751,7 +778,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   };
 
   // Captura foto sequencial da câmera em lote e comprime em background
-  const captureBatchFrame = async (targetProduct?: Product) => {
+  const captureBatchFrame = async (targetProduct?: Product, keepPrice = false) => {
     if (!videoRef.current || !canvasRef.current) return;
 
     // Trigger visual flash shutter effect
@@ -781,10 +808,19 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     // If target product is passed, pre-fill item fields directly
     const selectedProdId = targetProduct ? targetProduct.id : '';
     const prodSearch = targetProduct ? targetProduct.name : '';
-    const initialPrice = targetProduct && targetProduct.basePrice > 0
-      ? targetProduct.basePrice.toFixed(2).replace('.', ',')
-      : '0,00';
-    const initialConfidence = targetProduct ? 'high' : 'low';
+
+    // Calculate price: if keeping price, look up last registered price for this chain
+    const lastRec = targetProduct ? getLastPriceForProductInChain(targetProduct.id, selectedChainId) : null;
+    const priceToKeep = lastRec && lastRec.price > 0
+      ? lastRec.price
+      : (targetProduct && targetProduct.basePrice > 0 ? targetProduct.basePrice : 0);
+
+    const initialPrice = keepPrice
+      ? (priceToKeep > 0 ? priceToKeep.toFixed(2).replace('.', ',') : '0,00')
+      : (targetProduct && targetProduct.basePrice > 0
+        ? targetProduct.basePrice.toFixed(2).replace('.', ',')
+        : '0,00');
+    const initialConfidence = (targetProduct || keepPrice) ? 'high' : 'low';
 
     const newItem: BatchItem = {
       id: tempId,
@@ -795,9 +831,13 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       selectedProductId: selectedProdId,
       productSearch: prodSearch,
       price: initialPrice,
-      notes: targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '',
+      notes: keepPrice
+        ? `[Preço Mantido] ${targetProduct?.name || ''}`
+        : (targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : ''),
       selectedChainId: selectedChainId,
-      confidence: initialConfidence
+      confidence: initialConfidence,
+      isKeptPrice: keepPrice,
+      keptPriceValue: keepPrice ? priceToKeep : undefined
     };
 
     setBatchItems(prev => [...prev, newItem]);
@@ -816,11 +856,16 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       // Realiza o upload automático imediato para armazenamento
       const finalImageUrl = await uploadToSupabaseStorage(comp.compressedBase64, 'images');
 
-      // Registra na auditoria imediatamente (como pendente de preenchimento ou já vinculado)
       const todayStr = new Date().toISOString().split('T')[0];
-      const recordId = `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-      const numPrice = parseFloat(initialPrice.replace(',', '.')) || 0;
-      const finalNotes = serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '');
+      const recordId = keepPrice
+        ? `rec-kept-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`
+        : `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+      const numPrice = keepPrice ? priceToKeep : (parseFloat(initialPrice.replace(',', '.')) || 0);
+
+      // Se o usuário selecionou para manter o preço, ele já registra aquele preço sem passar pela auditoria
+      const finalNotes = keepPrice
+        ? `[Preço Mantido] ${targetProduct?.name || ''}`
+        : serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '');
 
       const newRecord: PriceRecord = {
         id: recordId,
@@ -840,7 +885,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         ...item,
         imageUrl: finalImageUrl,
         recordId: recordId,
-        status: 'pending' as const
+        status: keepPrice ? ('success' as const) : ('pending' as const),
+        aiAnalysisMessage: keepPrice ? 'Preço anterior mantido pelo usuário' : undefined
       } : item));
 
     } catch (err) {
@@ -862,7 +908,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setIsAnalyzingBatch(true);
     setErrorMsg('');
 
-    const itemsToAnalyze = batchItems.filter(item => item.status === 'pending');
+    const itemsToAnalyze = batchItems.filter(item => item.status === 'pending' && !item.isKeptPrice);
     if (itemsToAnalyze.length === 0) {
       setIsAnalyzingBatch(false);
       setStep(3);
@@ -1029,7 +1075,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         setBatchSaveProgress({ current: idx + 1, total: batchItems.length });
 
         let finalNotes = item.notes.trim();
-        if (item.aiAnalysisMessage) {
+        if (!item.isKeptPrice && item.aiAnalysisMessage) {
           finalNotes = finalNotes ? `[Lote / IA] ${finalNotes}` : '[Lote / IA] Monitorado via Scanner Inteligente';
         }
 
@@ -1374,6 +1420,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   };
 
   const stopCamera = () => {
+    setKeepCurrentPrice(false);
     if (cameraStream) {
       cameraStream.getTracks().forEach((track) => track.stop());
       setCameraStream(null);
@@ -1764,18 +1811,22 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                             <div className="p-2 flex-1 flex flex-col justify-between">
                               <span className="text-[9px] text-slate-400 font-black font-sans">Foto {idx + 1}</span>
                               <div className="flex items-center justify-between mt-1 gap-1">
-                                {item.status === 'compressing' && (
+                                {item.isKeptPrice ? (
+                                  <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 leading-none uppercase">
+                                    <Check className="w-2.5 h-2.5" />
+                                    Mantido (R$ {item.price})
+                                  </span>
+                                ) : item.status === 'compressing' ? (
                                   <span className="text-[9px] text-violet-600 font-extrabold flex items-center gap-1 leading-none uppercase animate-pulse">
                                     <Loader2 className="w-2.5 h-2.5 animate-spin" />
                                     Comprimindo
                                   </span>
-                                )}
-                                {item.status === 'pending' && (
+                                ) : item.status === 'pending' ? (
                                   <span className="text-[9px] text-emerald-600 font-extrabold flex items-center gap-1 leading-none uppercase">
                                     <Check className="w-3 h-3" />
                                     Pronto {item.compressedSizeKB ? `(${item.compressedSizeKB} KB)` : ''}
                                   </span>
-                                )}
+                                ) : null}
                               </div>
                             </div>
 
@@ -1917,22 +1968,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 {currentGuidedProduct.category}
                               </span>
                             )}
-                            {(() => {
-                              const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId);
-                              if (lastRec) {
-                                return (
-                                  <span className="text-[10px] font-bold text-amber-300 bg-amber-950/80 px-2 py-0.5 rounded-md border border-amber-800/80 font-mono">
-                                    Último na rede: R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                                  </span>
-                                );
-                              } else {
-                                return (
-                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-md border border-slate-700 font-mono">
-                                    Sem preço anterior na rede
-                                  </span>
-                                );
-                              }
-                            })()}
                           </div>
                           <h3 className="text-sm sm:text-base font-extrabold text-white truncate leading-snug mt-0.5">
                             {currentGuidedProduct.name}
@@ -2010,15 +2045,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
                     {/* Horizontal carousel of photos taken in this camera session */}
                     {batchItems.length > 0 && (
-                      <div className="absolute bottom-3 inset-x-3 z-10 bg-black/70 backdrop-blur-md p-2 rounded-xl flex items-center gap-2 overflow-x-auto scrollbar-none border border-white/10">
+                      <div className={`absolute ${currentGuidedProduct ? 'bottom-16' : 'bottom-3'} inset-x-3 z-10 bg-black/75 backdrop-blur-md p-2 rounded-xl flex items-center gap-2 overflow-x-auto scrollbar-none border border-white/10 transition-all`}>
                         <span className="text-[10px] text-white/90 font-bold uppercase font-mono px-1 shrink-0">Capturadas ({batchItems.length}):</span>
                         {batchItems.map((item, idx) => (
-                          <div key={item.id} className="relative w-12 h-12 rounded-lg border-2 border-white/90 overflow-hidden shrink-0 bg-slate-900 group shadow-sm">
+                          <div key={item.id} className={`relative w-12 h-12 rounded-lg border-2 ${item.isKeptPrice ? 'border-emerald-400' : 'border-white/90'} overflow-hidden shrink-0 bg-slate-900 group shadow-sm`}>
                             <img src={item.imagePreview} alt={`Captura ${idx+1}`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            {item.isKeptPrice && (
+                              <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-white text-[7px] font-black text-center py-0.5 leading-none uppercase">
+                                Mantido
+                              </div>
+                            )}
                             <button
                               type="button"
                               onClick={() => removeBatchItem(item)}
-                              className="absolute top-0 right-0 p-0.5 bg-black/80 text-white rounded-bl hover:bg-rose-600 transition"
+                              className="absolute top-0 right-0 p-0.5 bg-black/80 text-white rounded-bl hover:bg-rose-600 transition cursor-pointer"
                               title="Remover foto"
                             >
                               <XCircle className="w-3 h-3" />
@@ -2027,6 +2067,58 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         ))}
                       </div>
                     )}
+
+                    {/* Overlay inferior da Câmera: Último Preço & Opção de Manter Preço */}
+                    {currentGuidedProduct && (() => {
+                      const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId);
+                      const hasLastPrice = !!lastRec && lastRec.price > 0;
+
+                      return (
+                        <div className="absolute bottom-3 inset-x-3 z-20 bg-slate-950/85 backdrop-blur-md border border-slate-700/80 rounded-xl px-3.5 py-2 flex items-center justify-between gap-3 shadow-2xl">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0 border border-amber-500/30">
+                              <Tag className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider leading-none font-mono">
+                                Último na rede
+                              </span>
+                              {hasLastPrice ? (
+                                <span className="text-xs sm:text-sm font-black font-mono text-amber-300 leading-tight">
+                                  R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-medium text-slate-400 leading-tight">
+                                  Sem preço anterior
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {hasLastPrice && (
+                            <label
+                              htmlFor="camera-keep-price-toggle"
+                              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
+                                keepCurrentPrice
+                                  ? 'bg-emerald-500/25 border-emerald-500 text-emerald-300 shadow-xs'
+                                  : 'bg-slate-800/90 hover:bg-slate-800 border-slate-600 text-slate-300'
+                              }`}
+                            >
+                              <input
+                                id="camera-keep-price-toggle"
+                                type="checkbox"
+                                checked={keepCurrentPrice}
+                                onChange={(e) => setKeepCurrentPrice(e.target.checked)}
+                                className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0 border-slate-600 bg-slate-900 cursor-pointer accent-emerald-500"
+                              />
+                              <span className="font-extrabold whitespace-nowrap">
+                                Manter preço
+                              </span>
+                            </label>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Actions Bar */}
@@ -2036,10 +2128,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         type="button"
                         id="btn-capture-batch-frame"
                         onClick={handleCaptureGuidedProduct}
-                        className="w-full sm:flex-1 py-4 bg-[#D40511] hover:bg-[#b0040e] active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13"
+                        className={`w-full sm:flex-1 py-4 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13 ${
+                          keepCurrentPrice
+                            ? 'bg-emerald-600 hover:bg-emerald-700'
+                            : 'bg-[#D40511] hover:bg-[#b0040e]'
+                        }`}
                       >
                         <Camera className="w-5 h-5 shrink-0" />
-                        <span>📸 {currentGuidedProduct ? `Tirar Foto (${currentGuidedProduct.name})` : `Tirar Foto (${batchItems.length + 1})`}</span>
+                        <span>
+                          {keepCurrentPrice
+                            ? `📸 Tirar Foto e Manter Preço (${currentGuidedProduct ? currentGuidedProduct.name : ''})`
+                            : currentGuidedProduct
+                              ? `📸 Tirar Foto (${currentGuidedProduct.name})`
+                              : `📸 Tirar Foto (${batchItems.length + 1})`}
+                        </span>
                       </button>
 
                       <button
@@ -2192,7 +2294,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {isLowConfidence ? (
+                          {item.isKeptPrice ? (
+                            <span className="bg-emerald-50 text-emerald-800 border-emerald-200 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black border uppercase tracking-wider font-sans">
+                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              Preço Mantido
+                            </span>
+                          ) : isLowConfidence ? (
                             <span className="bg-amber-50 text-amber-800 border-amber-100 flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black border uppercase tracking-wider font-sans">
                               <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                               Preenchimento Manual
