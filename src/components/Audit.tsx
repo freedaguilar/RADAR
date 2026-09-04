@@ -29,6 +29,12 @@ export function Audit({
   const [searchNotes, setSearchNotes] = useState('');
   const [filterPeriodDays, setFilterPeriodDays] = useState('30'); // '7' | '15' | '30' | 'Todas'
 
+  // Lazy loading state for pending records
+  const PENDING_BATCH_SIZE = 10;
+  const [visiblePendingCount, setVisiblePendingCount] = useState(PENDING_BATCH_SIZE);
+  const [isLoadingMorePending, setIsLoadingMorePending] = useState(false);
+  const pendingSentinelRef = useRef<HTMLDivElement | null>(null);
+
   // Pagination states for audited records
   const [auditCurrentPage, setAuditCurrentPage] = useState(1);
   const [auditItemsPerPage, setAuditItemsPerPage] = useState(12);
@@ -343,11 +349,75 @@ export function Audit({
 
   // Split into pending vs. audited
   const pendingRecords = useMemo(() => {
-    return records.filter((rec) => {
-      const { isPending } = parsePriceRecordMeta(rec.notes);
-      return !rec.productId || isPending;
-    });
+    return records
+      .filter((rec) => {
+        const { isPending } = parsePriceRecordMeta(rec.notes);
+        return !rec.productId || isPending;
+      })
+      .sort((a, b) => {
+        const dateCompare = b.date.localeCompare(a.date);
+        if (dateCompare !== 0) return dateCompare;
+        return b.id.localeCompare(a.id);
+      });
   }, [records]);
+
+  // Sync visible count when pendingRecords list changes
+  useEffect(() => {
+    if (pendingRecords.length > 0 && visiblePendingCount < Math.min(PENDING_BATCH_SIZE, pendingRecords.length)) {
+      setVisiblePendingCount(Math.min(PENDING_BATCH_SIZE, pendingRecords.length));
+    }
+  }, [pendingRecords.length]);
+
+  // Lazy loaded slice of pending records
+  const visiblePendingRecords = useMemo(() => {
+    return pendingRecords.slice(0, visiblePendingCount);
+  }, [pendingRecords, visiblePendingCount]);
+
+  // IntersectionObserver for infinite scrolling / lazy load on scroll
+  useEffect(() => {
+    if (visiblePendingCount >= pendingRecords.length) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const first = entries[0];
+        if (first.isIntersecting) {
+          setIsLoadingMorePending(true);
+          setTimeout(() => {
+            setVisiblePendingCount((prev) => Math.min(prev + PENDING_BATCH_SIZE, pendingRecords.length));
+            setIsLoadingMorePending(false);
+          }, 150);
+        }
+      },
+      { rootMargin: '250px', threshold: 0.05 }
+    );
+
+    const currentSentinel = pendingSentinelRef.current;
+    if (currentSentinel) {
+      observer.observe(currentSentinel);
+    }
+
+    return () => {
+      if (currentSentinel) {
+        observer.unobserve(currentSentinel);
+      }
+    };
+  }, [visiblePendingCount, pendingRecords.length]);
+
+  const handleLoadMorePending = () => {
+    setIsLoadingMorePending(true);
+    setTimeout(() => {
+      setVisiblePendingCount((prev) => Math.min(prev + PENDING_BATCH_SIZE, pendingRecords.length));
+      setIsLoadingMorePending(false);
+    }, 100);
+  };
+
+  const handleLoadAllPending = () => {
+    setIsLoadingMorePending(true);
+    setTimeout(() => {
+      setVisiblePendingCount(pendingRecords.length);
+      setIsLoadingMorePending(false);
+    }, 100);
+  };
 
   const auditedRecords = useMemo(() => {
     return records.filter((rec) => {
@@ -602,11 +672,11 @@ export function Audit({
         </p>
       </div>
 
-      {/* 1. SEÇÃO PENDENTE DE ANÁLISE - LISTA COM AUDITORIA RÁPIDA */}
+      {/* 1. SEÇÃO PENDENTE DE ANÁLISE - LISTA COM AUDITORIA RÁPIDA E LAZY LOADING */}
       {pendingRecords.length > 0 && (
         <div className="bg-amber-50/30 border border-amber-200/90 p-5 sm:p-6 rounded-3xl space-y-4 shadow-2xs" id="pending-audits-section">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 pb-3">
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
               <span className="flex h-3 w-3 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
@@ -614,14 +684,19 @@ export function Audit({
               <h2 className="text-sm font-extrabold text-amber-950 uppercase tracking-widest font-sans">
                 Pendentes de Análise ({pendingRecords.length})
               </h2>
+              {pendingRecords.length > PENDING_BATCH_SIZE && (
+                <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-full font-mono">
+                  Exibindo {visiblePendingRecords.length} de {pendingRecords.length}
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-amber-800 font-sans font-medium">
-              Auditoria rápida em lista. Altere ou mantenha o último preço e confirme diretamente.
+              Auditoria rápida em lista com carregamento incremental. Altere ou mantenha o último preço e confirme diretamente.
             </p>
           </div>
           
           <div className="space-y-4">
-            {pendingRecords.map((rec) => {
+            {visiblePendingRecords.map((rec) => {
               const itemState = getOrInitItemState(rec);
               const meta = parsePriceRecordMeta(rec.notes);
               const activeProducts = products.filter(p => p.active);
@@ -657,6 +732,7 @@ export function Audit({
                           src={rec.imageUrl}
                           alt="Evidência pendente"
                           referrerPolicy="no-referrer"
+                          loading="lazy"
                           className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white">
@@ -946,6 +1022,69 @@ export function Audit({
                 </div>
               );
             })}
+
+            {/* Sentinel and Lazy Loading Controls for Pending Records */}
+            {visiblePendingRecords.length < pendingRecords.length && (
+              <div 
+                ref={pendingSentinelRef} 
+                className="pt-2 pb-1 flex flex-col items-center justify-center gap-2.5 bg-amber-100/40 border border-dashed border-amber-300/80 rounded-2xl p-4 transition-all"
+              >
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-950 font-sans">
+                  {isLoadingMorePending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 text-amber-700 animate-spin" />
+                      <span>Carregando mais itens pendentes...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                      <span>
+                        Exibindo {visiblePendingRecords.length} de {pendingRecords.length} fotos pendentes (rolagem automática)
+                      </span>
+                    </>
+                  )}
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full max-w-xs bg-amber-200/80 rounded-full h-1.5 overflow-hidden">
+                  <div 
+                    className="bg-amber-600 h-full transition-all duration-300 rounded-full"
+                    style={{ width: `${(visiblePendingRecords.length / pendingRecords.length) * 100}%` }}
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={handleLoadMorePending}
+                    disabled={isLoadingMorePending}
+                    className="px-3 py-1.5 bg-white hover:bg-amber-50 border border-amber-300 text-amber-900 rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    {isLoadingMorePending ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
+                    ) : (
+                      <ArrowRight className="w-3.5 h-3.5 text-amber-700" />
+                    )}
+                    <span>Carregar mais (+{Math.min(PENDING_BATCH_SIZE, pendingRecords.length - visiblePendingCount)})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleLoadAllPending}
+                    disabled={isLoadingMorePending}
+                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-2xs transition-all cursor-pointer"
+                  >
+                    Mostrar todos ({pendingRecords.length})
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {pendingRecords.length > PENDING_BATCH_SIZE && visiblePendingRecords.length >= pendingRecords.length && (
+              <div className="text-center py-2 text-[11px] font-bold text-amber-800/80 font-sans">
+                ✓ Todos os {pendingRecords.length} itens pendentes foram carregados.
+              </div>
+            )}
           </div>
         </div>
       )}
