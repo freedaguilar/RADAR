@@ -519,7 +519,11 @@ export function Audit({
     const activeProducts = products.filter(p => p.active);
     let matchedProduct: Product | null = null;
 
-    if (meta.aiProductSuggested) {
+    if (rec.productId) {
+      matchedProduct = activeProducts.find(p => p.id === rec.productId) || products.find(p => p.id === rec.productId) || null;
+    }
+
+    if (!matchedProduct && meta.aiProductSuggested) {
       const exact = activeProducts.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
       if (exact) {
         matchedProduct = exact;
@@ -531,9 +535,9 @@ export function Audit({
       }
     }
 
-    const initialPrice = meta.aiPriceSuggested > 0 
-      ? meta.aiPriceSuggested.toFixed(2).replace('.', ',') 
-      : '0,00';
+    const initialPrice = rec.price > 0 
+      ? rec.price.toFixed(2).replace('.', ',') 
+      : (meta.aiPriceSuggested > 0 ? meta.aiPriceSuggested.toFixed(2).replace('.', ',') : '0,00');
 
     return {
       productId: matchedProduct?.id || null,
@@ -620,19 +624,29 @@ export function Audit({
     
     // Attempt to automatically pre-select matched product
     const activeProducts = products.filter(p => p.active);
-    const fuzzyMatches = searchAndRankProducts(activeProducts, meta.aiProductSuggested);
-    
-    // If exact name matches or very unique fuzzy matches, preselect
-    const exact = activeProducts.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
-    if (exact) {
-      setSelectedProductForPending(exact);
-    } else if (fuzzyMatches.length === 1 && meta.aiProductSuggested.trim().length > 3) {
-      setSelectedProductForPending(fuzzyMatches[0]);
-    } else {
-      setSelectedProductForPending(null);
+    let matchedProd: Product | null = null;
+    if (rec.productId) {
+      matchedProd = activeProducts.find(p => p.id === rec.productId) || products.find(p => p.id === rec.productId) || null;
+    }
+    if (!matchedProd && meta.aiProductSuggested) {
+      const exact = activeProducts.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
+      if (exact) {
+        matchedProd = exact;
+      } else {
+        const fuzzyMatches = searchAndRankProducts(activeProducts, meta.aiProductSuggested);
+        if (fuzzyMatches.length === 1 && meta.aiProductSuggested.trim().length > 3) {
+          matchedProd = fuzzyMatches[0];
+        }
+      }
     }
     
-    setPendingPrice(meta.aiPriceSuggested > 0 ? meta.aiPriceSuggested.toFixed(2).replace('.', ',') : '0,00');
+    setSelectedProductForPending(matchedProd);
+    setPendingSearchQuery(matchedProd ? matchedProd.name : meta.aiProductSuggested);
+    
+    const initialPrice = rec.price > 0 
+      ? rec.price.toFixed(2).replace('.', ',') 
+      : (meta.aiPriceSuggested > 0 ? meta.aiPriceSuggested.toFixed(2).replace('.', ',') : '0,00');
+    setPendingPrice(initialPrice);
     setPendingNotes(meta.originalNotes);
     setPendingChainId(rec.chainId);
     setShowPendingDeleteConfirm(false);
@@ -752,6 +766,11 @@ export function Audit({
                         <span className="text-[9.5px] text-slate-700 font-medium inline-flex items-center justify-center gap-1 w-full truncate" title={rec.userName}>
                           <User className="w-3 h-3 text-slate-400 shrink-0" />
                           <span className="truncate">{rec.userName}</span>
+                          {(rec.notes?.includes('[Registro Convidado') || rec.userName?.toLowerCase().includes('convidado')) && (
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[7.5px] font-black px-1 py-0.2 rounded font-mono shrink-0">
+                              Convidado
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>

@@ -39,6 +39,8 @@ export interface User {
   role: 'gestor' | 'vendedor' | 'promotor';
   active: boolean;
   avatarUrl?: string;
+  password?: string;
+  isGuest?: boolean;
 }
 
 export interface AppState {

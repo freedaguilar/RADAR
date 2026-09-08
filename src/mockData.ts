@@ -242,9 +242,9 @@ export const INITIAL_CHAINS: Chain[] = [
 ];
 
 export const INITIAL_USERS: User[] = [
-  { id: 'user-1', name: 'Jesse Aguilar', email: 'aguilar.jesse@gmail.com', role: 'gestor', active: true, avatarUrl: 'JA' },
-  { id: 'user-2', name: 'Carla Souza', email: 'carla.audit@radar.com', role: 'vendedor', active: true, avatarUrl: 'CS' },
-  { id: 'user-3', name: 'Rodrigo Lima', email: 'rodrigo.lima@radar.com', role: 'vendedor', active: true, avatarUrl: 'RL' }
+  { id: 'user-1', name: 'Jesse Aguilar', email: 'aguilar.jesse@gmail.com', role: 'gestor', active: true, avatarUrl: 'JA', password: '123' },
+  { id: 'user-2', name: 'Carla Souza', email: 'carla.audit@radar.com', role: 'vendedor', active: true, avatarUrl: 'CS', password: '123' },
+  { id: 'user-3', name: 'Rodrigo Lima', email: 'rodrigo.lima@radar.com', role: 'promotor', active: true, avatarUrl: 'RL', password: '123' }
 ];
 
 // Generates interesting historic records for testing that varies based on date
@@ -336,7 +336,7 @@ export const getInitialState = (): {
     chains: INITIAL_CHAINS,
     records: generateMockHistory(),
     users: INITIAL_USERS,
-    currentUser: INITIAL_USERS[0]
+    currentUser: null
   };
 };
 

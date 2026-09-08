@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   Upload,
   Loader2,
+  LogOut,
 } from "lucide-react";
 import { Product, Chain, User } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
@@ -121,6 +122,7 @@ interface SettingsProps {
   onAddUser: (newUser: User) => void;
   onDeleteUser: (id: string) => void;
   onNavigate: (page: string, params?: any) => void;
+  onLogout?: () => void;
 }
 
 export function Settings({
@@ -137,6 +139,7 @@ export function Settings({
   onAddUser,
   onDeleteUser,
   onNavigate,
+  onLogout,
 }: SettingsProps) {
   // Navigation tabs inside Settings
   const [activeTab, setActiveTab] = useState<"products" | "chains" | "users">(
@@ -694,6 +697,69 @@ export function Settings({
             <Users2 className="w-4 h-4" />
             <span>Colaboradores / Usuários</span>
           </button>
+
+          {/* Current Session / Sair da Conta Card */}
+          {currentUser && onLogout && (
+            <div
+              className="mt-6 pt-5 border-t border-gray-200"
+              id="settings-session-container"
+            >
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2.5">
+                Sessão Ativa
+              </p>
+              <div className="p-3 bg-[#F5F5F5] border border-[#E0E0E0] rounded-xl mb-3">
+                <div className="flex items-center gap-2.5 mb-2">
+                  <span className="w-8 h-8 rounded-full bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
+                    {currentUser.avatarUrl &&
+                    (currentUser.avatarUrl.startsWith("http") ||
+                      currentUser.avatarUrl.startsWith("data:")) ? (
+                      <img
+                        src={currentUser.avatarUrl}
+                        alt={currentUser.name}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      currentUser.avatarUrl ||
+                      currentUser.name.substring(0, 2).toUpperCase()
+                    )}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-bold text-[#1A1A1A] truncate">
+                      {currentUser.name}
+                    </p>
+                    <p className="text-[10px] text-gray-500 truncate font-mono">
+                      {currentUser.email}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-[9px] font-mono font-bold text-gray-500 pt-2 border-t border-gray-200/80">
+                  <span>Perfil:</span>
+                  <span
+                    className={`px-1.5 py-0.5 rounded uppercase ${
+                      currentUser.isGuest
+                        ? "bg-amber-100 text-amber-900"
+                        : currentUser.role === "gestor"
+                        ? "bg-purple-100 text-purple-800"
+                        : "bg-blue-100 text-blue-800"
+                    }`}
+                  >
+                    {currentUser.isGuest ? "Convidado" : currentUser.role}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                id="settings-logout-btn"
+                onClick={onLogout}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-2xs group"
+              >
+                <LogOut className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                <span>Sair da Conta Atual</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Tab Content Panels */}

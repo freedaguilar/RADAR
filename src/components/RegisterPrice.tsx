@@ -244,6 +244,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [isAnalyzingBatch, setIsAnalyzingBatch] = useState(false);
   const [batchAnalysisProgress, setBatchAnalysisProgress] = useState('');
 
+  // Immediate manual price input state when taking photo without "manter preço"
+  const [pendingPriceModal, setPendingPriceModal] = useState<{
+    targetProduct: Product | null;
+    dataUrl: string;
+    originalBytes: number;
+    tempId: string;
+  } | null>(null);
+  const [immediatePrice, setImmediatePrice] = useState('0,00');
+
+  // Calculator-style price formatter (digit input from right to left)
+  const formatToCalculatorPrice = (inputValue: string): string => {
+    const digits = inputValue.replace(/\D/g, '');
+    if (!digits) return '0,00';
+    const cents = parseInt(digits, 10);
+    return (cents / 100).toFixed(2).replace('.', ',');
+  };
+
   // Total count occurrences per product across all records (for global fallback)
   const productRecordCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -462,12 +479,151 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     // Por padrão, a opção sempre vem desmarcada para o próximo produto
     setKeepCurrentPrice(false);
 
-    if (targetProduct) {
-      // Remove imediatamente o produto capturado da fila para exibir o próximo na tela
-      setCapturedProductIds(prev => [...prev, targetProduct.id]);
-      setGuidedQueue(prev => prev.filter(p => p.id !== targetProduct.id));
+    if (shouldKeepPrice) {
+      if (targetProduct) {
+        // Remove imediatamente o produto capturado da fila para exibir o próximo na tela
+        setCapturedProductIds(prev => [...prev, targetProduct.id]);
+        setGuidedQueue(prev => prev.filter(p => p.id !== targetProduct.id));
+      }
+      await captureBatchFrame(targetProduct || undefined, true);
+    } else {
+      // Se NÃO apertar "manter preço", captura a foto na hora e exibe o modal para digitar o preço antes de ir para o próximo produto
+      if (!videoRef.current || !canvasRef.current) return;
+
+      // Trigger visual flash shutter effect
+      setShutterEffect(true);
+      setTimeout(() => setShutterEffect(false), 120);
+
+      // Trigger haptic vibration feedback on mobile devices if supported
+      if (typeof window !== 'undefined' && window.navigator && window.navigator.vibrate) {
+        try { window.navigator.vibrate(40); } catch (_) {}
+      }
+
+      const cw = videoRef.current.videoWidth || 640;
+      const ch = videoRef.current.videoHeight || 480;
+
+      const ctx = canvasRef.current.getContext('2d');
+      if (!ctx) return;
+
+      canvasRef.current.width = cw;
+      canvasRef.current.height = ch;
+      ctx.drawImage(videoRef.current, 0, 0, cw, ch);
+
+      const dataUrl = canvasRef.current.toDataURL('image/jpeg', 0.95);
+      const originalBytes = dataUrl.length * 0.75;
+      const tempId = `batch-img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      setPendingPriceModal({
+        targetProduct: targetProduct || null,
+        dataUrl,
+        originalBytes,
+        tempId,
+      });
+      setImmediatePrice('0,00');
     }
-    await captureBatchFrame(targetProduct || undefined, shouldKeepPrice);
+  };
+
+  // Confirmação do preço digitado na hora pelo usuário
+  const handleConfirmImmediatePrice = async () => {
+    if (!pendingPriceModal) return;
+    const { targetProduct, dataUrl, originalBytes, tempId } = pendingPriceModal;
+    const numericPrice = parseFloat(immediatePrice.replace(',', '.')) || 0;
+
+    if (numericPrice <= 0) {
+      setErrorMsg('Por favor, informe um valor maior que zero para o produto.');
+      return;
+    }
+
+    const capturedTargetProduct = targetProduct;
+    const capturedImmediatePrice = immediatePrice;
+    
+    // Fecha o modal e limpa o valor para liberar imediatamente a tela
+    setPendingPriceModal(null);
+    setImmediatePrice('0,00');
+
+    // Se estiver em modo guiado com produto alvo, avança imediatamente para o próximo da fila
+    if (capturedTargetProduct) {
+      setCapturedProductIds(prev => [...prev, capturedTargetProduct.id]);
+      setGuidedQueue(prev => prev.filter(p => p.id !== capturedTargetProduct.id));
+    }
+
+    // Cria o item no lote com o valor digitado
+    const selectedProdId = capturedTargetProduct ? capturedTargetProduct.id : '';
+    const prodSearch = capturedTargetProduct ? capturedTargetProduct.name : '';
+
+    const newItem: BatchItem = {
+      id: tempId,
+      imagePreview: dataUrl,
+      originalSizeKB: Math.round(originalBytes / 1024),
+      compressedSizeKB: Math.round(originalBytes / 1024),
+      status: 'compressing',
+      selectedProductId: selectedProdId,
+      productSearch: prodSearch,
+      price: capturedImmediatePrice,
+      notes: capturedTargetProduct ? `[Preço Digitado] ${capturedTargetProduct.name}` : '',
+      selectedChainId: selectedChainId,
+      confidence: 'high',
+      isKeptPrice: false,
+    };
+
+    setBatchItems(prev => [...prev, newItem]);
+
+    try {
+      const comp = await compressSingleImagePromise(dataUrl, originalBytes);
+
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        imagePreview: comp.compressedBase64,
+        originalSizeKB: comp.originalSizeKB,
+        compressedSizeKB: comp.compressedSizeKB,
+        status: 'uploading' as const
+      } : item));
+
+      const finalImageUrl = await uploadToSupabaseStorage(comp.compressedBase64, 'images');
+      const todayStr = new Date().toISOString().split('T')[0];
+      const recordId = `rec-field-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+      // Se for convidado, marca como pendente para auditoria de gestor!
+      const isGuest = !!currentUser?.isGuest;
+      const finalNotes = isGuest
+        ? serializePendingMeta(prodSearch, numericPrice, `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`)
+        : (capturedTargetProduct ? `[Preço Digitado] ${capturedTargetProduct.name}` : '');
+
+      const newRecord: PriceRecord = {
+        id: recordId,
+        productId: selectedProdId,
+        chainId: selectedChainId,
+        price: numericPrice,
+        date: todayStr,
+        imageUrl: finalImageUrl || '',
+        notes: finalNotes,
+        userName: currentUser?.name || 'Vendedor Autônomo',
+        userEmail: currentUser?.email || 'vendas@radar.com'
+      };
+
+      onSaveRecord(newRecord);
+
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        imageUrl: finalImageUrl,
+        recordId: recordId,
+        status: isGuest ? ('pending' as const) : ('success' as const),
+        price: capturedImmediatePrice,
+        aiAnalysisMessage: 'Preço registrado pelo usuário'
+      } : item));
+    } catch (err) {
+      console.error('Camera frame compression/upload/save failed:', err);
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        status: 'failed' as const
+      } : item));
+    }
+  };
+
+  // Cancela a foto atual sem avançar a fila, permitindo ao usuário tirar outra foto
+  const handleCancelImmediatePrice = () => {
+    setPendingPriceModal(null);
+    setImmediatePrice('0,00');
   };
 
   const handleSkipGuidedProduct = () => {
@@ -862,10 +1018,13 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         : `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
       const numPrice = keepPrice ? priceToKeep : (parseFloat(initialPrice.replace(',', '.')) || 0);
 
-      // Se o usuário selecionou para manter o preço, ele já registra aquele preço sem passar pela auditoria
-      const finalNotes = keepPrice
-        ? `[Preço Mantido] ${targetProduct?.name || ''}`
-        : serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '');
+      const isGuest = !!currentUser?.isGuest;
+      // Se for convidado, marca como pendente para auditoria de gestor
+      const finalNotes = isGuest
+        ? serializePendingMeta(prodSearch, numPrice, `[Registro Convidado - Preço Mantido: ${currentUser?.name || 'Convidado'}]`)
+        : (keepPrice
+            ? `[Preço Mantido] ${targetProduct?.name || ''}`
+            : serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : ''));
 
       const newRecord: PriceRecord = {
         id: recordId,
@@ -885,7 +1044,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         ...item,
         imageUrl: finalImageUrl,
         recordId: recordId,
-        status: keepPrice ? ('success' as const) : ('pending' as const),
+        status: (!isGuest && keepPrice) ? ('success' as const) : ('pending' as const),
         aiAnalysisMessage: keepPrice ? 'Preço anterior mantido pelo usuário' : undefined
       } : item));
 
@@ -1250,14 +1409,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
     }
     return dateStr;
-  };
-
-  // Calculator-style price formatter (digit input from right to left)
-  const formatToCalculatorPrice = (inputValue: string): string => {
-    const digits = inputValue.replace(/\D/g, '');
-    if (!digits) return '0,00';
-    const cents = parseInt(digits, 10);
-    return (cents / 100).toFixed(2).replace('.', ',');
   };
 
   const handleProductSelect = (product: Product) => {
@@ -1641,14 +1792,19 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       )}
 
       {savedLaterCount !== null && (
-        <div className="p-5 bg-amber-50 border border-amber-100 text-amber-800 rounded-2xl flex items-start gap-4 shadow-sm" id="register-saved-later-box">
-          <div className="p-2 bg-amber-500 text-white rounded-xl col-span-1 shrink-0">
+        <div className="p-5 bg-emerald-50 border border-emerald-150 text-emerald-900 rounded-2xl flex items-start gap-4 shadow-sm" id="register-saved-later-box">
+          <div className="p-2 bg-emerald-600 text-white rounded-xl col-span-1 shrink-0">
             <CheckCircle2 className="w-5 h-5 shrink-0" />
           </div>
           <div>
-            <p className="text-sm font-bold font-sans">Fotos Salvas para Análise Posterior!</p>
-            <p className="text-xs text-amber-700/90 mt-1 font-medium leading-relaxed">
-              Consolidamos <strong>{savedLaterCount} foto(s)</strong> no lote com status <strong>"pendente"</strong>. As orientações da IA foram salvas como lembretes preliminares e esperam sua revisão na aba de <strong>Auditoria</strong>.
+            <p className="text-sm font-bold font-sans">Pesquisa Concluída com Sucesso!</p>
+            <p className="text-xs text-emerald-800/90 mt-1 font-medium leading-relaxed">
+              Consolidamos <strong>{savedLaterCount} produto(s)</strong> pesquisados com sucesso. Os preços e fotos foram registrados no sistema.
+              {currentUser?.isGuest && (
+                <span className="block mt-1 text-emerald-950 font-bold">
+                  Seus registros foram enviados e estão disponíveis para auditoria na conta de um gestor.
+                </span>
+              )}
             </p>
           </div>
         </div>
@@ -1801,47 +1957,86 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4" id="batch-thumbnails-container">
-                        {batchItems.map((item, idx) => (
-                          <div key={item.id} className="relative aspect-square border border-slate-150 rounded-xl overflow-hidden bg-slate-50 flex flex-col shadow-2xs group">
-                            {/* Visual Thumbnail */}
-                            <img src={item.imagePreview} alt={`Lote - ${idx+1}`} className="w-full h-24 object-contain bg-white shrink-0 border-b border-slate-100" referrerPolicy="no-referrer" />
-                            
-                            {/* Card Details/Status */}
-                            <div className="p-2 flex-1 flex flex-col justify-between">
-                              <span className="text-[9px] text-slate-400 font-black font-sans">Foto {idx + 1}</span>
-                              <div className="flex items-center justify-between mt-1 gap-1">
-                                {item.isKeptPrice ? (
-                                  <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 leading-none uppercase">
-                                    <Check className="w-2.5 h-2.5" />
-                                    Mantido (R$ {item.price})
-                                  </span>
-                                ) : item.status === 'compressing' ? (
-                                  <span className="text-[9px] text-violet-600 font-extrabold flex items-center gap-1 leading-none uppercase animate-pulse">
-                                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
-                                    Comprimindo
-                                  </span>
-                                ) : item.status === 'pending' ? (
-                                  <span className="text-[9px] text-emerald-600 font-extrabold flex items-center gap-1 leading-none uppercase">
-                                    <Check className="w-3 h-3" />
-                                    Pronto {item.compressedSizeKB ? `(${item.compressedSizeKB} KB)` : ''}
-                                  </span>
-                                ) : null}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4" id="batch-thumbnails-container">
+                        {batchItems.map((item, idx) => {
+                          const product = products.find(p => p.id === item.selectedProductId);
+                          const productName = product ? product.name : (item.productSearch || `Item ${idx + 1}`);
+
+                          return (
+                            <div
+                              key={item.id}
+                              className="relative border border-slate-200 rounded-2xl overflow-hidden bg-white flex flex-col shadow-2xs hover:shadow-sm transition-all group"
+                            >
+                              {/* Visual Thumbnail */}
+                              <div className="relative w-full h-28 sm:h-32 bg-slate-100 flex items-center justify-center overflow-hidden border-b border-slate-100">
+                                <img
+                                  src={item.imagePreview}
+                                  alt={productName}
+                                  className="w-full h-full object-cover"
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-xs text-white text-[9px] font-black font-mono px-2 py-0.5 rounded-md">
+                                  Foto {idx + 1}
+                                </div>
+                                {/* Delete single button over corner */}
+                                <button
+                                  type="button"
+                                  onClick={() => removeBatchItem(item)}
+                                  className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-full text-white hover:bg-rose-600 hover:scale-110 cursor-pointer transition shadow-md shrink-0"
+                                  title="Remover item"
+                                >
+                                  <XCircle className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                              
+                              {/* Card Details/Conferência */}
+                              <div className="p-3 flex-1 flex flex-col justify-between gap-2">
+                                <div>
+                                  {/* Nome do Item */}
+                                  <h4 className="text-xs font-black text-slate-800 line-clamp-2 leading-snug" title={productName}>
+                                    {productName}
+                                  </h4>
+                                  {product?.weight && (
+                                    <span className="text-[10px] text-slate-400 font-medium">
+                                      {product.weight}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Valor para Conferência & Status */}
+                                <div className="pt-2 border-t border-slate-100 flex flex-col gap-1">
+                                  <div className="flex items-baseline justify-between gap-1">
+                                    <span className="text-[9px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
+                                      Valor:
+                                    </span>
+                                    <span className="text-sm font-black font-mono text-[#D40511]">
+                                      R$ {item.price || '0,00'}
+                                    </span>
+                                  </div>
+
+                                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                                    {item.isKeptPrice ? (
+                                      <span className="text-[9px] text-emerald-700 bg-emerald-50 border border-emerald-200 font-extrabold px-1.5 py-0.5 rounded flex items-center gap-1 leading-none uppercase">
+                                        <Check className="w-2.5 h-2.5" />
+                                        Preço Mantido
+                                      </span>
+                                    ) : item.status === 'compressing' ? (
+                                      <span className="text-[9px] text-violet-600 font-extrabold flex items-center gap-1 leading-none uppercase animate-pulse">
+                                        <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                        Comprimindo
+                                      </span>
+                                    ) : (
+                                      <span className="text-[9px] text-emerald-600 font-extrabold flex items-center gap-1 leading-none uppercase">
+                                        <Check className="w-3 h-3" />
+                                        Pronto {item.compressedSizeKB ? `(${item.compressedSizeKB} KB)` : ''}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
                             </div>
-
-                            {/* Delete single button over corner */}
-                            <button
-                              type="button"
-                              onClick={() => {
-                                removeBatchItem(item);
-                              }}
-                              className="absolute top-1.5 right-1.5 p-1.5 bg-black/60 rounded-full text-white hover:bg-rose-600 hover:scale-115 cursor-pointer transition-all shadow-md shrink-0"
-                            >
-                              <XCircle className="w-3 h-3" />
-                            </button>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
 
                       {/* Processamento de Salvamento em Lote com Barra de Progresso se salvo de antemão */}
@@ -1871,22 +2066,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                           type="button"
                           onClick={handleBatchSaveLater}
                           disabled={isSavingLater || isSavingAll || batchItems.some(i => i.status === 'compressing')}
-                          className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide h-12"
+                          className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-4 rounded-xl text-xs font-black disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide h-12"
                         >
                           {isSavingLater ? (
                             <>
                               <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                              <span>Salvando lote...</span>
+                              <span>Concluindo pesquisa...</span>
                             </>
                           ) : (
                             <>
-                              <Layers className="w-4 h-4 text-white shrink-0" />
-                              <span>Salvar para Analisar Depois</span>
+                              <CheckCircle2 className="w-4 h-4 text-white shrink-0" />
+                              <span>Concluir Pesquisa</span>
                             </>
                           )}
                         </button>
 
-                        {currentUser?.role !== 'promotor' && (
+                        {/* Botão de analisar lote com IA oculto por solicitação do usuário. Código mantido intacto para uso futuro. */}
+                        {false && currentUser?.role !== 'promotor' && (
                           <button
                             type="button"
                             onClick={analyzeBatchAll}
@@ -2646,17 +2842,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                     type="button"
                     onClick={handleBatchSaveLater}
                     disabled={isSavingLater || isSavingAll || batchItems.length === 0}
-                    className="w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-white px-6 py-4 rounded-xl text-xs font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
+                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-4 rounded-xl text-xs font-black disabled:bg-slate-300 disabled:cursor-not-allowed transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2 uppercase tracking-wide"
                   >
                     {isSavingLater ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin shrink-0" />
-                        <span>Salvando lote...</span>
+                        <span>Concluindo pesquisa...</span>
                       </>
                     ) : (
                       <>
-                        <Layers className="w-4 h-4 text-white shrink-0" />
-                        <span>Salvar para Analisar Depois</span>
+                        <CheckCircle2 className="w-4 h-4 text-white shrink-0" />
+                        <span>Concluir Pesquisa</span>
                       </>
                     )}
                   </button>
@@ -2839,6 +3035,104 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
             <p className="text-center text-sm md:text-base text-white/95 font-bold font-mono mt-4 px-4 py-2 bg-black/60 rounded-lg max-w-[85vw] break-words">
               {fullscreenProductPhoto.name}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* Modal para digitar o preço na hora caso não tenha marcado "Manter Preço" */}
+      {pendingPriceModal && (
+        <div
+          id="immediate-price-input-modal"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div
+            className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-150 animate-scale-up flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header com preview da foto capturada */}
+            <div className="relative bg-slate-900 h-44 sm:h-48 w-full overflow-hidden flex items-center justify-center">
+              <img
+                src={pendingPriceModal.dataUrl}
+                alt="Foto capturada"
+                className="w-full h-full object-contain bg-black/40"
+                referrerPolicy="no-referrer"
+              />
+              <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-xs text-white text-[10px] font-bold font-mono px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-xs">
+                <Camera className="w-3 h-3 text-amber-400" />
+                Foto Capturada
+              </div>
+            </div>
+
+            {/* Conteúdo & Campo Numérico Estilo Calculadora */}
+            <div className="p-5 sm:p-6 flex flex-col gap-4 sm:gap-5">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
+                    Informe o Preço na Gôndola
+                  </span>
+                </div>
+                <h3 className="text-base font-black text-slate-900 leading-tight">
+                  {pendingPriceModal.targetProduct?.name || 'Produto da Pesquisa'}
+                </h3>
+                {pendingPriceModal.targetProduct?.category && (
+                  <p className="text-xs text-slate-400 font-medium mt-0.5">
+                    {pendingPriceModal.targetProduct.category}
+                  </p>
+                )}
+              </div>
+
+              {/* Input Numérico com shift de decimais da direita pra esquerda */}
+              <div className="bg-slate-50 border-2 border-slate-200 focus-within:border-[#D40511] focus-within:bg-white rounded-2xl p-4 transition flex flex-col items-center justify-center shadow-2xs">
+                <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
+                  Preço na Etiqueta (R$)
+                </label>
+                <div className="flex items-baseline justify-center gap-1.5 w-full">
+                  <span className="text-2xl font-black text-slate-400 font-mono">R$</span>
+                  <input
+                    id="input-immediate-price"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoFocus
+                    value={immediatePrice}
+                    onChange={(e) => setImmediatePrice(formatToCalculatorPrice(e.target.value))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleConfirmImmediatePrice();
+                      }
+                    }}
+                    className="w-48 text-center text-3xl sm:text-4xl font-black font-mono text-[#D40511] bg-transparent outline-hidden border-b-2 border-slate-300 focus:border-[#D40511] tracking-tight"
+                    placeholder="0,00"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400 font-medium mt-2 text-center">
+                  Digite os números continuamente (ex: digite 1, 4, 9, 9 para R$ 14,99)
+                </p>
+              </div>
+
+              {/* Botões de Ação */}
+              <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+                <button
+                  type="button"
+                  id="btn-cancel-immediate-price"
+                  onClick={handleCancelImmediatePrice}
+                  className="order-2 sm:order-1 flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition duration-150 cursor-pointer text-center"
+                >
+                  Tirar outra foto
+                </button>
+                <button
+                  type="button"
+                  id="btn-confirm-immediate-price"
+                  onClick={handleConfirmImmediatePrice}
+                  disabled={immediatePrice === '0,00'}
+                  className="order-1 sm:order-2 flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-wider transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4 text-white shrink-0" />
+                  <span>Confirmar & Próximo</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

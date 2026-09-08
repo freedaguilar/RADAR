@@ -139,41 +139,52 @@ export default function App() {
 
   // Session login
   const handleLoginSuccess = (user: User) => {
-    setState((prev) => ({
-      ...prev,
-      currentUser: user,
-    }));
+    setState((prev) => {
+      const exists = prev.users.some(
+        (u) => u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase()
+      );
+      return {
+        ...prev,
+        users: exists ? prev.users : [...prev.users, user],
+        currentUser: user,
+      };
+    });
     setActiveTab("dashboard");
   };
 
   // Session check on load
   useEffect(() => {
     async function checkSession() {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user?.email) {
-        // Fetch profile
-        const { data: profile } = await supabase
-          .from('app_users')
-          .select('*')
-          .eq('email', session.user.email)
-          .single();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
         
-        if (profile) {
-          setState(prev => ({
-            ...prev,
-            currentUser: {
-              id: profile.id,
-              name: profile.name,
-              email: profile.email,
-              role: profile.role,
-              active: profile.active,
-              avatarUrl: profile.avatar_url,
-            }
-          }));
+        if (session?.user?.email) {
+          // Fetch profile
+          const { data: profile } = await supabase
+            .from('app_users')
+            .select('*')
+            .eq('email', session.user.email)
+            .maybeSingle();
+          
+          if (profile) {
+            setState(prev => ({
+              ...prev,
+              currentUser: {
+                id: profile.id,
+                name: profile.name,
+                email: profile.email,
+                role: profile.role,
+                active: profile.active,
+                avatarUrl: profile.avatar_url,
+              }
+            }));
+          }
         }
+      } catch (err) {
+        console.debug("Session check exception caught:", err);
+      } finally {
+        setIsInitializing(false);
       }
-      setIsInitializing(false);
     }
     
     // Only check session if it's the very first load and not already initialized
@@ -183,13 +194,48 @@ export default function App() {
   }, []);
 
   // Session logout
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    setState((prev) => ({
-      ...prev,
-      currentUser: null,
-    }));
-  };
+  const handleLogout = useCallback(() => {
+    // 1. Immediately reset active user in state and localStorage synchronously
+    setState((prev) => {
+      const updated: AppState = {
+        ...prev,
+        currentUser: null,
+      };
+      saveStateToLocalStorage(updated);
+      return updated;
+    });
+
+    // 2. Clear route and prefill parameters
+    setActiveTab("dashboard");
+    setSelectedAuditRecordId(null);
+    setProductPageParams(null);
+    setRegisterPageParams(null);
+
+    // 3. Clear any auth tokens or cached session items
+    try {
+      Object.keys(localStorage).forEach((key) => {
+        if (key.startsWith("sb-") || key.includes("supabase.auth") || key.includes("auth.token")) {
+          localStorage.removeItem(key);
+        }
+      });
+    } catch (err) {
+      console.debug("Cleanup storage error:", err);
+    }
+
+    // 4. Fire-and-forget Supabase signout in background without blocking state
+    if (isConfigured) {
+      try {
+        Promise.race([
+          supabase.auth.signOut(),
+          new Promise((resolve) => setTimeout(resolve, 800)),
+        ]).catch((err) => {
+          console.debug("Supabase signOut error:", err);
+        });
+      } catch (err) {
+        console.debug("SignOut call caught:", err);
+      }
+    }
+  }, [isConfigured]);
 
   // State modification callbacks
   const handleAddProduct = useCallback(
@@ -561,6 +607,13 @@ export default function App() {
     setTouchStartY(null);
   }, [touchStartY, isPulling, pullY, isRefreshing, handleRefreshData]);
 
+  const pendingCount = React.useMemo(() => {
+    return state.records.filter((r) => {
+      const { isPending } = parsePriceRecordMeta(r.notes);
+      return !r.productId || isPending;
+    }).length;
+  }, [state.records]);
+
   // Guard routing: if no active profile, force Login screen
   if (!state.currentUser) {
     if (isInitializing) {
@@ -575,15 +628,13 @@ export default function App() {
         </div>
       );
     }
-    return <Login onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <Login
+        onLoginSuccess={handleLoginSuccess}
+        availableUsers={state.users}
+      />
+    );
   }
-
-  const pendingCount = React.useMemo(() => {
-    return state.records.filter((r) => {
-      const { isPending } = parsePriceRecordMeta(r.notes);
-      return !r.productId || isPending;
-    }).length;
-  }, [state.records]);
 
   const menuItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -605,13 +656,13 @@ export default function App() {
     >
       {/* 1. DESKTOP NAVIGATION SIDEBAR MENU */}
       <aside
-        className="hidden lg:flex lg:w-64 bg-white border-r border-[#E0E0E0] flex-col justify-between shrink-0 h-screen sticky top-0"
+        className="hidden lg:flex lg:w-64 bg-white border-r border-[#E0E0E0] flex-col justify-between shrink-0 h-screen sticky top-0 overflow-hidden"
         id="desktop-sidebar"
       >
-        <div>
-          {/* Logo Brand Brand Header */}
+        <div className="flex flex-col h-full overflow-hidden">
+          {/* Logo Brand Header */}
           <div
-            className="p-6 border-b border-[#E0E0E0] flex items-center justify-between"
+            className="p-6 border-b border-[#E0E0E0] flex items-center justify-between shrink-0"
             id="sidebar-logo-header"
           >
             <div className="flex items-center gap-3">
@@ -638,7 +689,7 @@ export default function App() {
           </div>
 
           {/* Navigation Links list */}
-          <nav className="p-4 space-y-1.5" id="sidebar-navigation">
+          <nav className="flex-1 overflow-y-auto p-4 space-y-1.5" id="sidebar-navigation">
             {menuItems.map((item) => {
               const IconComp = item.icon;
               const isSelected = activeTab === item.id;
@@ -678,46 +729,59 @@ export default function App() {
               );
             })}
           </nav>
-        </div>
 
-        {/* Desktop Active User Sidebar Footer and logout */}
-        <div className="p-4 border-t border-[#E0E0E0]" id="sidebar-footer">
-          <div
-            className="flex items-center justify-between p-2 rounded-xl bg-[#F5F5F5] mb-2"
-            id="sidebar-user-card"
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="w-8 h-8 rounded-full bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
-                {state.currentUser.avatarUrl && (state.currentUser.avatarUrl.startsWith("http") || state.currentUser.avatarUrl.startsWith("data:")) ? (
-                  <img
-                    src={state.currentUser.avatarUrl}
-                    alt={state.currentUser.name}
-                    className="w-full h-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  state.currentUser.avatarUrl || "JA"
-                )}
-              </span>
-              <div className="min-w-0">
-                <p className="text-xs font-mono font-bold text-[#1A1A1A] truncate">
-                  {state.currentUser.name}
-                </p>
-                <p className="text-[10px] text-gray-500 truncate lowercase">
-                  {state.currentUser.role === "gestor" ? "Gestor/Administrador" : state.currentUser.role === "promotor" ? "Promotor" : "Vendedor / Campo"}
-                </p>
+          {/* Desktop Active User Sidebar Footer and logout */}
+          <div className="p-4 border-t border-[#E0E0E0] shrink-0 bg-white" id="sidebar-footer">
+            <div
+              className="flex items-center justify-between p-2 rounded-xl bg-[#F5F5F5] mb-2.5"
+              id="sidebar-user-card"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-8 h-8 rounded-full bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
+                  {state.currentUser.avatarUrl && (state.currentUser.avatarUrl.startsWith("http") || state.currentUser.avatarUrl.startsWith("data:")) ? (
+                    <img
+                      src={state.currentUser.avatarUrl}
+                      alt={state.currentUser.name}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    state.currentUser.avatarUrl || "JA"
+                  )}
+                </span>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <p className="text-xs font-mono font-bold text-[#1A1A1A] truncate">
+                      {state.currentUser.name}
+                    </p>
+                    {state.currentUser.isGuest && (
+                      <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded-full font-mono shrink-0">
+                        Convidado
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-gray-500 truncate lowercase">
+                    {state.currentUser.isGuest
+                      ? "Acesso Convidado / Campo"
+                      : state.currentUser.role === "gestor"
+                      ? "Gestor/Administrador"
+                      : state.currentUser.role === "promotor"
+                      ? "Promotor"
+                      : "Vendedor / Campo"}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
 
-          <button
-            id="sidebar-logout-btn"
-            onClick={handleLogout}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-transparent text-gray-400 hover:text-[#D40511] text-xs font-semibold rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sair da Conta</span>
-          </button>
+            <button
+              id="sidebar-logout-btn"
+              onClick={handleLogout}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-2xs group"
+            >
+              <LogOut className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+              <span>Sair da Conta</span>
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -746,6 +810,11 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
+          {state.currentUser.isGuest && (
+            <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded-full font-mono">
+              Convidado
+            </span>
+          )}
           {/* Quick active profile bubble */}
           <span className="w-7 h-7 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-[10px] uppercase overflow-hidden shrink-0">
             {state.currentUser.avatarUrl && (state.currentUser.avatarUrl.startsWith("http") || state.currentUser.avatarUrl.startsWith("data:")) ? (
@@ -762,10 +831,11 @@ export default function App() {
           <button
             id="mobile-quick-logout-btn"
             onClick={handleLogout}
-            className="p-1.5 text-gray-400 hover:text-[#D40511] hover:bg-gray-100 rounded-lg"
-            title="Sair"
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-2xs"
+            title="Sair da Conta"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sair</span>
           </button>
         </div>
       </header>
@@ -872,6 +942,7 @@ export default function App() {
             onDeleteUser={handleDeleteUser}
             onEditProduct={handleEditProduct}
             onNavigate={handleNavigate}
+            onLogout={handleLogout}
           />
         )}
       </main>
