@@ -2140,14 +2140,25 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       {/* Product Main Detail Row */}
                       <div className="flex items-center gap-3.5 mt-3">
                         {currentGuidedProduct.imageUrl ? (
-                          <div className="w-14 h-14 rounded-xl overflow-hidden border border-slate-700 bg-white shrink-0 p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setFullscreenProductPhoto({
+                              url: currentGuidedProduct.imageUrl!,
+                              name: currentGuidedProduct.name
+                            })}
+                            className="relative group w-14 h-14 rounded-xl overflow-hidden border border-slate-700 hover:border-red-400 bg-white shrink-0 p-0.5 cursor-pointer transition shadow-xs focus:outline-none"
+                            title="Clique para ver a foto do produto ampliada"
+                          >
                             <img
                               src={currentGuidedProduct.imageUrl}
                               alt={currentGuidedProduct.name}
-                              className="w-full h-full object-contain"
+                              className="w-full h-full object-contain group-hover:scale-105 transition duration-200"
                               referrerPolicy="no-referrer"
                             />
-                          </div>
+                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <Eye className="w-4 h-4 text-white drop-shadow" />
+                            </div>
+                          </button>
                         ) : (
                           <div className="w-14 h-14 rounded-xl border border-dashed border-slate-700 bg-slate-800/80 flex items-center justify-center shrink-0">
                             <Package className="w-6 h-6 text-red-400" />
@@ -2217,17 +2228,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       <div className="absolute inset-0 bg-white z-20 pointer-events-none transition-opacity duration-150" />
                     )}
 
-                    {/* Live Badge & Close button overlay */}
-                    <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
-                      <div className="bg-black/75 backdrop-blur-md text-white border border-red-500/40 rounded-full px-3 py-1 text-xs font-extrabold font-mono flex items-center gap-2 shadow-md">
-                        <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse shrink-0"></span>
-                        <span>CÂMERA ATIVA | Lote: {batchItems.length} {batchItems.length === 1 ? 'Foto' : 'Fotos'}</span>
-                      </div>
-
+                    {/* Close button overlay */}
+                    <div className="absolute top-3 right-3 z-10">
                       <button
                         type="button"
                         onClick={stopCamera}
-                        className="pointer-events-auto p-2 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur-sm transition cursor-pointer"
+                        className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur-sm transition cursor-pointer"
                         title="Fechar Câmera"
                       >
                         <X className="w-4 h-4" />
@@ -2238,59 +2244,59 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                     <div className="absolute inset-x-8 inset-y-8 border-2 border-dashed border-red-500/40 rounded-2xl pointer-events-none flex items-center justify-center">
                       <div className="w-full h-0.5 bg-red-500/50 animate-pulse absolute"></div>
                     </div>
-
-                    {/* Overlay inferior da Câmera: Último Preço & Opção de Manter Preço */}
-                    {currentGuidedProduct && (() => {
-                      const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId);
-                      const hasLastPrice = !!lastRec && lastRec.price > 0;
-
-                      return (
-                        <div className="absolute bottom-3 inset-x-3 z-20 bg-slate-950/85 backdrop-blur-md border border-slate-700/80 rounded-xl px-3.5 py-2 flex items-center justify-between gap-3 shadow-2xl">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 shrink-0 border border-amber-500/30">
-                              <Tag className="w-3.5 h-3.5" />
-                            </div>
-                            <div className="min-w-0">
-                              <span className="text-[10px] font-bold text-slate-400 block uppercase tracking-wider leading-none font-mono">
-                                Último na rede
-                              </span>
-                              {hasLastPrice ? (
-                                <span className="text-xs sm:text-sm font-black font-mono text-amber-300 leading-tight">
-                                  R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                                </span>
-                              ) : (
-                                <span className="text-[11px] font-medium text-slate-400 leading-tight">
-                                  Sem preço anterior
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {hasLastPrice && (
-                            <label
-                              htmlFor="camera-keep-price-toggle"
-                              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
-                                keepCurrentPrice
-                                  ? 'bg-emerald-500/25 border-emerald-500 text-emerald-300 shadow-xs'
-                                  : 'bg-slate-800/90 hover:bg-slate-800 border-slate-600 text-slate-300'
-                              }`}
-                            >
-                              <input
-                                id="camera-keep-price-toggle"
-                                type="checkbox"
-                                checked={keepCurrentPrice}
-                                onChange={(e) => setKeepCurrentPrice(e.target.checked)}
-                                className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0 border-slate-600 bg-slate-900 cursor-pointer accent-emerald-500"
-                              />
-                              <span className="font-extrabold whitespace-nowrap">
-                                Manter preço
-                              </span>
-                            </label>
-                          )}
-                        </div>
-                      );
-                    })()}
                   </div>
+
+                  {/* Badge de Último Preço na Rede & Opção de Manter Preço (abaixo da câmera, acima do botão de tirar foto) */}
+                  {currentGuidedProduct && (() => {
+                    const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId);
+                    const hasLastPrice = !!lastRec && lastRec.price > 0;
+
+                    return (
+                      <div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 shadow-md">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 border border-amber-500/30">
+                            <Tag className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-extrabold text-slate-400 block uppercase tracking-wider leading-none font-mono">
+                              Último preço na rede
+                            </span>
+                            {hasLastPrice ? (
+                              <span className="text-sm sm:text-base font-black font-mono text-amber-300 leading-tight">
+                                R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-medium text-slate-400 leading-tight">
+                                Sem preço anterior
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {hasLastPrice && (
+                          <label
+                            htmlFor="camera-keep-price-toggle"
+                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
+                              keepCurrentPrice
+                                ? 'bg-emerald-500/25 border-emerald-500 text-emerald-300 shadow-xs ring-1 ring-emerald-500/50'
+                                : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
+                            }`}
+                          >
+                            <input
+                              id="camera-keep-price-toggle"
+                              type="checkbox"
+                              checked={keepCurrentPrice}
+                              onChange={(e) => setKeepCurrentPrice(e.target.checked)}
+                              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0 border-slate-600 bg-slate-900 cursor-pointer accent-emerald-500"
+                            />
+                            <span className="font-extrabold whitespace-nowrap">
+                              Manter preço
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Actions Bar */}
                   <div className="space-y-2.5">
@@ -2307,11 +2313,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       >
                         <Camera className="w-5 h-5 shrink-0" />
                         <span>
-                          {keepCurrentPrice
-                            ? `📸 Tirar Foto e Manter Preço (${currentGuidedProduct ? currentGuidedProduct.name : ''})`
-                            : currentGuidedProduct
-                              ? `📸 Tirar Foto (${currentGuidedProduct.name})`
-                              : `📸 Tirar Foto (${batchItems.length + 1})`}
+                          {keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
                         </span>
                       </button>
 
