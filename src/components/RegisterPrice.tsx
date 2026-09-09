@@ -165,6 +165,7 @@ interface RegisterPriceProps {
   onDeleteRecord?: (recordId: string) => void;
   currentUser: User | null;
   onNavigate?: (page: string, params?: any) => void;
+  onLogout?: () => void;
   pageParams?: {
     productId?: string;
     chainId?: string;
@@ -173,11 +174,11 @@ interface RegisterPriceProps {
   } | null;
 }
 
-export function RegisterPrice({ products, chains, records = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, pageParams }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, records = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, onLogout, pageParams }: RegisterPriceProps) {
   // Navigation Steps: 1 (Estado) | 2 (Rede) | 3 (Foto) | 4 (Confirmação) | 5 (Página de Conclusão)
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [completionData, setCompletionData] = useState<CompletionSummary | null>(null);
-  const [selectedState, setSelectedState] = useState<string>('Minas Gerais');
+  const [selectedState, setSelectedState] = useState<string>('');
 
   // Duplication warning confirm
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
@@ -219,6 +220,21 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       }
     }
   }, [pageParams, products, chains]);
+
+  // Estados ordenados pelo número de redes cadastradas (decrescente)
+  const sortedResearchStates = useMemo(() => {
+    return [...RESEARCH_STATES]
+      .map((st) => ({
+        ...st,
+        chainCount: chains.filter((c) => isChainInState(c, st.name)).length,
+      }))
+      .sort((a, b) => {
+        if (b.chainCount !== a.chainCount) {
+          return b.chainCount - a.chainCount;
+        }
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
+  }, [chains]);
 
   // Redirect after success prompt state
   const [showRedirectPrompt, setShowRedirectPrompt] = useState(false);
@@ -483,6 +499,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [capturedProductIds, setCapturedProductIds] = useState<string[]>([]);
   const [useGuidedMode, setUseGuidedMode] = useState<boolean>(true);
   const [keepCurrentPrice, setKeepCurrentPrice] = useState<boolean>(false);
+  const [showFreeModeNoticeModal, setShowFreeModeNoticeModal] = useState<boolean>(false);
+  const [hasShownFreeModeNotice, setHasShownFreeModeNotice] = useState<boolean>(false);
 
   // Inicializa ou reinicia a fila guiada quando a rede muda
   useEffect(() => {
@@ -490,6 +508,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setOutOfStockProductIds([]);
     setGuidedQueue(frequentProductsList);
     setKeepCurrentPrice(false);
+    setHasShownFreeModeNotice(false);
+    setShowFreeModeNoticeModal(false);
   }, [selectedChainId]);
 
   // Inicializa a fila na primeira carga se estiver vazia
@@ -711,6 +731,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setOutOfStockProductIds([]);
     setGuidedQueue(frequentProductsList);
     setUseGuidedMode(true);
+    setHasShownFreeModeNotice(false);
+    setShowFreeModeNoticeModal(false);
   };
 
   // Lista de produtos marcados como 'não tem na loja' com os dados completos de cadastro
@@ -1494,6 +1516,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setBatchShowSearchDropdowns({});
     setSelectedProductId('');
     setSelectedChainId('');
+    setSelectedState('');
     setPrice('0,00');
     setNotes('');
     setProductSearch('');
@@ -1504,16 +1527,26 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setCompletionData(null);
     setCapturedProductIds([]);
     setOutOfStockProductIds([]);
+    setHasShownFreeModeNotice(false);
+    setShowFreeModeNoticeModal(false);
     setStep(1);
   };
 
-  // Finalizar e navegar para a tela de produtos
+  // Finalizar e navegar para a tela de produtos ou logout
   const handleFinishAndNavigateAway = () => {
     setCompletionData(null);
-    if (currentUser?.isGuest) {
-      handleStartNewResearch();
+    if (currentUser?.isGuest || completionData?.isGuest) {
+      if (onLogout) {
+        onLogout();
+      } else {
+        localStorage.removeItem('pricehub_auth_user');
+        localStorage.removeItem('pricehub_session_guest_name');
+        window.location.reload();
+      }
     } else if (onNavigate) {
       onNavigate('produtos');
+    } else if (onLogout) {
+      onLogout();
     } else {
       setStep(1);
     }
@@ -1542,6 +1575,31 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Dispara modal de aviso ao concluir todos os produtos da fila de auditoria
+  useEffect(() => {
+    if (
+      useCamera &&
+      useGuidedMode &&
+      frequentProductsList.length > 0 &&
+      guidedQueue.length === 0 &&
+      (capturedProductIds.length > 0 || outOfStockProductIds.length > 0) &&
+      !pendingPriceModal &&
+      !hasShownFreeModeNotice
+    ) {
+      setShowFreeModeNoticeModal(true);
+      setHasShownFreeModeNotice(true);
+    }
+  }, [
+    useCamera,
+    useGuidedMode,
+    frequentProductsList.length,
+    guidedQueue.length,
+    capturedProductIds.length,
+    outOfStockProductIds.length,
+    pendingPriceModal,
+    hasShownFreeModeNotice,
+  ]);
 
   // Feedback notifications
   const [successMsg, setSuccessMsg] = useState(false);
@@ -2047,8 +2105,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4" id="states-selection-grid">
-            {RESEARCH_STATES.map((st) => {
-              const stateChainsCount = chains.filter(c => isChainInState(c, st.name)).length;
+            {sortedResearchStates.map((st) => {
+              const stateChainsCount = st.chainCount;
               const isSelected = selectedState === st.name;
 
               return (
@@ -2109,12 +2167,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 Etapa 2 — Selecionar Rede ({selectedState})
               </h2>
               <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">
-                Selecione a bandeira do ponto de venda no estado de {selectedState} para iniciar a coleta.
+                Selecione a rede de {selectedState} para iniciar a pesquisa.
               </p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                📍 {selectedState}
+                {selectedState}
               </span>
               <button
                 type="button"
@@ -2231,7 +2289,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 Etapa 3 — Foto da Gôndola
               </h2>
               <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">
-                Envie fotos nítidas da prateleira para que a IA detecte os preços e produtos automaticamente.
+                Envie fotos nítidas da etiqueta de preço juntamente com o produto para auditoria.
               </p>
             </div>
             {selectedChainId && (
@@ -2260,7 +2318,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
                       <div>
                         <span className="text-xs font-black text-slate-800 block">Tirar Fotos (Câmera do App)</span>
-                        <span className="text-[10px] text-slate-400 font-medium font-sans mt-0.5 block">Abra a câmera e tire várias fotos em sequência continuamente</span>
+                        <span className="text-[10px] text-slate-400 font-medium font-sans mt-0.5 block">Abra a câmera direto do app e tire as fotos para pesquisa</span>
                       </div>
                     </button>
 
@@ -2272,7 +2330,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
                       <div>
                         <span className="text-xs font-black text-slate-800 block">Importar da Galeria / Arquivos</span>
-                        <span className="text-[10px] text-slate-400 font-medium font-sans mt-0.5 block">Selecione lote de fotos já salvas no dispositivo</span>
+                        <span className="text-[10px] text-slate-400 font-medium font-sans mt-0.5 block">Selecione fotos já salvas do seu dispositivo</span>
                       </div>
                       <input
                         id="register-batch-file-selector"
@@ -2305,7 +2363,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   {batchItems.length > 0 ? (
                     <div className="space-y-4">
                       <div className="flex items-center justify-between border-b border-slate-50 pb-2">
-                        <span className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Imagens no Lote ({batchItems.length} de 10)</span>
+                        <span className="text-[11px] font-extrabold uppercase tracking-wide text-slate-500">Imagens no Lote ({batchItems.length})</span>
                         <button
                           type="button"
                           onClick={() => {
@@ -2464,13 +2522,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center text-slate-400 text-xs flex flex-col items-center justify-center gap-3">
-                      <Layers className="w-10 h-10 text-slate-300 animate-pulse" />
-                      <p className="font-bold text-slate-500 text-sm">Nenhuma foto adicionada ao lote</p>
-                      <p className="max-w-sm text-[11px] text-slate-400 font-medium font-sans">Adicione fotos de gôndola ao lote. O sistema reduzirá automaticamente a resolução de cada imagem para 800x800 antes da análise inteligente.</p>
-                    </div>
-                  )}
+                  ) : null}
                 </div>
               ) : useCamera ? (
                 /* Sequential camera views for bulk registering */
@@ -2577,46 +2629,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
                       </div>
                     </motion.div>
-                  ) : useGuidedMode && frequentProductsList.length > 0 ? (
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl text-white flex flex-col sm:flex-row items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <div className="p-2.5 bg-emerald-900/80 text-emerald-300 rounded-xl border border-emerald-700/60 shrink-0">
-                          <CheckCircle2 className="w-6 h-6" />
-                        </div>
-                        <div>
-                          <h4 className="text-xs sm:text-sm font-extrabold text-white">
-                            Fila de auditoria percorrida!
-                          </h4>
-                          <p className="text-[11px] text-slate-400 font-medium">
-                            {outOfStockProductIds.length > 0
-                              ? `Você marcou ${outOfStockProductIds.length} ${outOfStockProductIds.length === 1 ? 'item' : 'itens'} como "não tem na loja". Encontrou algum agora?`
-                              : 'Você pode continuar tirando fotos livres de mais produtos para auditar depois.'
-                            }
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-                        {outOfStockProductIds.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setShowOutOfStockModal(true)}
-                            className="w-full sm:w-auto px-3.5 py-2.5 bg-rose-900/80 hover:bg-rose-800 text-rose-100 rounded-xl text-xs font-bold border border-rose-750 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0 shadow-sm"
-                          >
-                            <PackageX className="w-3.5 h-3.5 text-rose-300" />
-                            <span>Itens sem estoque ({outOfStockProductIds.length})</span>
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleResetGuidedQueue}
-                          className="w-full sm:w-auto px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold border border-slate-700 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Reiniciar Lista</span>
-                        </button>
-                      </div>
-                    </div>
                   ) : null}
 
                   <div className="relative rounded-2xl overflow-hidden bg-black aspect-4/3 max-h-[380px] shadow-lg border border-slate-800 flex items-center justify-center">
@@ -3344,10 +3356,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
             <div className="space-y-1.5">
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-700 text-xs font-bold uppercase tracking-wider">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                {completionData?.isGuest ? 'Pesquisa Concluída' : 'Auditoria Concluída'}
+                {completionData?.isGuest ? 'Tudo ok' : 'Auditoria Concluída'}
               </div>
               <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
-                Pesquisa Concluída com Sucesso!
+                {completionData?.isGuest ? 'Pesquisa Concluída com Sucesso!' : 'Pesquisa Concluída com Sucesso!'}
               </h2>
               <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed">
                 {completionData?.isGuest
@@ -3461,8 +3473,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
               </h3>
               <p className="text-xs text-slate-500 font-medium leading-relaxed">
                 {completionData?.isGuest
-                  ? 'Você pode iniciar uma nova pesquisa em outro estabelecimento ou concluir sua sessão.'
-                  : 'Você pode iniciar uma nova auditoria em outro estabelecimento ou navegar para consultar a lista de produtos.'}
+                  ? 'Você pode iniciar uma nova pesquisa em outra rede ou concluir sua sessão.'
+                  : 'Você pode iniciar uma nova auditoria em outra rede ou navegar para consultar a lista de produtos.'}
               </p>
             </div>
 
@@ -3914,6 +3926,91 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 >
                   Fechar
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Modal de Aviso: Conclusão da lista com convite para registrar produtos adicionais no modo livre */}
+        {showFreeModeNoticeModal && (
+          <div
+            id="modal-free-mode-notice"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-xs animate-fade-in"
+            onClick={() => setShowFreeModeNoticeModal(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              transition={{ duration: 0.18 }}
+              className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col border border-slate-200 p-6 sm:p-7 text-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Icon Container */}
+              <div className="mx-auto w-16 h-16 rounded-2xl bg-red-50 text-[#D40511] flex items-center justify-center border border-red-100 shadow-2xs mb-4">
+                <Camera className="w-8 h-8 shrink-0" />
+              </div>
+
+              {/* Tag / Badge */}
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200/80 text-emerald-700 text-[11px] font-bold uppercase tracking-wider mx-auto mb-3">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Lista da Loja Concluída</span>
+              </div>
+
+              {/* Title & Description */}
+              <h3 className="text-base sm:text-lg font-black text-slate-900 leading-snug tracking-tight">
+                Encontrou algum outro produto que não estava na listagem?
+              </h3>
+
+              <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed mt-2.5 mb-6">
+                Registre as fotos dos produtos no modo livre antes de concluir a pesquisa.
+              </p>
+
+              {/* Actions */}
+              <div className="flex flex-col gap-2.5">
+                <button
+                  type="button"
+                  id="btn-notice-free-mode"
+                  onClick={() => {
+                    setShowFreeModeNoticeModal(false);
+                    setUseGuidedMode(false);
+                    if (!useCamera) {
+                      startCamera();
+                    }
+                  }}
+                  className="w-full py-3.5 px-5 bg-[#D40511] hover:bg-[#b0040e] active:scale-98 text-white rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Camera className="w-4 h-4" />
+                  <span>Tirar fotos no modo livre</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-notice-finish-research"
+                  onClick={() => {
+                    setShowFreeModeNoticeModal(false);
+                    stopCamera();
+                    setStep(3);
+                  }}
+                  className="w-full py-3 px-5 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center gap-2 cursor-pointer border border-slate-250"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  <span>Concluir</span>
+                </button>
+
+                {outOfStockProductIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowFreeModeNoticeModal(false);
+                      setShowOutOfStockModal(true);
+                    }}
+                    className="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center justify-center gap-1.5 pt-2 cursor-pointer transition"
+                  >
+                    <PackageX className="w-3.5 h-3.5" />
+                    <span>Ver {outOfStockProductIds.length} {outOfStockProductIds.length === 1 ? 'item sem estoque' : 'itens sem estoque'}</span>
+                  </button>
+                )}
               </div>
             </motion.div>
           </div>

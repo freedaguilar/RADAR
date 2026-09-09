@@ -756,7 +756,7 @@ export default function App() {
                   <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
                 </h1>
                 <span className="text-[9px] text-gray-400 font-mono tracking-wider block uppercase mt-0.5">
-                  Pesquisa & Coleta de Preços
+                  aquilas.tech
                 </span>
               </div>
             </div>
@@ -767,15 +767,9 @@ export default function App() {
                 <span className="w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-[10px] uppercase font-mono shrink-0">
                   {state.currentUser.avatarUrl || "CV"}
                 </span>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <span className="font-bold text-gray-900 whitespace-nowrap">
-                    {state.currentUser.name}
-                  </span>
-                  <span className="text-gray-400 font-normal">•</span>
-                  <span className="text-amber-800 font-bold font-mono text-[11px] whitespace-nowrap">
-                    Convidado
-                  </span>
-                </div>
+                <span className="text-xs font-bold text-gray-900 whitespace-nowrap">
+                  {state.currentUser.name}
+                </span>
               </div>
 
               <button
@@ -839,6 +833,7 @@ export default function App() {
             currentUser={state.currentUser}
             onNavigate={handleNavigate}
             pageParams={registerPageParams}
+            onLogout={handleLogout}
           />
         </main>
       </div>
@@ -878,7 +873,7 @@ export default function App() {
                   <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
                 </h1>
                 <span className="text-[9px] text-gray-400 font-mono tracking-wider block uppercase">
-                  MONITORIA DE PREÇOS
+                  aquilas.tech
                 </span>
               </div>
             </div>
@@ -996,7 +991,7 @@ export default function App() {
               <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
             </h1>
             <span className="text-[8px] text-gray-400 uppercase font-mono tracking-wider">
-              Dr.Oetker Brasil
+              aquilas.tech
             </span>
           </div>
         </div>
@@ -1099,6 +1094,7 @@ export default function App() {
             currentUser={state.currentUser}
             onNavigate={handleNavigate}
             pageParams={registerPageParams}
+            onLogout={handleLogout}
           />
         )}
 

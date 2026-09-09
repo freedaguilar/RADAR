@@ -210,7 +210,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
             <span className="text-[#E91617]">Hub</span>
           </h1>
           <p className="text-xs text-gray-500 mt-1 uppercase font-mono tracking-wider">
-            Pesquisa & Auditoria de Preços
+            Monitoramento de Preços
           </p>
         </div>
 
@@ -449,7 +449,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
           </span>
         </p>
         <p className="text-[10px] text-gray-400 mt-1 font-sans">
-          Desenvolvido por Jessé A. Santos para pesquisa e auditoria de preços em campo.
+          © 2026 aquilas.tech • Todos os direitos reservados 
         </p>
       </footer>
     </div>
