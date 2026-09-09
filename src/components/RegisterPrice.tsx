@@ -471,6 +471,103 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setKeepCurrentPrice(false);
   }, [currentGuidedProduct?.id]);
 
+  // Helper para remover marca e gramatura do nome quando não couber na tela
+  const cleanProductNameWithoutBrandAndWeight = (fullName: string, brand?: string, weight?: string): string => {
+    if (!fullName) return '';
+    let result = fullName;
+
+    if (brand && brand.trim()) {
+      const cleanB = brand.trim();
+      const escaped = cleanB.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`(^|\\s)${escaped}(\\s|$)`, 'gi'), ' ');
+
+      const noPunctBrand = cleanB.replace(/[^\w\s]/gi, '').trim();
+      if (noPunctBrand && noPunctBrand !== cleanB) {
+        const escapedNoPunct = noPunctBrand.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(`(^|\\s)${escapedNoPunct}(\\s|$)`, 'gi'), ' ');
+      }
+    }
+
+    if (weight && weight.trim()) {
+      const cleanW = weight.trim();
+      const escapedW = cleanW.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(`(^|\\s)${escapedW}(\\s|$)`, 'gi'), ' ');
+
+      const match = cleanW.match(/^(\d+(?:[.,]\d+)?)\s*([a-zA-Z]+)$/);
+      if (match) {
+        const [, num, unit] = match;
+        result = result.replace(new RegExp(`(^|\\s)${num}\\s*${unit}(\\s|$)`, 'gi'), ' ');
+      }
+    }
+
+    result = result
+      .replace(/\s+[-–—/]\s+/g, ' ')
+      .replace(/^[-–—/,\s]+|[-–—/,\s]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return result || fullName;
+  };
+
+  const guidedProductNameContainerRef = useRef<HTMLDivElement>(null);
+  const [shouldShortenGuidedProductName, setShouldShortenGuidedProductName] = useState(false);
+
+  useEffect(() => {
+    if (!currentGuidedProduct) {
+      setShouldShortenGuidedProductName(false);
+      return;
+    }
+
+    const checkTextFits = () => {
+      const container = guidedProductNameContainerRef.current;
+      if (!container) return;
+
+      const availableWidth = container.clientWidth;
+      if (availableWidth <= 0) return;
+
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const computed = window.getComputedStyle(container);
+      const fontSize = window.innerWidth >= 640 ? '16px' : '14px';
+      ctx.font = `800 ${fontSize} ${computed.fontFamily || 'sans-serif'}`;
+
+      const fullWidth = ctx.measureText(currentGuidedProduct.name).width;
+      // Se a largura total do nome ultrapassar o espaço disponível (deixando 4px de folga), ignora marca e gramatura
+      const doesNotFit = fullWidth > (availableWidth - 4);
+      setShouldShortenGuidedProductName(doesNotFit);
+    };
+
+    checkTextFits();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && guidedProductNameContainerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        checkTextFits();
+      });
+      resizeObserver.observe(guidedProductNameContainerRef.current);
+    }
+
+    window.addEventListener('resize', checkTextFits);
+    return () => {
+      window.removeEventListener('resize', checkTextFits);
+      if (resizeObserver) resizeObserver.disconnect();
+    };
+  }, [currentGuidedProduct?.id, currentGuidedProduct?.name, currentGuidedProduct?.brand, currentGuidedProduct?.weight]);
+
+  const displayedGuidedProductName = useMemo(() => {
+    if (!currentGuidedProduct) return '';
+    if (shouldShortenGuidedProductName) {
+      return cleanProductNameWithoutBrandAndWeight(
+        currentGuidedProduct.name,
+        currentGuidedProduct.brand,
+        currentGuidedProduct.weight
+      );
+    }
+    return currentGuidedProduct.name;
+  }, [currentGuidedProduct, shouldShortenGuidedProductName]);
+
   // Guided Queue Action Handlers
   const handleCaptureGuidedProduct = async () => {
     const targetProduct = currentGuidedProduct;
@@ -2165,7 +2262,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                           </div>
                         )}
 
-                        <div className="min-w-0 flex-1">
+                        <div ref={guidedProductNameContainerRef} className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="text-[10px] font-black text-red-400 uppercase tracking-widest block font-mono">
                               {currentGuidedProduct.brand || 'Marca'}
@@ -2176,8 +2273,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                               </span>
                             )}
                           </div>
-                          <h3 className="text-sm sm:text-base font-extrabold text-white truncate leading-snug mt-0.5">
-                            {currentGuidedProduct.name}
+                          <h3
+                            className="text-sm sm:text-base font-extrabold text-white truncate leading-snug mt-0.5"
+                            title={currentGuidedProduct.name}
+                          >
+                            {displayedGuidedProductName}
                           </h3>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-slate-300 font-medium">
@@ -2299,13 +2399,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   })()}
 
                   {/* Actions Bar */}
-                  <div className="space-y-2.5">
-                    <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <div className="space-y-3">
+                    {/* Botão Principal de Tirar Foto */}
+                    <div>
                       <button
                         type="button"
                         id="btn-capture-batch-frame"
                         onClick={handleCaptureGuidedProduct}
-                        className={`w-full sm:flex-1 py-4 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13 ${
+                        className={`w-full py-4 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13 ${
                           keepCurrentPrice
                             ? 'bg-emerald-600 hover:bg-emerald-700'
                             : 'bg-[#D40511] hover:bg-[#b0040e]'
@@ -2316,54 +2417,44 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                           {keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
                         </span>
                       </button>
-
-                      <button
-                        type="button"
-                        id="btn-stop-camera"
-                        onClick={stopCamera}
-                        className="w-full sm:w-auto px-6 py-4 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-2xl text-xs font-bold transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow h-13 shrink-0"
-                      >
-                        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        <span>Concluir ({batchItems.length})</span>
-                      </button>
                     </div>
 
-                    {/* Secondary Guided Buttons: Skip Item, Skip Category & Out of Stock */}
+                    {/* Secondary Guided Buttons: Pular item, Pular categoria, Não tem na loja (um abaixo do outro no mobile, 3 colunas no desktop) */}
                     {currentGuidedProduct && (
-                      <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                         <button
                           type="button"
                           onClick={handleSkipGuidedProduct}
-                          className="py-3 px-2 sm:px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer border border-slate-250 shadow-2xs text-center"
+                          className="w-full py-3 px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-250 shadow-2xs text-center"
                           title="Pular este item individual e tirar foto depois"
                         >
                           <FastForward className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span className="truncate">Pular item</span>
+                          <span>Pular item</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={handleSkipSubcategory}
-                          className="py-3 px-2 sm:px-3 bg-indigo-50/80 hover:bg-indigo-100/80 active:scale-98 text-indigo-700 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer border border-indigo-200/80 shadow-2xs text-center"
+                          className="w-full py-3 px-3 bg-indigo-50/80 hover:bg-indigo-100/80 active:scale-98 text-indigo-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-200/80 shadow-2xs text-center"
                           title="Pular todos os itens desta categoria/subcategoria"
                         >
                           <ChevronsRight className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                          <span className="truncate">Pular categoria</span>
+                          <span>Pular categoria</span>
                         </button>
 
                         <button
                           type="button"
                           onClick={handleMarkOutOfStock}
-                          className="py-3 px-2 sm:px-3 bg-rose-50/80 hover:bg-rose-100/80 active:scale-98 text-rose-700 rounded-xl text-[11px] sm:text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1 sm:gap-1.5 cursor-pointer border border-rose-200/80 shadow-2xs text-center"
+                          className="w-full py-3 px-3 bg-rose-50/80 hover:bg-rose-100/80 active:scale-98 text-rose-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-rose-200/80 shadow-2xs text-center"
                           title="Marca que o produto não está disponível nesta loja"
                         >
                           <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                          <span className="truncate">Não tem na loja</span>
+                          <span>Não tem na loja</span>
                         </button>
                       </div>
                     )}
 
-                    {/* Horizontal carousel of photos taken in this camera session (placed below skip/out-of-stock options) */}
+                    {/* Horizontal carousel of photos taken in this camera session (Badge de Fotos Capturadas) */}
                     {batchItems.length > 0 && (
                       <div className="bg-slate-900 rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 overflow-x-auto scrollbar-none border border-slate-800 shadow-sm">
                         <div className="flex flex-col shrink-0 pl-1 pr-2">
@@ -2407,6 +2498,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
                       </div>
                     )}
+
+                    {/* Botão de Concluir posicionado abaixo do badge de capturadas */}
+                    <button
+                      type="button"
+                      id="btn-stop-camera"
+                      onClick={stopCamera}
+                      className="w-full py-4 px-6 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-bold transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow h-13"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Concluir ({batchItems.length})</span>
+                    </button>
                   </div>
                 </div>
               ) : isAnalyzingBatch ? (
