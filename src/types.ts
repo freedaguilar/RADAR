@@ -12,12 +12,42 @@ export interface Product {
   internalCode?: string; // Código interno para produtos de marca própria (Dr. Oetker e Mavalério)
 }
 
+export const RESEARCH_STATES = [
+  { name: 'Amazonas', uf: 'AM', region: 'Norte' },
+  { name: 'Acre', uf: 'AC', region: 'Norte' },
+  { name: 'Rondônia', uf: 'RO', region: 'Norte' },
+  { name: 'Mato Grosso', uf: 'MT', region: 'Centro-Oeste' },
+  { name: 'Tocantins', uf: 'TO', region: 'Norte' },
+  { name: 'Goiás', uf: 'GO', region: 'Centro-Oeste' },
+  { name: 'Distrito Federal', uf: 'DF', region: 'Centro-Oeste' },
+  { name: 'Minas Gerais', uf: 'MG', region: 'Sudeste' },
+] as const;
+
+export type ResearchStateName = typeof RESEARCH_STATES[number]['name'];
+
 export interface Chain {
   id: string;
   name: string;
   logoColor: string; // Tailwinds background color code for logo accent
   active: boolean;
   logoUrl?: string;
+  state?: string; // Estado legado/principal (default: 'Minas Gerais')
+  states?: string[]; // Lista de estados onde a rede atua (ex: ['Minas Gerais', 'Goiás', 'Distrito Federal'])
+}
+
+export function getChainStates(chain: Chain): string[] {
+  if (Array.isArray(chain.states) && chain.states.length > 0) {
+    return chain.states;
+  }
+  if (typeof chain.state === 'string' && chain.state.trim()) {
+    return chain.state.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return ['Minas Gerais'];
+}
+
+export function isChainInState(chain: Chain, stateName: string): boolean {
+  const states = getChainStates(chain);
+  return states.includes(stateName);
 }
 
 export interface PriceRecord {
@@ -30,6 +60,27 @@ export interface PriceRecord {
   notes?: string;
   userName: string;
   userEmail: string;
+  state?: string; // Estado onde o preço foi coletado / pesquisado
+}
+
+export function getPriceRecordState(record: PriceRecord, chains?: Chain[]): string {
+  if (record.state && record.state.trim()) {
+    return record.state.trim();
+  }
+  if (record.notes) {
+    const match = record.notes.match(/\[Estado:\s*([^\]]+)\]/i);
+    if (match && match[1]) {
+      return match[1].trim();
+    }
+  }
+  if (chains && record.chainId) {
+    const chain = chains.find(c => c.id === record.chainId);
+    if (chain) {
+      const cStates = getChainStates(chain);
+      if (cStates.length > 0) return cStates[0];
+    }
+  }
+  return 'Minas Gerais';
 }
 
 export interface User {

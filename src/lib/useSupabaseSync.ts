@@ -32,13 +32,38 @@ export function useSupabaseSync() {
       internalCode: p.internal_code || undefined
     })) as Product[];
 
-    const chains = (chainsRes.data || []).map(c => ({
-      id: c.id,
-      name: c.name,
-      logoColor: c.logo_color,
-      logoUrl: c.logo_url,
-      active: c.active
-    })) as Chain[];
+    const chains = (chainsRes.data || []).map(c => {
+      let statesList: string[] = [];
+      
+      // Check comma-separated string in "state"
+      if (typeof c.state === 'string' && c.state.trim()) {
+        statesList = c.state.split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
+      
+      // Check array in "states"
+      if (Array.isArray(c.states) && c.states.length > 0) {
+        const arrayStates = c.states.map((s: any) => String(s).trim()).filter(Boolean);
+        if (arrayStates.length > statesList.length) {
+          statesList = arrayStates;
+        } else if (statesList.length === 0) {
+          statesList = arrayStates;
+        }
+      }
+
+      if (statesList.length === 0) {
+        statesList = ['Minas Gerais'];
+      }
+
+      return {
+        id: c.id,
+        name: c.name,
+        logoColor: c.logo_color,
+        logoUrl: c.logo_url,
+        active: c.active,
+        state: statesList.join(', '),
+        states: statesList
+      };
+    }) as Chain[];
 
     const records = (recordsRes.data || []).map(r => ({
       id: r.id,
@@ -49,7 +74,8 @@ export function useSupabaseSync() {
       imageUrl: r.image_url,
       notes: r.notes,
       userName: r.user_name,
-      userEmail: r.user_email
+      userEmail: r.user_email,
+      state: r.state || 'Minas Gerais',
     })) as PriceRecord[];
 
     const users = (usersRes.data || []).map(u => ({
@@ -58,7 +84,8 @@ export function useSupabaseSync() {
       email: u.email,
       role: u.role,
       active: u.active,
-      avatarUrl: u.avatar_url
+      avatarUrl: u.avatar_url,
+      password: u.password,
     })) as User[];
 
     return { products, chains, records, users };

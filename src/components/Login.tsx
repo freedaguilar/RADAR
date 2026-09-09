@@ -12,6 +12,7 @@ import {
   Shield,
   Briefcase,
   Camera,
+  BookOpen,
 } from 'lucide-react';
 import { User as UserType } from '../types';
 import { supabase } from '../lib/supabase';
@@ -23,8 +24,8 @@ interface LoginProps {
 }
 
 export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginProps) {
-  // Mode selection: 'credentials' (corporate email + password) or 'guest' (name only, no password)
-  const [loginMode, setLoginMode] = useState<'credentials' | 'guest'>('credentials');
+  // Mode selection: 'guest' (name only, no password) or 'credentials' (corporate email + password)
+  const [loginMode, setLoginMode] = useState<'guest' | 'credentials'>('guest');
 
   // Credentials mode states
   const [email, setEmail] = useState('');
@@ -69,33 +70,41 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
     try {
       let authenticatedUser: UserType | null = null;
 
-      // 1. Attempt Supabase Auth if online/configured
+      // 1. Attempt Supabase direct check on app_users if configured
       try {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
+        const { data: profile } = await supabase
+          .from('app_users')
+          .select('*')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
 
-        if (!authError && authData.user?.email) {
-          const { data: profile } = await supabase
-            .from('app_users')
-            .select('*')
-            .eq('email', authData.user.email)
-            .maybeSingle();
-
-          if (profile) {
-            authenticatedUser = {
-              id: profile.id,
-              name: profile.name,
-              email: profile.email,
-              role: profile.role,
-              active: profile.active,
-              avatarUrl: profile.avatar_url,
-            };
+        if (profile) {
+          if (!profile.active) {
+            throw new Error(
+              'Este usuário está inativo no sistema. Entre em contato com o administrador.'
+            );
           }
+
+          const expectedPassword = profile.password || '123';
+          if (password !== expectedPassword) {
+            throw new Error('Senha incorreta. Verifique suas credenciais.');
+          }
+
+          authenticatedUser = {
+            id: profile.id,
+            name: profile.name,
+            email: profile.email,
+            role: profile.role,
+            active: profile.active,
+            avatarUrl: profile.avatar_url,
+            password: profile.password,
+          };
         }
-      } catch (sbErr) {
-        console.debug('Supabase sign-in skipped or unconfigured:', sbErr);
+      } catch (sbErr: any) {
+        if (sbErr.message && (sbErr.message.includes('Senha incorreta') || sbErr.message.includes('inativo'))) {
+          throw sbErr;
+        }
+        console.debug('Supabase direct check skipped or unconfigured:', sbErr);
       }
 
       // 2. Fallback to registered users in state/mockData
@@ -106,7 +115,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
 
         if (!matched) {
           throw new Error(
-            'E-mail não cadastrado. Verifique o endereço ou utilize o acesso como Convidado.'
+            'E-mail não cadastrado. Verifique o endereço digitado.'
           );
         }
 
@@ -116,15 +125,10 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
           );
         }
 
-        // Validate password if configured, or accept standard default '123' / '123456'
-        if (matched.password) {
-          const isValidPass =
-            password === matched.password ||
-            password === '123' ||
-            password === '123456';
-          if (!isValidPass) {
-            throw new Error('Senha incorreta. A senha padrão para testes é 123.');
-          }
+        // Strictly validate password matching user's stored password
+        const expectedPassword = matched.password || '123';
+        if (password !== expectedPassword) {
+          throw new Error('Senha incorreta. Verifique suas credenciais.');
         }
 
         authenticatedUser = matched;
@@ -138,17 +142,6 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
       setCredError(err.message || 'Erro ao realizar login.');
       setIsCredLoading(false);
     }
-  };
-
-  // One-click quick login for testing standard profiles
-  const handleQuickLogin = (targetUser: UserType) => {
-    setCredError('');
-    setIsCredLoading(true);
-    setSuccessMessage(`Acessando como ${targetUser.name} (${targetUser.role.toUpperCase()})...`);
-
-    setTimeout(() => {
-      onLoginSuccess(targetUser);
-    }, 450);
   };
 
   // Handle Guest login: user only enters their name, no password required!
@@ -194,14 +187,6 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
     }, 400);
   };
 
-  // Computed preview initials for guest typing
-  const guestInitialsPreview = React.useMemo(() => {
-    const parts = guestName.trim().split(/\s+/).filter(Boolean);
-    if (parts.length === 0) return '?';
-    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
-    return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-  }, [guestName]);
-
   return (
     <div
       className="min-h-screen bg-[#F5F5F5] flex flex-col justify-between"
@@ -238,6 +223,24 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
           <div className="flex bg-[#F5F5F5] p-1 rounded-2xl mb-6 border border-gray-200">
             <button
               type="button"
+              id="tab-guest-login"
+              onClick={() => {
+                setLoginMode('guest');
+                setCredError('');
+                setGuestError('');
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                loginMode === 'guest'
+                  ? 'bg-white text-[#1A1A1A] shadow-xs border border-gray-200/80'
+                  : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              <User className="w-3.5 h-3.5 text-amber-600" />
+              <span>Convidado</span>
+            </button>
+
+            <button
+              type="button"
               id="tab-credentials-login"
               onClick={() => {
                 setLoginMode('credentials');
@@ -251,28 +254,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
               }`}
             >
               <KeyRound className="w-3.5 h-3.5 text-[#D40511]" />
-              <span>Com Senha</span>
-            </button>
-
-            <button
-              type="button"
-              id="tab-guest-login"
-              onClick={() => {
-                setLoginMode('guest');
-                setCredError('');
-                setGuestError('');
-              }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer relative ${
-                loginMode === 'guest'
-                  ? 'bg-white text-[#1A1A1A] shadow-xs border border-gray-200/80'
-                  : 'text-gray-500 hover:text-gray-900'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-              <span>Como Convidado</span>
-              <span className="hidden sm:inline text-[9px] bg-amber-100 text-amber-900 px-1.5 py-0.2 rounded-full font-mono font-bold">
-                Sem senha
-              </span>
+              <span>Gestor</span>
             </button>
           </div>
 
@@ -308,16 +290,84 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
           )}
 
           {/* ============================================================
-              TAB 1: CREDENTIALS LOGIN (Email + Password)
+              TAB 1: GUEST LOGIN (Convidado)
+             ============================================================ */}
+          {loginMode === 'guest' && (
+            <div id="guest-login-panel">
+              {/* Guest Form */}
+              <form onSubmit={handleGuestSubmit} className="space-y-4" id="guest-login-form">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-700 mb-1.5">
+                    Como deseja ser chamado(a)?
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="guest-name-input"
+                      type="text"
+                      placeholder="Ex: Carlos Silva, Juliana Santos..."
+                      value={guestName}
+                      onChange={(e) => {
+                        setGuestName(e.target.value);
+                        if (guestError) setGuestError('');
+                      }}
+                      disabled={isGuestLoading}
+                      autoFocus
+                      required
+                      maxLength={50}
+                      className="w-full px-3.5 py-3 pl-10 bg-[#F5F5F5] border border-[#E0E0E0] rounded-xl text-sm text-[#1A1A1A] placeholder-gray-400 focus:outline-none focus:border-amber-500 focus:bg-white transition-all font-sans"
+                    />
+                    <User className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
+                  </div>
+                </div>
+
+                {/* Tutorial para coleta em campo */}
+                <div className="p-3.5 bg-gray-50 border border-gray-200/70 rounded-2xl text-[11px] text-gray-600 space-y-2">
+                  <div className="flex items-center gap-1.5 font-bold text-gray-800">
+                    <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+                    <span>Tutorial para coleta em campo</span>
+                  </div>
+                  <ol className="space-y-1 text-gray-600 pl-5 list-decimal marker:text-amber-600 marker:font-bold">
+                    <li>Selecione o estado da pesquisa</li>
+                    <li>Selecione a rede para a pesquisa</li>
+                    <li>Tire a foto da etiqueta do produto solicitado</li>
+                    <li>Insira o valor do produto</li>
+                    <li>Confira e conclua a pesquisa</li>
+                  </ol>
+                </div>
+
+                <button
+                  id="guest-submit-btn"
+                  type="submit"
+                  disabled={isGuestLoading || !guestName.trim()}
+                  className="w-full bg-amber-500 hover:bg-amber-600 text-amber-950 hover:text-black py-3 rounded-xl text-sm font-bold transition-all focus:ring-2 focus:ring-amber-500/40 flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-60 disabled:cursor-not-allowed mt-2"
+                >
+                  {isGuestLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-900" />
+                      <span>Preparando acesso...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{guestName.trim() ? `Entrar como ${guestName.trim()}` : 'Entrar como Convidado'}</span>
+                      <ArrowRight className="w-4 h-4 text-amber-900" />
+                    </>
+                  )}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* ============================================================
+              TAB 2: CREDENTIALS LOGIN (Gestor - Email + Senha)
              ============================================================ */}
           {loginMode === 'credentials' && (
             <div>
               <div className="mb-4">
                 <h2 className="text-lg font-bold text-[#1A1A1A]">
-                  Acesso com Conta
+                  Acesso Gestor
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Insira suas credenciais corporativas de acesso
+                  Insira seu e-mail corporativo e senha cadastrada
                 </p>
               </div>
 
@@ -339,13 +389,10 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
                 </div>
 
                 <div>
-                  <div className="flex justify-between items-center mb-1.5">
+                  <div className="mb-1.5">
                     <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-600">
                       Senha de acesso
                     </label>
-                    <span className="text-[10px] text-gray-400 font-mono">
-                      Padrão teste: 123
-                    </span>
                   </div>
                   <div className="relative">
                     <input
@@ -388,198 +435,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
                   )}
                 </button>
               </form>
-
-              {/* Quick Profile Switcher / Demo Accounts */}
-              <div className="mt-6 pt-5 border-t border-gray-100" id="quick-login-profiles">
-                <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2.5">
-                  Acesso Rápido em 1 Clique (Perfis de Demonstração):
-                </p>
-                <div className="grid grid-cols-1 gap-2">
-                  {allUsers.slice(0, 3).map((user) => (
-                    <button
-                      key={user.id}
-                      type="button"
-                      id={`quick-login-${user.id}`}
-                      onClick={() => handleQuickLogin(user)}
-                      disabled={isCredLoading}
-                      className="w-full flex items-center justify-between p-2.5 rounded-xl border border-gray-200 bg-gray-50/70 hover:bg-white hover:border-[#D40511]/50 hover:shadow-2xs transition-all text-left group cursor-pointer"
-                    >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="w-7 h-7 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-xs shrink-0 uppercase">
-                          {user.avatarUrl && (user.avatarUrl.startsWith('http') || user.avatarUrl.startsWith('data:')) ? (
-                            <img
-                              src={user.avatarUrl}
-                              alt={user.name}
-                              className="w-full h-full object-cover rounded-full"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            user.avatarUrl || user.name.slice(0, 2).toUpperCase()
-                          )}
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-xs font-bold text-gray-900 group-hover:text-[#D40511] transition-colors truncate">
-                            {user.name}
-                          </p>
-                          <p className="text-[10px] text-gray-500 truncate font-mono">
-                            {user.email}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        <span
-                          className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase font-mono ${
-                            user.role === 'gestor'
-                              ? 'bg-purple-100 text-purple-800'
-                              : user.role === 'promotor'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-emerald-100 text-emerald-800'
-                          }`}
-                        >
-                          {user.role}
-                        </span>
-                        <ArrowRight className="w-3.5 h-3.5 text-gray-400 group-hover:text-[#D40511] group-hover:translate-x-0.5 transition-transform" />
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
             </div>
-          )}
-
-          {/* ============================================================
-              TAB 2: GUEST LOGIN (Name only, no password!)
-             ============================================================ */}
-          {loginMode === 'guest' && (
-            <div id="guest-login-panel">
-              <div className="mb-5">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="p-1 rounded-lg bg-amber-100 text-amber-800">
-                    <Sparkles className="w-4 h-4" />
-                  </span>
-                  <h2 className="text-lg font-bold text-[#1A1A1A]">
-                    Entrar como Convidado
-                  </h2>
-                </div>
-                <p className="text-xs text-gray-600 leading-relaxed">
-                  Digite apenas o seu nome para acessar o PriceHub imediatamente, sem necessidade de senha ou cadastro prévio.
-                </p>
-              </div>
-
-              {/* Guest Form */}
-              <form onSubmit={handleGuestSubmit} className="space-y-4" id="guest-login-form">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wider text-gray-700 mb-1.5">
-                    Como deseja ser chamado(a)?
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="guest-name-input"
-                      type="text"
-                      placeholder="Ex: Carlos Silva, Juliana Santos..."
-                      value={guestName}
-                      onChange={(e) => {
-                        setGuestName(e.target.value);
-                        if (guestError) setGuestError('');
-                      }}
-                      disabled={isGuestLoading}
-                      autoFocus
-                      required
-                      maxLength={50}
-                      className="w-full px-3.5 py-3 pl-10 bg-[#F5F5F5] border border-[#E0E0E0] rounded-xl text-sm text-[#1A1A1A] placeholder-gray-400 focus:outline-none focus:border-amber-500 focus:bg-white transition-all font-sans"
-                    />
-                    <User className="w-4 h-4 text-gray-400 absolute left-3.5 top-3.5" />
-                  </div>
-                </div>
-
-                {/* Real-time Guest Preview Card */}
-                {guestName.trim().length > 0 && (
-                  <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-2xl flex items-center justify-between animate-in fade-in">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-9 h-9 rounded-full bg-amber-500 text-white font-bold text-xs flex items-center justify-center uppercase shadow-2xs font-mono">
-                        {guestInitialsPreview}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-gray-900">
-                          {guestName.trim()}
-                        </p>
-                        <p className="text-[10px] text-amber-800 font-medium">
-                          Modo Convidado • Pesquisa & Auditoria
-                        </p>
-                      </div>
-                    </div>
-                    <span className="text-[10px] bg-amber-200/80 text-amber-950 font-bold px-2 py-0.5 rounded-full font-mono">
-                      Pronto para entrar
-                    </span>
-                  </div>
-                )}
-
-                {/* Benefits / Information Pill */}
-                <div className="p-3.5 bg-gray-50 border border-gray-200/70 rounded-2xl text-[11px] text-gray-600 space-y-1.5">
-                  <div className="flex items-center gap-1.5 font-bold text-gray-800">
-                    <Shield className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Acesso Imediato sem Burocracia</span>
-                  </div>
-                  <ul className="space-y-1 text-gray-500 pl-5 list-disc marker:text-amber-500">
-                    <li>Não requer senha ou confirmação de e-mail</li>
-                    <li>Permite consultar preços, produtos e registrar fotos em campo</li>
-                    <li>Suas auditorias serão identificadas com o seu nome</li>
-                  </ul>
-                </div>
-
-                <button
-                  id="guest-submit-btn"
-                  type="submit"
-                  disabled={isGuestLoading || !guestName.trim()}
-                  className="w-full bg-amber-500 hover:bg-amber-600 text-amber-950 hover:text-black py-3 rounded-xl text-sm font-bold transition-all focus:ring-2 focus:ring-amber-500/40 flex items-center justify-center gap-2 cursor-pointer shadow-xs disabled:opacity-60 disabled:cursor-not-allowed mt-2"
-                >
-                  {isGuestLoading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-amber-900" />
-                      <span>Preparando acesso...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-4 h-4 text-amber-900" />
-                      <span>Entrar como Convidado</span>
-                      <ArrowRight className="w-4 h-4 text-amber-900" />
-                    </>
-                  )}
-                </button>
-              </form>
-            </div>
-          )}
-        </div>
-
-        {/* Alternate switcher link */}
-        <div className="mt-4 text-center">
-          {loginMode === 'credentials' ? (
-            <button
-              type="button"
-              id="switch-to-guest-link"
-              onClick={() => {
-                setLoginMode('guest');
-                setCredError('');
-              }}
-              className="text-xs text-gray-600 hover:text-amber-700 font-medium inline-flex items-center gap-1.5 cursor-pointer underline underline-offset-4 decoration-gray-300"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-600" />
-              <span>Quer apenas testar? <strong>Entre como convidado sem senha</strong></span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              id="switch-to-credentials-link"
-              onClick={() => {
-                setLoginMode('credentials');
-                setGuestError('');
-              }}
-              className="text-xs text-gray-600 hover:text-[#D40511] font-medium inline-flex items-center gap-1.5 cursor-pointer underline underline-offset-4 decoration-gray-300"
-            >
-              <KeyRound className="w-3.5 h-3.5 text-[#D40511]" />
-              <span>Possui uma conta corporativa? <strong>Entrar com e-mail e senha</strong></span>
-            </button>
           )}
         </div>
       </div>

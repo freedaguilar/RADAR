@@ -16,8 +16,11 @@ import {
   Upload,
   Loader2,
   LogOut,
+  KeyRound,
+  Eye,
+  EyeOff,
 } from "lucide-react";
-import { Product, Chain, User } from "../types";
+import { Product, Chain, User, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
 import { normalizeString } from "../lib/textUtils";
 
@@ -120,6 +123,7 @@ interface SettingsProps {
   onEditChain: (chain: Chain) => void;
   onDeleteChain: (id: string) => void;
   onAddUser: (newUser: User) => void;
+  onUpdateUser?: (updatedUser: User) => void;
   onDeleteUser: (id: string) => void;
   onNavigate: (page: string, params?: any) => void;
   onLogout?: () => void;
@@ -137,6 +141,7 @@ export function Settings({
   onEditChain,
   onDeleteChain,
   onAddUser,
+  onUpdateUser,
   onDeleteUser,
   onNavigate,
   onLogout,
@@ -173,6 +178,8 @@ export function Settings({
   // Input states for Chains creator/editor
   const [editingChainId, setEditingChainId] = useState<string | null>(null);
   const [newChainName, setNewChainName] = useState("");
+  const [newChainStates, setNewChainStates] = useState<string[]>(["Minas Gerais"]);
+  const [chainStateFilter, setChainStateFilter] = useState<string>("Todos");
   const [newChainLogoColor, setNewChainLogoColor] = useState("bg-blue-600");
   const [newChainLogoUrl, setNewChainLogoUrl] = useState("");
   const [isUploadingChainLogo, setIsUploadingChainLogo] = useState(false);
@@ -183,6 +190,8 @@ export function Settings({
   const [newUserImg, setNewUserImg] = useState("RL");
   const [newUserName, setNewUserName] = useState("");
   const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserPassword, setNewUserPassword] = useState("");
+  const [showNewUserPassword, setShowNewUserPassword] = useState(false);
   const [newUserRole, setNewUserRole] = useState<"gestor" | "vendedor">(
     "vendedor",
   );
@@ -190,6 +199,12 @@ export function Settings({
   const [isUploadingUserAvatar, setIsUploadingUserAvatar] = useState(false);
   const [userAvatarDragActive, setUserAvatarDragActive] = useState(false);
   const [userFormError, setUserFormError] = useState("");
+
+  // States for Password Change Modal
+  const [editingPasswordUser, setEditingPasswordUser] = useState<User | null>(null);
+  const [newPasswordVal, setNewPasswordVal] = useState("");
+  const [showPasswordModalVal, setShowPasswordModalVal] = useState(false);
+  const [passwordModalError, setPasswordModalError] = useState("");
 
   const [filterText, setFilterText] = useState("");
 
@@ -541,6 +556,11 @@ export function Settings({
       return;
     }
 
+    if (newChainStates.length === 0) {
+      setChainFormError("Por favor selecione ao menos um estado de atuação para a rede.");
+      return;
+    }
+
     const nameExists = chains.some(
       (c) => c.id !== editingChainId && c.name.toLowerCase() === newChainName.trim().toLowerCase()
     );
@@ -556,6 +576,8 @@ export function Settings({
         logoColor: newChainLogoColor,
         logoUrl: newChainLogoUrl || undefined,
         active: true,
+        state: newChainStates.join(', '),
+        states: newChainStates,
       };
 
       onEditChain(updatedChain);
@@ -563,6 +585,7 @@ export function Settings({
       setNewChainName("");
       setNewChainLogoColor("bg-blue-600");
       setNewChainLogoUrl("");
+      setNewChainStates(["Minas Gerais"]);
       triggerSuccessMsg("Rede/Bandeira editada com sucesso!");
     } else {
       const uniqueId = `chain-add-${Date.now()}`;
@@ -572,12 +595,15 @@ export function Settings({
         logoColor: newChainLogoColor,
         logoUrl: newChainLogoUrl || undefined,
         active: true,
+        state: newChainStates.join(', '),
+        states: newChainStates,
       };
 
       onAddChain(newChain);
       setNewChainName("");
       setNewChainLogoColor("bg-blue-600");
       setNewChainLogoUrl("");
+      setNewChainStates(["Minas Gerais"]);
       triggerSuccessMsg("Rede/Bandeira cadastrada com sucesso!");
     }
   };
@@ -588,6 +614,11 @@ export function Settings({
 
     if (!newUserName.trim() || !newUserEmail.trim()) {
       setUserFormError("Preencha os dados obrigatórios nome e e-mail.");
+      return;
+    }
+
+    if (!newUserPassword.trim() || newUserPassword.trim().length < 3) {
+      setUserFormError("Defina uma senha de acesso com no mínimo 3 caracteres.");
       return;
     }
 
@@ -616,11 +647,14 @@ export function Settings({
       role: newUserRole,
       active: true,
       avatarUrl: newUserAvatarUrl || cleanInitials,
+      password: newUserPassword.trim(),
     };
 
     onAddUser(newUserObj);
     setNewUserName("");
     setNewUserEmail("");
+    setNewUserPassword("");
+    setShowNewUserPassword(false);
     setNewUserRole("vendedor");
     setNewUserAvatarUrl("");
     triggerSuccessMsg("Usuário cadastrado com sucesso!");
@@ -1239,52 +1273,134 @@ export function Settings({
                   </h4>
                   <form
                     onSubmit={handleCreateChainSubmit}
-                    className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end"
+                    className="grid grid-cols-1 md:grid-cols-3 gap-4"
                     id="add-chain-micro-form"
                   >
                     <div className="md:col-span-2">
                       <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
-                        Nome da Rede
+                        Nome da Rede *
                       </label>
                       <input
                         id="new-chain-name-input"
-                      type="text"
-                      placeholder="Ex: Supermercados Extra"
-                      value={newChainName}
-                      onChange={(e) => setNewChainName(e.target.value)}
-                      className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
-                      required
-                    />
-                  </div>
-
-                  {/* Manual / Preset Color Selector */}
-                  <div>
-                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
-                      Cor Identificadora
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <input
                         type="text"
-                        value={newChainLogoColor.startsWith("#") ? newChainLogoColor : ""}
-                        onChange={(e) => setNewChainLogoColor(e.target.value || "bg-blue-600")}
-                        placeholder="#FF0000"
-                        className="px-2 py-1.5 border border-[#E0E0E0] rounded-lg text-xs font-mono w-20 uppercase text-center focus:border-[#D40511] focus:outline-none bg-white"
-                        title="Hexadecimal da cor predominante"
+                        placeholder="Ex: Supermercados Extra"
+                        value={newChainName}
+                        onChange={(e) => setNewChainName(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
+                        required
                       />
-                      <div className="flex gap-1">
-                        {["bg-blue-600", "bg-emerald-700", "bg-red-500", "bg-amber-600", "bg-purple-600"].map((preset) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            onClick={() => setNewChainLogoColor(preset)}
-                            className={`w-4 h-4 rounded-full border transition ${preset} ${
-                              newChainLogoColor === preset ? "border-gray-800 scale-110" : "border-transparent"
-                            }`}
-                          />
-                        ))}
+                    </div>
+
+                    {/* Manual / Preset Color Selector */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
+                        Cor Identificadora
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={newChainLogoColor.startsWith("#") ? newChainLogoColor : ""}
+                          onChange={(e) => setNewChainLogoColor(e.target.value || "bg-blue-600")}
+                          placeholder="#FF0000"
+                          className="px-2 py-1.5 border border-[#E0E0E0] rounded-lg text-xs font-mono w-20 uppercase text-center focus:border-[#D40511] focus:outline-none bg-white"
+                          title="Hexadecimal da cor predominante"
+                        />
+                        <div className="flex gap-1">
+                          {["bg-blue-600", "bg-emerald-700", "bg-red-500", "bg-amber-600", "bg-purple-600"].map((preset) => (
+                            <button
+                              key={preset}
+                              type="button"
+                              onClick={() => setNewChainLogoColor(preset)}
+                              className={`w-4 h-4 rounded-full border transition ${preset} ${
+                                newChainLogoColor === preset ? "border-gray-800 scale-110" : "border-transparent"
+                              }`}
+                            />
+                          ))}
+                        </div>
                       </div>
                     </div>
-                  </div>
+
+                    {/* Multiple States Selector */}
+                    <div className="col-span-full">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 mb-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                            Estados de Atuação da Rede *
+                          </label>
+                          <span className="text-[11px] text-gray-500 font-medium">
+                            Selecione um ou mais estados onde a rede possui lojas ({newChainStates.length} de {RESEARCH_STATES.length} selecionados)
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setNewChainStates(RESEARCH_STATES.map(s => s.name))}
+                            className="text-[11px] text-[#D40511] hover:underline font-bold cursor-pointer"
+                          >
+                            Selecionar Todos
+                          </button>
+                          <span className="text-gray-300">•</span>
+                          <button
+                            type="button"
+                            onClick={() => setNewChainStates(["Minas Gerais"])}
+                            className="text-[11px] text-gray-500 hover:text-gray-800 font-bold cursor-pointer"
+                          >
+                            Apenas MG
+                          </button>
+                          <span className="text-gray-300">•</span>
+                          <button
+                            type="button"
+                            onClick={() => setNewChainStates([])}
+                            className="text-[11px] text-gray-400 hover:text-red-600 font-medium cursor-pointer"
+                          >
+                            Limpar
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        {RESEARCH_STATES.map((st) => {
+                          const isChecked = newChainStates.includes(st.name);
+                          return (
+                            <button
+                              key={st.uf}
+                              type="button"
+                              id={`chain-state-btn-${st.uf.toLowerCase()}`}
+                              onClick={() => {
+                                setNewChainStates((prev) =>
+                                  prev.includes(st.name)
+                                    ? prev.filter((s) => s !== st.name)
+                                    : [...prev, st.name]
+                                );
+                              }}
+                              className={`px-3 py-2 rounded-lg border text-left flex items-center justify-between gap-2 transition cursor-pointer ${
+                                isChecked
+                                  ? "bg-[#D40511] text-white border-[#D40511] shadow-xs"
+                                  : "bg-white text-slate-700 border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span
+                                  className={`text-[10px] font-mono font-black px-1.5 py-0.5 rounded shrink-0 ${
+                                    isChecked ? "bg-white/20 text-white" : "bg-slate-100 text-slate-700"
+                                  }`}
+                                >
+                                  {st.uf}
+                                </span>
+                                <span className="text-xs font-bold truncate">{st.name}</span>
+                              </div>
+                              {isChecked && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {newChainStates.length === 0 && (
+                        <p className="text-[11px] text-red-600 mt-1 font-semibold">
+                          ⚠️ Selecione ao menos um estado onde esta rede atua.
+                        </p>
+                      )}
+                    </div>
 
                   {/* Upload Area for Chain Logo */}
                   <div className="col-span-full mt-2">
@@ -1385,6 +1501,7 @@ export function Settings({
                         onClick={() => {
                           setEditingChainId(null);
                           setNewChainName("");
+                          setNewChainStates(["Minas Gerais"]);
                           setNewChainLogoColor("bg-blue-600");
                           setNewChainLogoUrl("");
                         }}
@@ -1411,24 +1528,58 @@ export function Settings({
                 </div>
               )}
 
-              {/* Registered list */}
+              {/* Registered list with State Filter */}
               <div>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
-                  Lojas e Redes Cadastradas
-                </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">
+                      Lojas e Redes Cadastradas
+                    </h3>
+                    <p className="text-[11px] text-gray-500 font-sans mt-0.5">
+                      Visualizando {chains.filter((c) => chainStateFilter === "Todos" || isChainInState(c, chainStateFilter)).length} de {chains.length} redes
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                      Filtrar Estado:
+                    </label>
+                    <select
+                      id="filter-chain-state-select"
+                      value={chainStateFilter}
+                      onChange={(e) => setChainStateFilter(e.target.value)}
+                      className="px-3 py-1.5 bg-white border border-[#E0E0E0] rounded-lg text-xs font-bold text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
+                    >
+                      <option value="Todos">Todos os Estados ({chains.length})</option>
+                      {RESEARCH_STATES.map((st) => {
+                        const count = chains.filter((c) => isChainInState(c, st.name)).length;
+                        return (
+                          <option key={st.name} value={st.name}>
+                            {st.name} ({st.uf}) — {count} {count === 1 ? "rede" : "redes"}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+
                 <div
                   className="grid grid-cols-1 sm:grid-cols-2 gap-4"
                   id="chains-settings-list"
                 >
-                  {chains.map((chain) => (
+                  {chains
+                    .filter((c) => chainStateFilter === "Todos" || isChainInState(c, chainStateFilter))
+                    .map((chain) => {
+                      const chainStatesList = getChainStates(chain);
+                      return (
                     <div
                       key={chain.id}
                       className="p-4 bg-white border border-[#E0E0E0] rounded-xl flex items-center justify-between shadow-sm hover:border-gray-300 transition-colors"
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         <span
                           style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
-                          className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-white text-xs overflow-hidden ${
+                          className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-white text-xs overflow-hidden shrink-0 ${
                             chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
                           }`}
                         >
@@ -1443,37 +1594,54 @@ export function Settings({
                             <span>{chain.name.substring(0, 2).toUpperCase()}</span>
                           )}
                         </span>
-                        <div>
-                          <p className="text-xs font-bold text-[#1A1A1A] font-sans">
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-[#1A1A1A] font-sans truncate">
                             {chain.name}
                           </p>
-                          <p className="text-[10px] text-gray-400 font-mono flex items-center gap-1.5">
-                            <span
-                              className="w-2 h-2 rounded-full inline-block"
-                              style={{
-                                backgroundColor: chain.logoColor?.startsWith("#")
-                                  ? chain.logoColor
-                                  : chain.logoColor === "bg-blue-600"
-                                    ? "#2563eb"
-                                    : chain.logoColor === "bg-emerald-700"
-                                      ? "#047857"
-                                      : chain.logoColor === "bg-red-500"
-                                        ? "#ef4444"
-                                        : chain.logoColor === "bg-amber-600"
-                                          ? "#d97706"
-                                          : "#7c3aed",
-                              }}
-                            />
-                            {chain.logoColor?.startsWith("#") ? "Cor Extraída" : "Cor Predefinida"}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <div className="flex flex-wrap items-center gap-1">
+                              {chainStatesList.map((stName) => {
+                                const uf = RESEARCH_STATES.find(s => s.name === stName)?.uf || stName.substring(0, 2).toUpperCase();
+                                return (
+                                  <span
+                                    key={stName}
+                                    className="text-[9px] font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded font-mono"
+                                    title={stName}
+                                  >
+                                    {uf}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                            <span className="text-[10px] text-gray-400 font-mono flex items-center gap-1">
+                              <span
+                                className="w-1.5 h-1.5 rounded-full inline-block"
+                                style={{
+                                  backgroundColor: chain.logoColor?.startsWith("#")
+                                    ? chain.logoColor
+                                    : chain.logoColor === "bg-blue-600"
+                                      ? "#2563eb"
+                                      : chain.logoColor === "bg-emerald-700"
+                                        ? "#047857"
+                                        : chain.logoColor === "bg-red-500"
+                                          ? "#ef4444"
+                                          : chain.logoColor === "bg-amber-600"
+                                            ? "#d97706"
+                                            : "#7c3aed",
+                                }}
+                              />
+                              {chain.logoColor?.startsWith("#") ? "Cor Personalizada" : "Padrão"}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       {currentUser?.role === "gestor" && (
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 shrink-0 ml-2">
                           <button
                             onClick={() => {
                               setEditingChainId(chain.id);
                               setNewChainName(chain.name);
+                              setNewChainStates(getChainStates(chain));
                               setNewChainLogoColor(chain.logoColor || "bg-blue-600");
                               setNewChainLogoUrl(chain.logoUrl || "");
                               document
@@ -1502,7 +1670,8 @@ export function Settings({
                         </div>
                       )}
                     </div>
-                  ))}
+                      );
+                    })}
                 </div>
               </div>
             </div>
@@ -1570,6 +1739,31 @@ export function Settings({
                         Gestor / Administrador (Acesso total + cadastro e edição)
                       </option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
+                      Senha de Acesso
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="new-user-password-input"
+                        type={showNewUserPassword ? "text" : "password"}
+                        placeholder="Defina a senha (mín. 3 caracteres)"
+                        value={newUserPassword}
+                        onChange={(e) => setNewUserPassword(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511] pr-9 font-sans"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowNewUserPassword(!showNewUserPassword)}
+                        className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                        title={showNewUserPassword ? "Ocultar senha" : "Ver senha"}
+                      >
+                        {showNewUserPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
 
                   {/* Option to Add User Photo */}
@@ -1718,6 +1912,21 @@ export function Settings({
                         </span>
 
                         <button
+                          id={`change-password-user-btn-${item.id}`}
+                          type="button"
+                          onClick={() => {
+                            setEditingPasswordUser(item);
+                            setNewPasswordVal(item.password || "");
+                            setPasswordModalError("");
+                            setShowPasswordModalVal(false);
+                          }}
+                          className="text-gray-400 hover:text-amber-600 p-1 rounded hover:bg-amber-50 transition cursor-pointer"
+                          title="Alterar Senha do Usuário"
+                        >
+                          <KeyRound className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
                           id={`delete-user-btn-${item.id}`}
                           onClick={() => {
                             setDeleteConfirm({
@@ -1797,6 +2006,94 @@ export function Settings({
                 className="px-4 py-2 bg-[#D40511] text-white rounded-xl text-xs font-bold hover:bg-red-700 transition cursor-pointer"
               >
                 Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Password Change Modal */}
+      {editingPasswordUser && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-[#E0E0E0] animate-in fade-in zoom-in duration-200">
+            <div className="flex items-start gap-3.5 mb-4">
+              <div className="p-2.5 bg-amber-50 rounded-xl text-amber-600 shrink-0">
+                <KeyRound className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-[#1A1A1A] font-sans">
+                  Alterar Senha de Acesso
+                </h4>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Usuário: <strong className="text-gray-800">{editingPasswordUser.name}</strong>
+                </p>
+                <p className="text-[10px] text-gray-400 font-mono">
+                  {editingPasswordUser.email}
+                </p>
+              </div>
+            </div>
+
+            {passwordModalError && (
+              <div className="mb-3 p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs font-medium flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{passwordModalError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5 mb-2">
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                Nova Senha de Acesso
+              </label>
+              <div className="relative">
+                <input
+                  id="modal-new-password-input"
+                  type={showPasswordModalVal ? "text" : "password"}
+                  value={newPasswordVal}
+                  onChange={(e) => setNewPasswordVal(e.target.value)}
+                  placeholder="Mínimo de 3 caracteres"
+                  className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-amber-500 pr-9 font-sans"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordModalVal(!showPasswordModalVal)}
+                  className="absolute right-2.5 top-2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                  title={showPasswordModalVal ? "Ocultar senha" : "Ver senha"}
+                >
+                  {showPasswordModalVal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                type="button"
+                onClick={() => setEditingPasswordUser(null)}
+                className="px-4 py-2 border border-[#E0E0E0] text-gray-700 bg-white rounded-xl text-xs font-bold hover:bg-gray-50 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                id="save-user-password-modal-btn"
+                onClick={() => {
+                  if (!newPasswordVal.trim() || newPasswordVal.trim().length < 3) {
+                    setPasswordModalError("A senha deve ter no mínimo 3 caracteres.");
+                    return;
+                  }
+                  const updated: User = {
+                    ...editingPasswordUser,
+                    password: newPasswordVal.trim(),
+                  };
+                  if (onUpdateUser) {
+                    onUpdateUser(updated);
+                  }
+                  triggerSuccessMsg(`Senha de ${editingPasswordUser.name} atualizada!`);
+                  setEditingPasswordUser(null);
+                }}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-amber-950 font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                Salvar Senha
               </button>
             </div>
           </div>

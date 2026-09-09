@@ -1,4 +1,4 @@
-import { Product, Chain, PriceRecord, User } from './types';
+import { Product, Chain, PriceRecord, User, getChainStates } from './types';
 
 // Let's create localized products, inspired by Dr. Oetker & retail
 export const INITIAL_PRODUCTS: Product[] = [
@@ -234,11 +234,11 @@ export const INITIAL_PRODUCTS: Product[] = [
 ];
 
 export const INITIAL_CHAINS: Chain[] = [
-  { id: 'chain-1', name: 'Carrefour Supermercado', logoColor: 'bg-blue-600', active: true },
-  { id: 'chain-2', name: 'Pão de Açúcar', logoColor: 'bg-emerald-700', active: true },
-  { id: 'chain-3', name: 'Sonda Supermercados', logoColor: 'bg-red-500', active: true },
-  { id: 'chain-4', name: 'Mambo Supermercados', logoColor: 'bg-amber-600', active: true },
-  { id: 'chain-5', name: 'Grupo Hirota', logoColor: 'bg-orange-700', active: true }
+  { id: 'chain-1', name: 'Carrefour Supermercado', logoColor: 'bg-blue-600', active: true, state: 'Minas Gerais, Goiás, Distrito Federal', states: ['Minas Gerais', 'Goiás', 'Distrito Federal'] },
+  { id: 'chain-2', name: 'Pão de Açúcar', logoColor: 'bg-emerald-700', active: true, state: 'Minas Gerais, Distrito Federal', states: ['Minas Gerais', 'Distrito Federal'] },
+  { id: 'chain-3', name: 'Sonda Supermercados', logoColor: 'bg-red-500', active: true, state: 'Minas Gerais', states: ['Minas Gerais'] },
+  { id: 'chain-4', name: 'Mambo Supermercados', logoColor: 'bg-amber-600', active: true, state: 'Minas Gerais', states: ['Minas Gerais'] },
+  { id: 'chain-5', name: 'Grupo Hirota', logoColor: 'bg-orange-700', active: true, state: 'Minas Gerais', states: ['Minas Gerais'] }
 ];
 
 export const INITIAL_USERS: User[] = [
@@ -258,40 +258,46 @@ export const generateMockHistory = (): PriceRecord[] => {
     { name: 'Rodrigo Lima', email: 'rodrigo.lima@radar.com' }
   ];
 
-  // For each product, chain, generate price checkpoints every 10 days
+  // For each product, chain, and state, generate price checkpoints
   INITIAL_PRODUCTS.forEach((product) => {
     INITIAL_CHAINS.forEach((chain, chainIdx) => {
-      // Variance based on chain index to create interesting comparisons
-      const chainFactor = 0.95 + (chainIdx * 0.03); // +/- some % differences Between chains
-      const basePriceInChain = Number((product.basePrice * chainFactor).toFixed(2));
+      const chainStates = chain.states && chain.states.length > 0 ? chain.states : ['Minas Gerais'];
+      
+      chainStates.forEach((stateName, stateIdx) => {
+        // State factor simulates price differences per state: e.g. Goiás +4%, DF +7%
+        const stateFactor = stateName === 'Goiás' ? 1.05 : stateName === 'Distrito Federal' ? 1.08 : 1.0;
+        const chainFactor = 0.95 + (chainIdx * 0.03); // +/- differences between chains
+        const basePriceInChain = Number((product.basePrice * chainFactor * stateFactor).toFixed(2));
 
-      // Create 4 data points over last 40 days
-      for (let i = 0; i < 4; i++) {
-        const recordDate = new Date(startDay);
-        recordDate.setDate(recordDate.getDate() + (i * 10) + (chainIdx * 2)); // slight jitter in date
+        // Create 3 data points over last 30 days per state
+        for (let i = 0; i < 3; i++) {
+          const recordDate = new Date(startDay);
+          recordDate.setDate(recordDate.getDate() + (i * 10) + (chainIdx * 2) + stateIdx);
 
-        // Price changes slightly
-        const trend = i === 0 ? -0.05 : i === 1 ? 0.02 : i === 2 ? -0.01 : 0.04;
-        const currentPrice = Number((basePriceInChain * (1 + trend)).toFixed(2));
+          // Price changes slightly
+          const trend = i === 0 ? -0.04 : i === 1 ? 0.01 : 0.03;
+          const currentPrice = Number((basePriceInChain * (1 + trend)).toFixed(2));
 
-        const user = auditingUsers[(chainIdx + i) % auditingUsers.length];
+          const user = auditingUsers[(chainIdx + i + stateIdx) % auditingUsers.length];
 
-        // Custom clean SVG graphics as mock receipt/shelf camera photos
-        const svgColor = product.id === 'prod-1' ? '%23D40511' : '%234B5563';
-        const photoSvg = `data:image/svg+xml;utf8,<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23f3f4f6"/><path d="M 0,220 L 400,220 L 400,300 L 0,300 Z" fill="%23e5e7eb"/><circle cx="200" cy="110" r="40" fill="${svgColor}"/><rect x="180" y="80" width="40" height="60" rx="3" fill="%23ffffff" opacity="0.9"/><text x="200" y="165" font-family="sans-serif" font-weight="bold" font-size="12" fill="%23374151" text-anchor="middle">${product.name.substring(0, 20)}...</text><rect x="120" y="190" width="160" height="40" rx="6" fill="%231a1a1a"/><text x="200" y="215" font-family="monospace" font-weight="bold" font-size="15" fill="%2310b981" text-anchor="middle">R$ ${currentPrice.toFixed(2)}</text><text x="200" y="270" font-family="sans-serif" font-size="10" fill="%236b7280" text-anchor="middle">Auditoria ${chain.name}</text></svg>`;
+          // Custom clean SVG graphics as mock receipt/shelf camera photos
+          const svgColor = product.id === 'prod-1' ? '%23D40511' : '%234B5563';
+          const photoSvg = `data:image/svg+xml;utf8,<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23f3f4f6"/><path d="M 0,220 L 400,220 L 400,300 L 0,300 Z" fill="%23e5e7eb"/><circle cx="200" cy="110" r="40" fill="${svgColor}"/><rect x="180" y="80" width="40" height="60" rx="3" fill="%23ffffff" opacity="0.9"/><text x="200" y="165" font-family="sans-serif" font-weight="bold" font-size="12" fill="%23374151" text-anchor="middle">${product.name.substring(0, 20)}...</text><rect x="120" y="190" width="160" height="40" rx="6" fill="%231a1a1a"/><text x="200" y="215" font-family="monospace" font-weight="bold" font-size="15" fill="%2310b981" text-anchor="middle">R$ ${currentPrice.toFixed(2)}</text><text x="200" y="270" font-family="sans-serif" font-size="10" fill="%236b7280" text-anchor="middle">${chain.name} (${stateName})</text></svg>`;
 
-        records.push({
-          id: `rec-${product.id}-${chain.id}-${i}`,
-          productId: product.id,
-          chainId: chain.id,
-          price: currentPrice,
-          date: recordDate.toISOString().split('T')[0],
-          imageUrl: photoSvg,
-          notes: i === 3 ? 'Preço promocional destacado na gôndola.' : undefined,
-          userName: user.name,
-          userEmail: user.email,
-        });
-      }
+          records.push({
+            id: `rec-${product.id}-${chain.id}-${stateName.substring(0, 2).toLowerCase()}-${i}`,
+            productId: product.id,
+            chainId: chain.id,
+            price: currentPrice,
+            date: recordDate.toISOString().split('T')[0],
+            imageUrl: photoSvg,
+            notes: i === 2 ? `Preço coletado em ${stateName}.` : undefined,
+            userName: user.name,
+            userEmail: user.email,
+            state: stateName,
+          });
+        }
+      });
     });
   });
 
@@ -311,6 +317,16 @@ export const getInitialState = (): {
     if (localStore) {
       const parsed = JSON.parse(localStore);
       if (parsed.products && parsed.chains && parsed.records && parsed.users) {
+        // Ensure chains have normalized states array and state string
+        const normalizedChains = (parsed.chains as Chain[]).map((c) => {
+          const statesList = getChainStates(c);
+          return {
+            ...c,
+            state: statesList.join(', '),
+            states: statesList,
+          };
+        });
+
         // Check if current user is valid of type User
         const hasValidUserObj = parsed.currentUser && 
                                 typeof parsed.currentUser === 'object' && 
@@ -319,7 +335,7 @@ export const getInitialState = (): {
         
         return {
           products: parsed.products,
-          chains: parsed.chains,
+          chains: normalizedChains,
           records: parsed.records,
           users: parsed.users,
           currentUser: hasValidUserObj ? parsed.currentUser : null

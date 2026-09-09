@@ -21,8 +21,10 @@ import {
   Package,
   Camera,
   Download,
+  MapPin,
+  Globe,
 } from "lucide-react";
-import { Product, Chain, PriceRecord } from "../types";
+import { Product, Chain, PriceRecord, RESEARCH_STATES, getPriceRecordState, getChainStates } from "../types";
 import { normalizeString } from "../lib/textUtils";
 import { getOutdatedProducts } from "../lib/productUtils";
 
@@ -106,6 +108,7 @@ export function Products({
 
   // Excel Export Modal states
   const [showExportModal, setShowExportModal] = useState(false);
+  const [exportStates, setExportStates] = useState<string[]>(["Todos"]);
   const [exportChainIds, setExportChainIds] = useState<string[]>(["Todas"]);
   const [exportCategories, setExportCategories] = useState<string[]>(["Todas"]);
   const [exportBrandTypes, setExportBrandTypes] = useState<string[]>([
@@ -113,7 +116,7 @@ export function Products({
     "propria-mavalerio",
     "concorrentes",
   ]);
-  const [exportIncludeHistory, setExportIncludeHistory] = useState<boolean>(true);
+  const [exportIncludeHistory, setExportIncludeHistory] = useState<boolean>(false);
   const [exportIsGenerating, setExportIsGenerating] = useState<boolean>(false);
 
   const handleExecuteExcelExport = async () => {
@@ -151,17 +154,26 @@ export function Products({
       const prodIdsSet = new Set(filteredProds.map((p) => p.id));
       let matchingRecords = records.filter((r) => prodIdsSet.has(r.productId));
 
+      // State check
+      if (!exportStates.includes("Todos")) {
+        matchingRecords = matchingRecords.filter((r) => {
+          const recState = getPriceRecordState(r, chains);
+          return exportStates.includes(recState);
+        });
+      }
+
       // Network check
       if (!exportChainIds.includes("Todas")) {
         matchingRecords = matchingRecords.filter((r) => exportChainIds.includes(r.chainId));
       }
 
-      // If NOT including full history, we only want the LATEST record per (productId, chainId)
+      // If NOT including full history, we only want the LATEST record per (productId, chainId, state)
       if (!exportIncludeHistory) {
-        // Group by productId + chainId
+        // Group by productId + chainId + state
         const latestMap = new Map<string, PriceRecord>();
         matchingRecords.forEach((r) => {
-          const key = `${r.productId}_${r.chainId}`;
+          const recState = getPriceRecordState(r, chains);
+          const key = `${r.productId}_${r.chainId}_${recState}`;
           const currentLatest = latestMap.get(key);
           if (!currentLatest || r.date.localeCompare(currentLatest.date) > 0) {
             latestMap.set(key, r);
@@ -177,13 +189,16 @@ export function Products({
       const rowsAudit = sortedRecordsForSheet.map((r, idx) => {
         const prod = products.find((p) => p.id === r.productId);
         const ch = chains.find((c) => c.id === r.chainId);
+        const recState = getPriceRecordState(r, chains);
 
         return {
           "Nº": idx + 1,
           "Data do Registro": formatDateBR(r.date),
+          "Estado": recState,
           "Rede (PDV)": ch ? ch.name : "N/A",
+          "Código": prod?.internalCode && prod.internalCode.trim() ? prod.internalCode.trim() : "-",
+          "Código Interno": prod?.internalCode && prod.internalCode.trim() ? prod.internalCode.trim() : "-",
           "Produto": prod ? prod.name : "N/A",
-          "Código Interno": prod?.internalCode || "",
           "Marca": prod ? prod.brand : "N/A",
           "Categoria": prod ? prod.category : "N/A",
           "Subcategoria": prod ? (prod.subcategory || "") : "N/A",
@@ -202,9 +217,19 @@ export function Products({
         ? chains
         : chains.filter((c) => exportChainIds.includes(c.id));
 
+      // Compute latest price per chain filtered by selected states
+      const exportLatestPricesMap: Record<string, Record<string, number>> = {};
+      const sortedMatchingForPivot = [...matchingRecords].sort(compareRecordsAsc);
+      sortedMatchingForPivot.forEach((r) => {
+        if (!exportLatestPricesMap[r.productId]) {
+          exportLatestPricesMap[r.productId] = {};
+        }
+        exportLatestPricesMap[r.productId][r.chainId] = r.price;
+      });
+
       const rowsPivot = filteredProds.map((prod) => {
         // Get prices across selected chains
-        const pricesMap = (latestPricePerChainMap[prod.id] || {}) as Record<string, number>;
+        const pricesMap = (exportLatestPricesMap[prod.id] || {}) as Record<string, number>;
 
         // Filter price values to selected chains only
         const activePrices: number[] = [];
@@ -226,7 +251,7 @@ export function Products({
         const dispersion = minVal > 0 ? ((maxVal - minVal) / minVal) * 100 : 0;
 
         return {
-          "Código": prod.internalCode || prod.id.split("-")[0].toUpperCase(),
+          "Código": prod.internalCode && prod.internalCode.trim() ? prod.internalCode.trim() : "-",
           "Produto": prod.name,
           "Marca": prod.brand || "Dr. Oetker",
           "Categoria": prod.category,
@@ -253,6 +278,9 @@ export function Products({
         rows_pivot: rowsPivot,
         meta: {
           data_geracao: new Date().toLocaleString('pt-BR'),
+          estados_selecionados: exportStates.includes("Todos")
+            ? "Todos"
+            : exportStates.join(", "),
           redes_selecionadas: exportChainIds.includes("Todas")
             ? "Todas"
             : chains.filter(c => exportChainIds.includes(c.id)).map(c => c.name).join(", "),
@@ -290,6 +318,28 @@ export function Products({
       alert("Houve um erro ao processar a planilha. Detalhes: " + err.message);
     } finally {
       setExportIsGenerating(false);
+    }
+  };
+
+  const handleToggleState = (stateName: string) => {
+    if (stateName === "Todos") {
+      setExportStates(["Todos"]);
+    } else {
+      if (exportStates.includes("Todos")) {
+        setExportStates([stateName]);
+      } else {
+        let updated = [...exportStates];
+        if (updated.includes(stateName)) {
+          updated = updated.filter((s) => s !== stateName);
+        } else {
+          updated.push(stateName);
+        }
+        if (updated.length === 0 || updated.length === RESEARCH_STATES.length) {
+          setExportStates(["Todos"]);
+        } else {
+          setExportStates(updated);
+        }
+      }
     }
   };
 
@@ -387,6 +437,7 @@ export function Products({
   const [selectedCategory, setSelectedCategory] = useState("Todas");
   const [selectedSubcategory, setSelectedSubcategory] = useState("Todas");
   const [selectedChainId, setSelectedChainId] = useState("Todas");
+  const [selectedState, setSelectedState] = useState("Todas");
   const [selectedWeight, setSelectedWeight] = useState("Todas");
   const [selectedBrandFilters, setSelectedBrandFilters] = useState<
     ("propria-oetker" | "propria-mavalerio" | "concorrentes")[]
@@ -438,7 +489,7 @@ export function Products({
   // Reset page to 1 when filters or sorting change
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedCategory, selectedSubcategory, selectedChainId, selectedWeight, selectedBrandFilters, sortBy]);
+  }, [searchTerm, selectedCategory, selectedSubcategory, selectedChainId, selectedState, selectedWeight, selectedBrandFilters, sortBy]);
 
   // Audit Photo Modal / Lightbox inside Product Detail
   const [selectedRecord, setSelectedRecord] = useState<PriceRecord | null>(null);
@@ -450,6 +501,14 @@ export function Products({
   const [compareBySubcategory, setCompareBySubcategory] = useState(true);
   const [compareByWeight, setCompareByWeight] = useState(false);
   const [competitorCompareChainId, setCompetitorCompareChainId] = useState<string>("Todas");
+  const [detailStateFilter, setDetailStateFilter] = useState<string>("Todas");
+
+  // Sync state filter in detail modal with main filter when opening a product
+  useEffect(() => {
+    if (selectedProductId) {
+      setDetailStateFilter(selectedState !== "Todas" ? selectedState : "Todas");
+    }
+  }, [selectedProductId, selectedState]);
 
   // Chart-specific states (filtering networks and hover points)
   const [selectedChartChains, setSelectedChartChains] = useState<string[]>([]);
@@ -664,12 +723,18 @@ export function Products({
       .sort(compareRecordsAsc);
   }, [records, selectedProductId, compareRecordsAsc]);
 
+  // Regional pricing records filtered by selectedState
+  const effectiveRecords = useMemo(() => {
+    if (selectedState === "Todas") return records;
+    return records.filter((r) => (r.state || "Minas Gerais") === selectedState);
+  }, [records, selectedState]);
+
   // Dynamic calculated latest price per retail chain for each product or specific product
   const latestPricePerChainMap = useMemo(() => {
     const productChainPrices: Record<string, Record<string, number>> = {};
 
-    // Sort all records chronologically
-    const sortedRecords = [...records].sort(compareRecordsAsc);
+    // Sort effective records chronologically
+    const sortedRecords = [...effectiveRecords].sort(compareRecordsAsc);
 
     sortedRecords.forEach((r) => {
       if (!productChainPrices[r.productId]) {
@@ -679,7 +744,7 @@ export function Products({
     });
 
     return productChainPrices;
-  }, [records, compareRecordsAsc]);
+  }, [effectiveRecords, compareRecordsAsc]);
 
   // Filtered products list
   const filteredProducts = useMemo(() => {
@@ -734,11 +799,18 @@ export function Products({
         matchesChain = prices[selectedChainId] !== undefined;
       }
 
+      // If a specific state is selected, check if this product has at least one recorded price in that state
+      let matchesState = true;
+      if (selectedState !== "Todas") {
+        const prices = latestPricePerChainMap[prod.id] || {};
+        matchesState = Object.keys(prices).length > 0;
+      }
+
       // Weight filter logic
       const matchesWeight =
         selectedWeight === "Todas" || prod.weight === selectedWeight;
       
-      const outdatedProductsList = getOutdatedProducts(products, records);
+      const outdatedProductsList = getOutdatedProducts(products, effectiveRecords);
       const isOutdated = outdatedProductsList.some(p => p.id === prod.id);
       const matchesOutdated = isOutdatedFilter ? isOutdated : true;
 
@@ -747,6 +819,7 @@ export function Products({
         matchesCategory &&
         matchesSubcategory &&
         matchesChain &&
+        matchesState &&
         matchesBrand &&
         matchesWeight &&
         matchesOutdated
@@ -754,11 +827,12 @@ export function Products({
     });
   }, [
     products,
-    records,
+    effectiveRecords,
     searchTerm,
     selectedCategory,
     selectedSubcategory,
     selectedChainId,
+    selectedState,
     selectedBrandFilters,
     selectedWeight,
     latestPricePerChainMap,
@@ -768,7 +842,7 @@ export function Products({
   // Sort mappings
   const productLatestRecordMap = useMemo(() => {
     const map: Record<string, { time: number; index: number }> = {};
-    const sortedAsc = [...records].sort(compareRecordsAsc);
+    const sortedAsc = [...effectiveRecords].sort(compareRecordsAsc);
     sortedAsc.forEach((r, idx) => {
       if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
       const t = new Date(r.date).getTime();
@@ -778,11 +852,11 @@ export function Products({
       }
     });
     return map;
-  }, [records, selectedChainId, compareRecordsAsc]);
+  }, [effectiveRecords, selectedChainId, compareRecordsAsc]);
 
   const productAveragePriceMap = useMemo(() => {
     const map: Record<string, { sum: number; count: number }> = {};
-    records.forEach((r) => {
+    effectiveRecords.forEach((r) => {
       if (!map[r.productId]) {
         map[r.productId] = { sum: 0, count: 0 };
       }
@@ -794,11 +868,11 @@ export function Products({
       averages[prodId] = val.sum / val.count;
     });
     return averages;
-  }, [records]);
+  }, [effectiveRecords]);
 
   const productDispersionMap = useMemo(() => {
     const prodPrices: Record<string, number[]> = {};
-    records.forEach((r) => {
+    effectiveRecords.forEach((r) => {
       if (!prodPrices[r.productId]) {
         prodPrices[r.productId] = [];
       }
@@ -815,16 +889,16 @@ export function Products({
       }
     });
     return dispersions;
-  }, [records]);
+  }, [effectiveRecords]);
 
   const productRecordCountMap = useMemo(() => {
     const map: Record<string, number> = {};
-    records.forEach((r) => {
+    effectiveRecords.forEach((r) => {
       if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
       map[r.productId] = (map[r.productId] || 0) + 1;
     });
     return map;
-  }, [records, selectedChainId]);
+  }, [effectiveRecords, selectedChainId]);
 
   const sortedAndFilteredProducts = useMemo(() => {
     const list = [...filteredProducts];
@@ -1071,7 +1145,7 @@ export function Products({
                   setExportChainIds(["Todas"]);
                   setExportCategories(["Todas"]);
                   setExportBrandTypes(["propria-oetker", "propria-mavalerio", "concorrentes"]);
-                  setExportIncludeHistory(true);
+                  setExportIncludeHistory(false);
                   setShowExportModal(true);
                 }}
                 className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-xs hover:shadow-md transition-all text-xs sm:text-sm cursor-pointer select-none font-sans"
@@ -1291,7 +1365,7 @@ export function Products({
           >
             {/* Search Input */}
             <div
-              className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-4"
+              className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-3"
               id="search-input-wrapper"
             >
               <input
@@ -1351,15 +1425,15 @@ export function Products({
             </div>
 
             {/* Weight Select Filter */}
-            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="weight-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[65px]">
-                Gramatura:
+            <div className="flex items-center gap-2 xl:col-span-1 min-w-0" id="weight-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[40px]">
+                Gram:
               </span>
               <select
                 id="product-weight-filter-select"
                 value={selectedWeight}
                 onChange={(e) => setSelectedWeight(e.target.value)}
-                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
+                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
               >
                 {weights.map((w) => (
                   <option key={w} value={w}>
@@ -1371,8 +1445,8 @@ export function Products({
 
             {/* Retail Chain Filter */}
             <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="chain-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[65px]">
-                Preço em:
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[55px]">
+                Rede:
               </span>
               <select
                 id="product-chain-filter-select"
@@ -1384,6 +1458,26 @@ export function Products({
                 {chains.map((chain) => (
                   <option key={chain.id} value={chain.id}>
                     {chain.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Regional State Filter */}
+            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="state-filter-wrapper">
+              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[50px]">
+                Estado:
+              </span>
+              <select
+                id="product-state-filter-select"
+                value={selectedState}
+                onChange={(e) => setSelectedState(e.target.value)}
+                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
+              >
+                <option value="Todas">Todos Estados</option>
+                {RESEARCH_STATES.map((st) => (
+                  <option key={st.name} value={st.name}>
+                    {st.uf} - {st.name}
                   </option>
                 ))}
               </select>
@@ -2524,232 +2618,589 @@ export function Products({
               </div>
             )}
 
-            {/* Pricing Comparisons Box */}
+            {/* Pricing Comparisons Box (Visão Geral de Pontos de Venda separada por Estado) */}
             {(() => {
-              const currentPricesList = chains.map((chain) => {
-                const chainRecords = selectedProductHistory.filter((r) => r.chainId === chain.id);
-                const latestRecord = chainRecords[chainRecords.length - 1];
-                return { chain, latestRecord };
+              // Get all distinct states present in records for this product
+              const recordedStatesSet = new Set<string>();
+              selectedProductHistory.forEach((r) => {
+                recordedStatesSet.add(r.state || "Minas Gerais");
               });
 
-              const pricedRecords = currentPricesList
-                .filter((item) => item.latestRecord !== undefined)
-                .sort((a, b) => a.latestRecord!.price - b.latestRecord!.price);
-              
-              let averagePrice = 0;
-              let minPriceItem: typeof currentPricesList[number] | null = null;
-              let maxPriceItem: typeof currentPricesList[number] | null = null;
+              // Also include states from chains that have active retail presence
+              chains.forEach((ch) => {
+                getChainStates(ch).forEach((st) => recordedStatesSet.add(st));
+              });
 
-              if (pricedRecords.length > 0) {
-                const sum = pricedRecords.reduce((acc, r) => acc + r.latestRecord!.price, 0);
-                averagePrice = sum / pricedRecords.length;
-                
-                minPriceItem = pricedRecords[0];
-                maxPriceItem = pricedRecords[0];
-                
-                pricedRecords.forEach((item) => {
-                  if (item.latestRecord!.price < minPriceItem!.latestRecord!.price) {
-                    minPriceItem = item;
-                  }
-                  if (item.latestRecord!.price > maxPriceItem!.latestRecord!.price) {
-                    maxPriceItem = item;
-                  }
+              const allInvolvedStates = Array.from(recordedStatesSet).sort((a, b) => {
+                const aCount = selectedProductHistory.filter((r) => (r.state || "Minas Gerais") === a).length;
+                const bCount = selectedProductHistory.filter((r) => (r.state || "Minas Gerais") === b).length;
+                if (aCount !== bCount) return bCount - aCount;
+                return a.localeCompare(b);
+              });
+
+              // Breakdown per state
+              const stateBreakdowns = allInvolvedStates.map((stateName) => {
+                const stateInfo = RESEARCH_STATES.find((s) => s.name === stateName);
+                const uf = stateInfo?.uf || stateName.substring(0, 2).toUpperCase();
+
+                // Records for this state
+                const stateRecords = selectedProductHistory.filter(
+                  (r) => (r.state || "Minas Gerais") === stateName
+                );
+
+                // Chains in this state
+                const stateChains = chains.filter(
+                  (ch) => getChainStates(ch).includes(stateName) || stateRecords.some((r) => r.chainId === ch.id)
+                );
+
+                // Latest record per chain in this state
+                const chainPricedList = stateChains.map((chain) => {
+                  const recordsForChainInState = stateRecords.filter((r) => r.chainId === chain.id);
+                  const latestRecord = recordsForChainInState[recordsForChainInState.length - 1];
+                  return { chain, latestRecord };
                 });
+
+                const pricedRecordsInState = chainPricedList
+                  .filter((item) => item.latestRecord !== undefined)
+                  .sort((a, b) => a.latestRecord!.price - b.latestRecord!.price);
+
+                let avgPrice = 0;
+                let minItem: typeof pricedRecordsInState[number] | null = null;
+                let maxItem: typeof pricedRecordsInState[number] | null = null;
+
+                if (pricedRecordsInState.length > 0) {
+                  const sum = pricedRecordsInState.reduce((acc, r) => acc + r.latestRecord!.price, 0);
+                  avgPrice = sum / pricedRecordsInState.length;
+                  minItem = pricedRecordsInState[0];
+                  maxItem = pricedRecordsInState[pricedRecordsInState.length - 1];
+                }
+
+                return {
+                  stateName,
+                  uf,
+                  totalChains: stateChains.length,
+                  pricedCount: pricedRecordsInState.length,
+                  avgPrice,
+                  minItem,
+                  maxItem,
+                  chainPricedList,
+                  pricedRecordsInState,
+                  hasRecords: pricedRecordsInState.length > 0,
+                };
+              });
+
+              // Overall National Metrics across all priced records
+              const allPricedLatestAcrossStates = stateBreakdowns.flatMap((st) =>
+                st.pricedRecordsInState.map((item) => ({ ...item, stateName: st.stateName, uf: st.uf }))
+              );
+
+              let nationalAvg = 0;
+              let nationalMinItem: typeof allPricedLatestAcrossStates[0] | null = null;
+              let nationalMaxItem: typeof allPricedLatestAcrossStates[0] | null = null;
+
+              if (allPricedLatestAcrossStates.length > 0) {
+                const sum = allPricedLatestAcrossStates.reduce((acc, r) => acc + r.latestRecord!.price, 0);
+                nationalAvg = sum / allPricedLatestAcrossStates.length;
+                const sorted = [...allPricedLatestAcrossStates].sort(
+                  (a, b) => a.latestRecord!.price - b.latestRecord!.price
+                );
+                nationalMinItem = sorted[0];
+                nationalMaxItem = sorted[sorted.length - 1];
               }
+
+              // Selected state stats (if specific state filter is active)
+              const selectedStateData =
+                detailStateFilter !== "Todas"
+                  ? stateBreakdowns.find((s) => s.stateName === detailStateFilter) || null
+                  : null;
+
+              // States with actual records
+              const statesWithRecords = stateBreakdowns.filter((st) => st.hasRecords);
+
+              // Helper renderer for a single chain price card
+              const renderChainCard = (
+                chain: Chain,
+                latestRecord: PriceRecord | undefined,
+                stateAvgPrice: number,
+                stateUF: string,
+                stateName: string
+              ) => {
+                const calculatedPercent =
+                  latestRecord && selectedProduct
+                    ? ((latestRecord.price - selectedProduct.basePrice) / selectedProduct.basePrice) * 100
+                    : null;
+
+                let borderStyle = "border-l-4 border-l-gray-300";
+                let bgStyle = "bg-white border-y border-r border-[#E0E0E0] text-gray-700 hover:border-gray-300";
+                let indicatorText = "Na Média";
+                let indicatorColorClass = "text-blue-600 bg-blue-50 border-blue-150";
+
+                if (latestRecord && stateAvgPrice > 0) {
+                  const diff = latestRecord.price - stateAvgPrice;
+                  if (diff < -0.01) {
+                    borderStyle = "border-l-4 border-l-emerald-500";
+                    bgStyle =
+                      "bg-gradient-to-r from-emerald-50/10 to-white/90 border-y border-r border-emerald-200/70 text-emerald-950 hover:bg-emerald-50/20 hover:border-emerald-300/80";
+                    indicatorText = "- Média";
+                    indicatorColorClass = "text-emerald-700 bg-emerald-50 border-emerald-150";
+                  } else if (diff > 0.01) {
+                    borderStyle = "border-l-4 border-l-red-500";
+                    bgStyle =
+                      "bg-gradient-to-r from-red-50/10 to-white/90 border-y border-r border-red-150/70 text-red-950 hover:bg-red-50/20 hover:border-red-250/80";
+                    indicatorText = "+ Média";
+                    indicatorColorClass = "text-red-700 bg-red-50 border-red-150";
+                  } else {
+                    borderStyle = "border-l-4 border-l-gray-350";
+                    bgStyle =
+                      "bg-gradient-to-r from-gray-50/10 to-white/90 border-y border-r border-gray-200 text-gray-800 hover:bg-gray-50/20 hover:border-gray-350";
+                    indicatorText = "No Preço";
+                    indicatorColorClass = "text-gray-650 bg-gray-50 border-gray-200";
+                  }
+                }
+
+                const tooltipText = latestRecord
+                  ? `Estado: ${stateName} (${stateUF}) • Registrado por: ${latestRecord.userName || "N/A"} • Preço Base: R$ ${selectedProduct.basePrice.toFixed(2)} (${calculatedPercent !== null ? `${calculatedPercent > 0 ? "+" : ""}${calculatedPercent.toFixed(1)}%` : "0%"})`
+                  : `Sem preço coletado em ${stateName}`;
+
+                return (
+                  <div
+                    key={`${chain.id}_${stateName}`}
+                    title={tooltipText}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      latestRecord && setSelectedRecord(latestRecord);
+                    }}
+                    className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-xs min-h-[115px] ${borderStyle} ${bgStyle} ${
+                      latestRecord ? "cursor-pointer hover:scale-[1.02]" : "opacity-75"
+                    }`}
+                    id={`current-price-card-${chain.id}-${stateUF.toLowerCase()}`}
+                  >
+                    {/* Top Row: Logo & Chain Name & State Badge */}
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
+                        className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-[10px] shrink-0 overflow-hidden border border-gray-100 shadow-xs relative ${
+                          chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
+                        }`}
+                      >
+                        {chain.logoUrl ? (
+                          <img
+                            src={chain.logoUrl}
+                            alt={chain.name}
+                            className="w-full h-full object-contain p-0.5 bg-white"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <span>{chain.name.substring(0, 2).toUpperCase()}</span>
+                        )}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <span className="text-[9px] font-black text-gray-800 uppercase tracking-tight truncate block leading-tight">
+                          {chain.name}
+                        </span>
+                        <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider block leading-none mt-0.5">
+                          {stateUF}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Price in prominence */}
+                    <div className="my-2 text-left">
+                      {latestRecord ? (
+                        <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline">
+                          <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
+                          {latestRecord.price.toFixed(2)}
+                        </div>
+                      ) : (
+                        <div className="text-[10px] font-bold text-gray-350 italic">
+                          ————
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Footer Row: Date & Status */}
+                    <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
+                      <span className="text-[8px] font-mono flex items-center gap-0.5 min-w-0">
+                        {latestRecord ? (
+                          <>
+                            <Clock className="w-2 h-2 text-gray-300 shrink-0" />
+                            <span className={`truncate ${getAuditDateColorClass(latestRecord.date)}`}>
+                              {formatDateBR(latestRecord.date).substring(0, 5)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </span>
+
+                      <span
+                        className={`text-[8px] font-bold uppercase px-1 py-0.2 rounded border tracking-tight truncate shrink-0 ${indicatorColorClass}`}
+                      >
+                        {indicatorText}
+                      </span>
+                    </div>
+                  </div>
+                );
+              };
 
               return (
                 <div
                   className="border border-[#E0E0E0] rounded-xl p-5 bg-white space-y-4"
                   id="detail-comparison-block"
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-[#F5F5F5] pb-3">
+                  {/* Header with State Selector Tabs */}
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-[#F5F5F5] pb-3">
                     <div>
                       <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block font-sans">
                         Visão Geral de Pontos de Venda
                       </span>
-                      <h3 className="text-sm font-black text-[#1A1A1A] font-sans mt-0.5">
-                        Comparativo de Preços Atuais
+                      <h3 className="text-sm font-black text-[#1A1A1A] font-sans mt-0.5 flex items-center gap-1.5">
+                        <span>Comparativo de Preços por Estado</span>
+                        {statesWithRecords.length > 1 && (
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                            {statesWithRecords.length} estados pesquisados
+                          </span>
+                        )}
                       </h3>
                     </div>
-                  </div>
 
-                  {/* Highlights Summary KPI (KPI Superior Compacto) */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" id="current-prices-highlights">
-                    {/* Média Geral */}
-                    <div className="bg-gray-50/50 border border-gray-200 rounded-xl p-3 flex items-center justify-between" id="highlight-avg-price">
-                      <div className="min-w-0">
-                        <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider font-sans">
-                          📊 Média Geral
-                        </span>
-                        <div className="text-base font-black font-mono text-gray-900 mt-0.5">
-                          {pricedRecords.length > 0 ? `R$ ${averagePrice.toFixed(2)}` : "Sem dados"}
-                        </div>
-                        <p className="text-[10px] text-gray-400 font-sans truncate mt-0.5">
-                          {pricedRecords.length > 0 ? `Cálculo sobre ${pricedRecords.length} redes` : "Nenhum preço coletado"}
-                        </p>
-                      </div>
-                    </div>
+                    {/* State Selector Tabs / Filter */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none" id="detail-state-selector-tabs">
+                      <button
+                        type="button"
+                        onClick={() => setDetailStateFilter("Todas")}
+                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                          detailStateFilter === "Todas"
+                            ? "bg-[#D40511] text-white shadow-xs"
+                            : "bg-[#F5F5F5] text-gray-600 hover:bg-gray-200 border border-transparent"
+                        }`}
+                      >
+                        <Globe className="w-3 h-3" />
+                        <span>Todos Estados ({allPricedLatestAcrossStates.length})</span>
+                      </button>
 
-                    {/* Menor Preço */}
-                    <div className="bg-emerald-50/30 border border-emerald-250/60 rounded-xl p-3 flex items-center justify-between" id="highlight-min-price">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                          <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
-                          Menor Preço
+                      {stateBreakdowns.map((st) => (
+                        <button
+                          key={st.stateName}
+                          type="button"
+                          onClick={() => setDetailStateFilter(st.stateName)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                            detailStateFilter === st.stateName
+                              ? "bg-[#1A1A1A] text-white shadow-xs"
+                              : st.hasRecords
+                              ? "bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200/60"
+                              : "bg-gray-50 text-gray-400 hover:bg-gray-100 border border-transparent"
+                          }`}
+                        >
+                          <MapPin className="w-3 h-3 text-red-500" />
+                          <span>
+                            {st.uf} {st.hasRecords ? `(${st.pricedCount})` : "(0)"}
                           </span>
-                        </div>
-                        <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
-                          {minPriceItem ? `R$ ${minPriceItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
-                        </div>
-                        <p className="text-[10px] text-emerald-700 font-medium truncate mt-0.5 font-sans">
-                          {minPriceItem ? minPriceItem.chain.name : "Nenhum canal ativo"}
-                        </p>
-                      </div>
-                      <div className="p-2 bg-emerald-100/50 rounded-lg text-emerald-700 shrink-0">
-                        <TrendingDown className="w-4 h-4" />
-                      </div>
-                    </div>
-
-                    {/* Maior Preço */}
-                    <div className="bg-red-50/30 border border-red-200/60 rounded-xl p-3 flex items-center justify-between" id="highlight-max-price">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                          <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
-                          Maior Preço
-                          </span>
-                        </div>
-                        <div className="text-base font-black font-mono text-red-950 mt-0.5">
-                          {maxPriceItem ? `R$ ${maxPriceItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
-                        </div>
-                        <p className="text-[10px] text-red-700 font-medium truncate mt-0.5 font-sans">
-                          {maxPriceItem ? maxPriceItem.chain.name : "Nenhum canal ativo"}
-                        </p>
-                      </div>
-                      <div className="p-2 bg-red-100/50 rounded-lg text-red-700 shrink-0">
-                        <TrendingUp className="w-4 h-4" />
-                      </div>
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Compact Grid of Cards (Visual BI) */}
-                  <div 
-                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3" 
-                    id="current-prices-cards-grid"
-                  >
-                    {pricedRecords.length > 0 ? (
-                      pricedRecords.map(({ chain, latestRecord }) => {
-                        const calculatedPercent =
-                          latestRecord && selectedProduct
-                            ? ((latestRecord.price - selectedProduct.basePrice) /
-                                selectedProduct.basePrice) *
-                              100
-                            : null;
+                  {/* Highlights Summary KPI */}
+                  {detailStateFilter === "Todas" ? (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" id="current-prices-highlights-national">
+                        {/* Média Geral Nacional */}
+                        <div
+                          className="bg-gray-50/50 border border-gray-200 rounded-xl p-3 flex items-center justify-between"
+                          id="highlight-avg-price-national"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider font-sans">
+                              📊 Média Nacional
+                            </span>
+                            <div className="text-base font-black font-mono text-gray-900 mt-0.5">
+                              {allPricedLatestAcrossStates.length > 0 ? `R$ ${nationalAvg.toFixed(2)}` : "Sem dados"}
+                            </div>
+                            <p className="text-[10px] text-gray-400 font-sans truncate mt-0.5">
+                              {allPricedLatestAcrossStates.length > 0
+                                ? `${allPricedLatestAcrossStates.length} preços em ${statesWithRecords.length} estados`
+                                : "Nenhum preço coletado"}
+                            </p>
+                          </div>
+                        </div>
 
-                        // Redesign comparison indicators & colors as instructed
-                        let borderStyle = "border-l-4 border-l-gray-300";
-                        let bgStyle = "bg-white border-y border-r border-[#E0E0E0] text-gray-700 hover:border-gray-300";
-                        let indicatorText = "Na Média";
-                        let indicatorColorClass = "text-blue-600 bg-blue-50 border-blue-150";
-
-                        if (latestRecord && pricedRecords.length > 1) {
-                          const diff = latestRecord.price - averagePrice;
-                          if (diff < -0.01) {
-                            borderStyle = "border-l-4 border-l-emerald-500";
-                            bgStyle = "bg-gradient-to-r from-emerald-50/10 to-white/90 border-y border-r border-emerald-200/70 text-emerald-950 hover:bg-emerald-50/20 hover:border-emerald-300/80";
-                            indicatorText = "- Média";
-                            indicatorColorClass = "text-emerald-700 bg-emerald-50 border-emerald-150";
-                          } else if (diff > 0.01) {
-                            borderStyle = "border-l-4 border-l-red-500";
-                            bgStyle = "bg-gradient-to-r from-red-50/10 to-white/90 border-y border-r border-red-150/70 text-red-950 hover:bg-red-50/20 hover:border-red-250/80";
-                            indicatorText = "+ Média";
-                            indicatorColorClass = "text-red-700 bg-red-50 border-red-150";
-                          } else {
-                            borderStyle = "border-l-4 border-l-gray-350";
-                            bgStyle = "bg-gradient-to-r from-gray-50/10 to-white/90 border-y border-r border-gray-200 text-gray-800 hover:bg-gray-50/20 hover:border-gray-350";
-                            indicatorText = "No Preço";
-                            indicatorColorClass = "text-gray-650 bg-gray-50 border-gray-200";
-                          }
-                        }
-
-                        const tooltipText = latestRecord
-                          ? `Registrado por: ${latestRecord.userName || "N/A"} • Preço Base: R$ ${selectedProduct.basePrice.toFixed(2)} (${calculatedPercent !== null ? `${calculatedPercent > 0 ? "+" : ""}${calculatedPercent.toFixed(1)}%` : "0%"})`
-                          : "Nenhum histórico nesta rede";
-
-                        return (
-                          <div
-                            key={chain.id}
-                            title={tooltipText}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              latestRecord && setSelectedRecord(latestRecord);
-                            }}
-                            className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-sm min-h-[110px] ${borderStyle} ${bgStyle} cursor-pointer hover:scale-[1.02]`}
-                            id={`current-price-card-${chain.id}`}
-                          >
-                            {/* Top Row: Logo larger (increased to w-7 h-7) & Chain Name smaller/discrete */}
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span
-                                style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
-                                className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-[10px] shrink-0 overflow-hidden border border-gray-100 shadow-xs relative ${
-                                  chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
-                                }`}
-                              >
-                                {chain.logoUrl ? (
-                                  <img
-                                    src={chain.logoUrl}
-                                    alt={chain.name}
-                                    className="w-full h-full object-contain p-0.5 bg-white"
-                                    referrerPolicy="no-referrer"
-                                  />
-                                ) : (
-                                  <span>{chain.name.substring(0, 2).toUpperCase()}</span>
-                                )}
-                              </span>
-                              <span className="text-[9px] font-black text-gray-400 uppercase tracking-tight truncate block leading-none flex-1">
-                                {chain.name}
+                        {/* Menor Preço Nacional */}
+                        <div
+                          className="bg-emerald-50/30 border border-emerald-250/60 rounded-xl p-3 flex items-center justify-between"
+                          id="highlight-min-price-national"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+                              <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
+                                Menor Preço Nacional
                               </span>
                             </div>
+                            <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
+                              {nationalMinItem ? `R$ ${nationalMinItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
+                            </div>
+                            <p className="text-[10px] text-emerald-700 font-medium truncate mt-0.5 font-sans">
+                              {nationalMinItem
+                                ? `${nationalMinItem.chain.name} (${nationalMinItem.uf})`
+                                : "Nenhum canal ativo"}
+                            </p>
+                          </div>
+                          <div className="p-2 bg-emerald-100/50 rounded-lg text-emerald-700 shrink-0">
+                            <TrendingDown className="w-4 h-4" />
+                          </div>
+                        </div>
 
-                            {/* Price in maximum prominence (Display typography style) */}
-                            <div className="my-2.5 text-left">
-                              {latestRecord ? (
-                                <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline">
-                                  <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
-                                  {latestRecord.price.toFixed(2)}
+                        {/* Maior Preço Nacional */}
+                        <div
+                          className="bg-red-50/30 border border-red-200/60 rounded-xl p-3 flex items-center justify-between"
+                          id="highlight-max-price-national"
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                              <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
+                                Maior Preço Nacional
+                              </span>
+                            </div>
+                            <div className="text-base font-black font-mono text-red-950 mt-0.5">
+                              {nationalMaxItem ? `R$ ${nationalMaxItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
+                            </div>
+                            <p className="text-[10px] text-red-700 font-medium truncate mt-0.5 font-sans">
+                              {nationalMaxItem
+                                ? `${nationalMaxItem.chain.name} (${nationalMaxItem.uf})`
+                                : "Nenhum canal ativo"}
+                            </p>
+                          </div>
+                          <div className="p-2 bg-red-100/50 rounded-lg text-red-700 shrink-0">
+                            <TrendingUp className="w-4 h-4" />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Interstate Regional Overview Chips (quando houver múltiplos estados) */}
+                      {statesWithRecords.length > 1 && (
+                        <div className="bg-gray-50/70 border border-gray-200/80 rounded-xl p-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider font-sans flex items-center gap-1">
+                              <MapPin className="w-3 h-3 text-red-500" />
+                              Comparativo Médio por Estado
+                            </span>
+                            <span className="text-[9px] text-gray-400 font-sans">
+                              Clique no estado para filtrar
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                            {statesWithRecords.map((st) => {
+                              const diffPercent =
+                                nationalAvg > 0
+                                  ? ((st.avgPrice - nationalAvg) / nationalAvg) * 100
+                                  : 0;
+                              return (
+                                <button
+                                  key={st.stateName}
+                                  type="button"
+                                  onClick={() => setDetailStateFilter(st.stateName)}
+                                  className="text-left bg-white border border-gray-200 rounded-lg p-2 hover:border-[#D40511] hover:shadow-xs transition"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-black text-gray-800">
+                                      {st.uf} - {st.stateName}
+                                    </span>
+                                    <span className="text-[9px] font-mono text-gray-400">
+                                      {st.pricedCount} PDVs
+                                    </span>
+                                  </div>
+                                  <div className="flex items-baseline justify-between mt-1">
+                                    <span className="text-xs font-black font-mono text-[#1A1A1A]">
+                                      R$ {st.avgPrice.toFixed(2)}
+                                    </span>
+                                    <span
+                                      className={`text-[8px] font-bold font-mono ${
+                                        diffPercent < -0.5
+                                          ? "text-emerald-600"
+                                          : diffPercent > 0.5
+                                          ? "text-red-600"
+                                          : "text-gray-500"
+                                      }`}
+                                    >
+                                      {diffPercent > 0 ? "+" : ""}
+                                      {diffPercent.toFixed(1)}% vs Nac.
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* Specific State KPI */
+                    selectedStateData && (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" id="current-prices-highlights-state">
+                        <div className="bg-gray-50/50 border border-gray-200 rounded-xl p-3 flex items-center justify-between">
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider font-sans">
+                              📊 Média em {selectedStateData.stateName} ({selectedStateData.uf})
+                            </span>
+                            <div className="text-base font-black font-mono text-gray-900 mt-0.5">
+                              {selectedStateData.pricedCount > 0
+                                ? `R$ ${selectedStateData.avgPrice.toFixed(2)}`
+                                : "Sem dados"}
+                            </div>
+                            <p className="text-[10px] text-gray-400 font-sans truncate mt-0.5">
+                              {selectedStateData.pricedCount > 0
+                                ? `${selectedStateData.pricedCount} de ${selectedStateData.totalChains} redes pesquisadas`
+                                : "Nenhum preço coletado neste estado"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="bg-emerald-50/30 border border-emerald-250/60 rounded-xl p-3 flex items-center justify-between">
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
+                              Menor Preço ({selectedStateData.uf})
+                            </span>
+                            <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
+                              {selectedStateData.minItem
+                                ? `R$ ${selectedStateData.minItem.latestRecord!.price.toFixed(2)}`
+                                : "Sem dados"}
+                            </div>
+                            <p className="text-[10px] text-emerald-700 font-medium truncate mt-0.5 font-sans">
+                              {selectedStateData.minItem
+                                ? selectedStateData.minItem.chain.name
+                                : "Nenhum canal ativo"}
+                            </p>
+                          </div>
+                          <div className="p-2 bg-emerald-100/50 rounded-lg text-emerald-700 shrink-0">
+                            <TrendingDown className="w-4 h-4" />
+                          </div>
+                        </div>
+
+                        <div className="bg-red-50/30 border border-red-200/60 rounded-xl p-3 flex items-center justify-between">
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
+                              Maior Preço ({selectedStateData.uf})
+                            </span>
+                            <div className="text-base font-black font-mono text-red-950 mt-0.5">
+                              {selectedStateData.maxItem
+                                ? `R$ ${selectedStateData.maxItem.latestRecord!.price.toFixed(2)}`
+                                : "Sem dados"}
+                            </div>
+                            <p className="text-[10px] text-red-700 font-medium truncate mt-0.5 font-sans">
+                              {selectedStateData.maxItem
+                                ? selectedStateData.maxItem.chain.name
+                                : "Nenhum canal ativo"}
+                            </p>
+                          </div>
+                          <div className="p-2 bg-red-100/50 rounded-lg text-red-700 shrink-0">
+                            <TrendingUp className="w-4 h-4" />
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  )}
+
+                  {/* Cards Display Section (Grouped by State or Filtered by State) */}
+                  <div className="space-y-6 pt-1" id="state-cards-wrapper">
+                    {detailStateFilter === "Todas" ? (
+                      /* When "Todas" is selected: Render distinct section for each state */
+                      statesWithRecords.length > 0 ? (
+                        stateBreakdowns
+                          .filter((st) => st.hasRecords)
+                          .map((st) => (
+                            <div
+                              key={st.stateName}
+                              className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 space-y-3"
+                              id={`state-group-${st.uf.toLowerCase()}`}
+                            >
+                              {/* State Sub-header */}
+                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 border-b border-gray-200/80 pb-2.5">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-6 h-6 rounded-md bg-[#1A1A1A] text-white font-black text-[10px] flex items-center justify-center">
+                                    {st.uf}
+                                  </span>
+                                  <span className="text-xs font-black text-[#1A1A1A] font-sans">
+                                    {st.stateName}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">
+                                    {st.pricedCount} de {st.totalChains} redes com preço
+                                  </span>
                                 </div>
-                              ) : (
-                                <div className="text-[10px] font-bold text-gray-350 italic">
-                                  ————
+                                <div className="text-[11px] font-mono text-gray-600 flex items-center gap-3">
+                                  <span>
+                                    Média: <strong className="text-gray-900">R$ {st.avgPrice.toFixed(2)}</strong>
+                                  </span>
+                                  {st.minItem && (
+                                    <span className="text-emerald-700 font-medium">
+                                      Menor: R$ {st.minItem.latestRecord!.price.toFixed(2)}
+                                    </span>
+                                  )}
+                                  {st.maxItem && (
+                                    <span className="text-red-700 font-medium">
+                                      Maior: R$ {st.maxItem.latestRecord!.price.toFixed(2)}
+                                    </span>
+                                  )}
                                 </div>
+                              </div>
+
+                              {/* State Chain Cards Grid */}
+                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                                {st.chainPricedList.map(({ chain, latestRecord }) =>
+                                  renderChainCard(chain, latestRecord, st.avgPrice, st.uf, st.stateName)
+                                )}
+                              </div>
+                            </div>
+                          ))
+                      ) : (
+                        <div
+                          className="py-8 text-center text-xs font-medium text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 font-sans italic"
+                          id="no-current-prices-alert"
+                        >
+                          Nenhum preço coletado atualmente para este produto.
+                        </div>
+                      )
+                    ) : (
+                      /* When a specific state is selected */
+                      selectedStateData && (
+                        <div
+                          className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 space-y-3"
+                          id={`state-single-group-${selectedStateData.uf.toLowerCase()}`}
+                        >
+                          <div className="flex items-center justify-between border-b border-gray-200/80 pb-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className="w-6 h-6 rounded-md bg-[#1A1A1A] text-white font-black text-[10px] flex items-center justify-center">
+                                {selectedStateData.uf}
+                              </span>
+                              <span className="text-xs font-black text-[#1A1A1A] font-sans">
+                                Redes em {selectedStateData.stateName}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-bold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">
+                              {selectedStateData.pricedCount} com preços registrados
+                            </span>
+                          </div>
+
+                          {selectedStateData.chainPricedList.length > 0 ? (
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                              {selectedStateData.chainPricedList.map(({ chain, latestRecord }) =>
+                                renderChainCard(
+                                  chain,
+                                  latestRecord,
+                                  selectedStateData.avgPrice,
+                                  selectedStateData.uf,
+                                  selectedStateData.stateName
+                                )
                               )}
                             </div>
-
-                            {/* Footer Row: Date & Small Pill Status Info */}
-                            <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
-                              <span className="text-[8px] font-mono flex items-center gap-0.5 min-w-0">
-                                {latestRecord ? (
-                                  <>
-                                    <Clock className="w-2 h-2 text-gray-300 shrink-0" />
-                                    <span className={`truncate ${getAuditDateColorClass(latestRecord.date)}`}>{formatDateBR(latestRecord.date).substring(0, 5)}</span>
-                                  </>
-                                ) : (
-                                  <span className="text-gray-400">-</span>
-                                )}
-                              </span>
-                              
-                              <span className={`text-[8px] font-bold uppercase px-1 py-0.2 rounded border tracking-tight truncate shrink-0 ${indicatorColorClass}`}>
-                                {indicatorText}
-                              </span>
+                          ) : (
+                            <div className="py-6 text-center text-xs text-gray-400 font-sans italic">
+                              Nenhuma rede associada a este estado.
                             </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className="col-span-full py-8 text-center text-xs font-medium text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 font-sans italic" id="no-current-prices-alert">
-                        Nenhum preço coletado atualmente para este produto.
-                      </div>
+                          )}
+                        </div>
+                      )
                     )}
                   </div>
                 </div>
@@ -3633,11 +4084,63 @@ export function Products({
             {/* Modal Body (Scrollable) */}
             <div className="p-6 space-y-6 overflow-y-auto flex-1 font-sans">
               
-              {/* Step 1: Chains (Redes) */}
+              {/* Step 1: States (Estados) */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono">
-                    1. Filtrar por Redes (PDV)
+                    1. Filtrar por Estados
+                  </span>
+                  <span className="text-[9px] text-gray-400 font-bold">
+                    {exportStates.includes("Todos") ? "Todos os estados selecionados" : `${exportStates.length} selecionado(s)`}
+                  </span>
+                </div>
+                
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150/80 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none col-span-1 sm:col-span-2 ${
+                    exportStates.includes("Todos")
+                      ? "border-emerald-500 ring-1 ring-emerald-500/20"
+                      : "border-slate-200 hover:border-slate-300"
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={exportStates.includes("Todos")}
+                      onChange={() => handleToggleState("Todos")}
+                      className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-extrabold text-slate-800">Todos os Estados</span>
+                  </label>
+                  
+                  {RESEARCH_STATES.map((st) => (
+                    <label
+                      key={st.name}
+                      className={`flex items-center gap-2 px-3 py-2 bg-white rounded-xl border transition cursor-pointer select-none ${
+                        exportStates.includes(st.name) || exportStates.includes("Todos")
+                          ? "border-emerald-500 ring-1 ring-emerald-500/20"
+                          : "border-slate-200 hover:border-slate-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={exportStates.includes(st.name) || exportStates.includes("Todos")}
+                        onChange={() => handleToggleState(st.name)}
+                        className="w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1.5 truncate">
+                        <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
+                          {st.uf}
+                        </span>
+                        <span className="text-xs font-bold text-slate-700 truncate">{st.name}</span>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Step 2: Chains (Redes) */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono">
+                    2. Filtrar por Redes (PDV)
                   </span>
                   <span className="text-[9px] text-gray-400 font-bold">
                     {exportChainIds.includes("Todas") ? "Todas as redes selecionadas" : `${exportChainIds.length} selecionada(s)`}
@@ -3680,11 +4183,11 @@ export function Products({
                 </div>
               </div>
 
-              {/* Step 2: Categories */}
+              {/* Step 3: Categories */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono">
-                    2. Filtrar por Categorias
+                    3. Filtrar por Categorias
                   </span>
                   <span className="text-[9px] text-gray-400 font-bold">
                     {exportCategories.includes("Todas") ? "Todas as categorias" : `${exportCategories.length} selecionada(s)`}
@@ -3729,10 +4232,10 @@ export function Products({
                 </div>
               </div>
 
-              {/* Step 3: Brands (Marcas) */}
+              {/* Step 4: Brands (Marcas) */}
               <div className="space-y-2.5">
                 <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono block">
-                  3. Filtrar por Marcas
+                  4. Filtrar por Marcas
                 </span>
                 
                 <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-150/80 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -3795,10 +4298,10 @@ export function Products({
                 </div>
               </div>
 
-              {/* Step 4: Include History Toggle */}
+              {/* Step 5: Include History Toggle */}
               <div className="space-y-2.5">
                 <span className="text-[10px] font-black uppercase tracking-wider text-[#D40511] font-mono block">
-                  4. Detalhes e Histórico
+                  5. Detalhes e Histórico
                 </span>
                 
                 <div className="p-4 bg-slate-50 rounded-2xl border border-slate-150/80 flex flex-col md:flex-row md:items-center justify-between gap-4">

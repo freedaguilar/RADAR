@@ -34,6 +34,7 @@ CREATE TABLE app_users (
   role user_role DEFAULT 'vendedor',
   active BOOLEAN DEFAULT true,
   avatar_url TEXT,
+  password TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -48,8 +49,16 @@ CREATE TABLE price_records (
   notes TEXT,
   user_name TEXT,
   user_email TEXT,
+  state TEXT DEFAULT 'Minas Gerais',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+-- Migration commands for existing databases (run if table already exists)
+ALTER TABLE price_records ADD COLUMN IF NOT EXISTS state TEXT DEFAULT 'Minas Gerais';
+ALTER TABLE chains ADD COLUMN IF NOT EXISTS state TEXT DEFAULT 'Minas Gerais';
+ALTER TABLE chains ADD COLUMN IF NOT EXISTS states TEXT[] DEFAULT ARRAY['Minas Gerais'];
+ALTER TABLE products ADD COLUMN IF NOT EXISTS internal_code TEXT;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS password TEXT;
 
 -- Enable Row Level Security
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;

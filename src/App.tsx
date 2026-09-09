@@ -64,17 +64,23 @@ export default function App() {
                 role: u.role,
                 active: u.active,
                 avatar_url: u.avatarUrl,
+                password: u.password || '123',
               }));
               await supabase.from("app_users").insert(usersToInsert);
 
               // Seed chains
               if (initialData.chains.length > 0) {
-                const chainsToInsert = initialData.chains.map((c) => ({
-                  id: c.id,
-                  name: c.name,
-                  logo_color: c.logoColor,
-                  active: c.active,
-                }));
+                const chainsToInsert = initialData.chains.map((c) => {
+                  const sList = c.states && c.states.length > 0 ? c.states : [c.state || 'Minas Gerais'];
+                  return {
+                    id: c.id,
+                    name: c.name,
+                    logo_color: c.logoColor,
+                    logo_url: c.logoUrl,
+                    active: c.active,
+                    state: sList.join(', '),
+                  };
+                });
                 await supabase.from("chains").insert(chainsToInsert);
               }
 
@@ -149,7 +155,11 @@ export default function App() {
         currentUser: user,
       };
     });
-    setActiveTab("dashboard");
+    if (user.isGuest) {
+      setActiveTab("registrar");
+    } else {
+      setActiveTab("dashboard");
+    }
   };
 
   // Session check on load
@@ -324,12 +334,14 @@ export default function App() {
       }));
 
       if (isConfigured) {
+        const sList = newChain.states && newChain.states.length > 0 ? newChain.states : [newChain.state || 'Minas Gerais'];
         const { error } = await supabase.from("chains").insert({
           id: newChain.id,
           name: newChain.name,
           logo_color: newChain.logoColor,
           logo_url: newChain.logoUrl,
           active: newChain.active,
+          state: sList.join(', '),
         });
         if (error) console.error("Error inserting chain:", error);
       }
@@ -345,6 +357,7 @@ export default function App() {
       }));
 
       if (isConfigured) {
+        const sList = updatedChain.states && updatedChain.states.length > 0 ? updatedChain.states : [updatedChain.state || 'Minas Gerais'];
         const { error } = await supabase
           .from("chains")
           .update({
@@ -352,6 +365,7 @@ export default function App() {
             logo_color: updatedChain.logoColor,
             logo_url: updatedChain.logoUrl,
             active: updatedChain.active,
+            state: sList.join(', '),
           })
           .eq("id", updatedChain.id);
         if (error) console.error("Error updating chain:", error);
@@ -394,8 +408,35 @@ export default function App() {
           role: newUser.role,
           active: newUser.active,
           avatar_url: newUser.avatarUrl,
+          password: newUser.password,
         });
         if (error) console.error("Error inserting user:", error);
+      }
+    },
+    [isConfigured],
+  );
+
+  const handleUpdateUser = useCallback(
+    async (updatedUser: User) => {
+      setState((prev) => ({
+        ...prev,
+        users: prev.users.map((u) => (u.id === updatedUser.id ? updatedUser : u)),
+        currentUser: prev.currentUser?.id === updatedUser.id ? updatedUser : prev.currentUser,
+      }));
+
+      if (isConfigured) {
+        const { error } = await supabase
+          .from("app_users")
+          .update({
+            name: updatedUser.name,
+            email: updatedUser.email,
+            role: updatedUser.role,
+            active: updatedUser.active,
+            avatar_url: updatedUser.avatarUrl,
+            password: updatedUser.password,
+          })
+          .eq("id", updatedUser.id);
+        if (error) console.error("Error updating user:", error);
       }
     },
     [isConfigured],
@@ -437,6 +478,7 @@ export default function App() {
           notes: newRecord.notes,
           user_name: newRecord.userName,
           user_email: newRecord.userEmail,
+          state: newRecord.state || 'Minas Gerais',
         });
         if (error) console.error("Error inserting price record:", error);
       }
@@ -465,6 +507,7 @@ export default function App() {
             notes: updatedRecord.notes,
             user_name: updatedRecord.userName,
             user_email: updatedRecord.userEmail,
+            state: updatedRecord.state || 'Minas Gerais',
           })
           .eq("id", updatedRecord.id);
         if (error) console.error("Error updating price record:", error);
@@ -491,31 +534,59 @@ export default function App() {
     [isConfigured],
   );
 
-  // Quick navigation with deep parameters support (e.g. going directly to view photo)
-  const handleNavigate = useCallback((page: string, params?: any) => {
-    if (page === "auditoria") {
-      setActiveTab("auditoria");
-      if (params && params.recordId) {
-        setSelectedAuditRecordId(params.recordId);
-      } else {
-        setSelectedAuditRecordId(null);
-      }
-    } else if (page === "produtos") {
-      setActiveTab("produtos");
-      if (params) {
-        setProductPageParams(params);
-      } else {
-        setProductPageParams(null);
-      }
-    } else if (page === "registrar") {
+  // Enforce guest tab lock
+  useEffect(() => {
+    if (state.currentUser?.isGuest && activeTab !== "registrar") {
       setActiveTab("registrar");
-      if (params) {
-        setRegisterPageParams(params);
-      } else {
-        setRegisterPageParams(null);
-      }
     }
-  }, []);
+  }, [state.currentUser?.isGuest, activeTab]);
+
+  // Quick navigation with deep parameters support (e.g. going directly to view photo)
+  const handleNavigate = useCallback(
+    (page: string, params?: any) => {
+      // For guest users, navigation to dashboard, produtos, auditoria, and settings is blocked
+      if (state.currentUser?.isGuest) {
+        setActiveTab("registrar");
+        if (params) {
+          setRegisterPageParams(params);
+        } else {
+          setRegisterPageParams(null);
+        }
+        return;
+      }
+
+      if (page === "auditoria") {
+        if (state.currentUser?.role === "promotor") return;
+        setActiveTab("auditoria");
+        if (params && params.recordId) {
+          setSelectedAuditRecordId(params.recordId);
+        } else {
+          setSelectedAuditRecordId(null);
+        }
+      } else if (page === "produtos") {
+        setActiveTab("produtos");
+        if (params) {
+          setProductPageParams(params);
+        } else {
+          setProductPageParams(null);
+        }
+      } else if (page === "registrar") {
+        setActiveTab("registrar");
+        if (params) {
+          setRegisterPageParams(params);
+        } else {
+          setRegisterPageParams(null);
+        }
+      } else if (page === "dashboard") {
+        setActiveTab("dashboard");
+      } else if (page === "configuracoes" || page === "settings") {
+        if (state.currentUser?.role === "gestor") {
+          setActiveTab("settings");
+        }
+      }
+    },
+    [state.currentUser],
+  );
 
   // Pull to refresh pull gesture state hooks & touch engine handlers (mobile/tablet only)
   const [pullY, setPullY] = useState(0);
@@ -636,25 +707,153 @@ export default function App() {
     );
   }
 
-  const menuItems = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-    { id: "produtos", label: "Produtos", icon: ShoppingBag },
-    { id: "registrar", label: "Registrar Preço", icon: Camera },
-    { id: "auditoria", label: "Auditoria", icon: FileCheck2 },
-    { id: "settings", label: "Configurações", icon: SettingsIcon },
-  ].filter(item => {
-    if (state.currentUser?.role === 'promotor') {
-      return item.id !== 'auditoria';
-    }
-    return true;
-  });
+  const isGuest = Boolean(state.currentUser?.isGuest);
+  const isGestor = state.currentUser?.role === "gestor";
 
+  // Menu items are strictly exclusive to registered managers/gestores (and allowed staff), hidden completely for guests
+  const menuItems = isGuest
+    ? []
+    : [
+        { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+        { id: "produtos", label: "Produtos", icon: ShoppingBag },
+        { id: "registrar", label: "Registrar Preço", icon: Camera },
+        { id: "auditoria", label: "Auditoria", icon: FileCheck2 },
+        { id: "settings", label: "Configurações", icon: SettingsIcon },
+      ].filter((item) => {
+        if (state.currentUser?.role === "promotor") {
+          return item.id !== "auditoria" && item.id !== "settings";
+        }
+        return true;
+      });
+
+  // =========================================================================
+  // GUEST USER LAYOUT (Dedicated, focused view without navigation menus)
+  // =========================================================================
+  if (isGuest) {
+    return (
+      <div
+        className="min-h-screen bg-[#F5F5F5] font-sans antialiased text-[#1A1A1A] flex flex-col pb-8"
+        id="app-viewport-guest"
+      >
+        {/* Dedicated Guest Top Navigation Bar */}
+        <header
+          className="bg-white border-b border-[#E0E0E0] px-4 lg:px-8 py-3.5 sticky top-0 z-40 shadow-xs"
+          id="guest-top-header"
+        >
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            {/* Brand Logo */}
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-white overflow-hidden flex items-center justify-center border border-gray-100 shrink-0">
+                <img
+                  src="https://i.imgur.com/TGgcoZg.png"
+                  alt="PriceHub Logo"
+                  className="w-full h-full object-contain"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+              <div>
+                <h1 className="text-base font-extrabold tracking-tight font-sans leading-none">
+                  <span className="text-[#0F379A]">Price</span><span className="text-[#E91617]">Hub</span>
+                </h1>
+                <span className="text-[9px] text-gray-400 font-mono tracking-wider block uppercase mt-0.5">
+                  Pesquisa & Coleta de Preços
+                </span>
+              </div>
+            </div>
+
+            {/* Guest Identification & Exit Button */}
+            <div className="flex items-center gap-2.5 sm:gap-3">
+              <div className="flex items-center gap-2 bg-amber-50/90 border border-amber-200/90 px-3 py-1.5 rounded-xl">
+                <span className="w-6 h-6 rounded-full bg-amber-500 text-white flex items-center justify-center font-bold text-[10px] uppercase font-mono shrink-0">
+                  {state.currentUser.avatarUrl || "CV"}
+                </span>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="font-bold text-gray-900 whitespace-nowrap">
+                    {state.currentUser.name}
+                  </span>
+                  <span className="text-gray-400 font-normal">•</span>
+                  <span className="text-amber-800 font-bold font-mono text-[11px] whitespace-nowrap">
+                    Convidado
+                  </span>
+                </div>
+              </div>
+
+              <button
+                id="guest-logout-btn"
+                onClick={handleLogout}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-2xs group"
+                title="Sair do modo convidado"
+              >
+                <LogOut className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
+                <span className="hidden xs:inline sm:inline">Sair</span>
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Dynamic Guest Working Area (Exclusively Registrar Preço) */}
+        <main
+          className="flex-1 p-4 lg:p-8 max-w-7xl mx-auto w-full font-sans relative"
+          id="app-main-content-guest"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {/* Pull-to-Refresh Gestures Panel Indicator wrapper */}
+          <AnimatePresence>
+            {(pullY > 0 || isRefreshing) && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                animate={{ 
+                  opacity: 1, 
+                  height: isRefreshing ? 52 : Math.max(0, pullY),
+                  marginBottom: isRefreshing ? 14 : Math.min(14, pullY / 3.5)
+                }}
+                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                transition={{ type: "spring", stiffness: 350, damping: 26 }}
+                className="w-full flex items-center justify-center overflow-hidden border border-dashed border-[#D40511]/15 bg-[#D40511]/5 rounded-2xl select-none pointer-events-none"
+                id="pull-to-refresh-visual-indicator"
+              >
+                <div className="flex items-center gap-2.5 py-2">
+                  <Loader2 
+                    className={`w-5 h-5 text-[#D40511] ${isRefreshing ? "animate-spin" : ""}`}
+                    style={{
+                      transform: isRefreshing ? undefined : `rotate(${pullY * 6}deg)`,
+                    }}
+                  />
+                  <span className="text-[11px] text-[#D40511] font-bold font-sans tracking-wider uppercase">
+                    {isRefreshing ? "Atualizando dados..." : pullY >= 50 ? "Solte para atualizar" : "Puxe para atualizar"}
+                  </span>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <RegisterPrice
+            products={state.products}
+            chains={state.chains}
+            records={state.records}
+            onSaveRecord={handleSavePriceRecord}
+            onUpdateRecord={handleUpdatePriceRecord}
+            onDeleteRecord={handleDeletePriceRecord}
+            currentUser={state.currentUser}
+            onNavigate={handleNavigate}
+            pageParams={registerPageParams}
+          />
+        </main>
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // STANDARD LAYOUT FOR MANAGERS & REGISTERED TEAM MEMBERS
+  // =========================================================================
   return (
     <div
       className="min-h-screen bg-[#F5F5F5] font-sans antialiased text-[#1A1A1A] flex flex-col lg:flex-row pb-20 lg:pb-0"
       id="app-viewport"
     >
-      {/* 1. DESKTOP NAVIGATION SIDEBAR MENU */}
+      {/* 1. DESKTOP NAVIGATION SIDEBAR MENU (Exclusivo para Gestores e equipe cadastrada) */}
       <aside
         className="hidden lg:flex lg:w-64 bg-white border-r border-[#E0E0E0] flex-col justify-between shrink-0 h-screen sticky top-0 overflow-hidden"
         id="desktop-sidebar"
@@ -754,16 +953,9 @@ export default function App() {
                     <p className="text-xs font-mono font-bold text-[#1A1A1A] truncate">
                       {state.currentUser.name}
                     </p>
-                    {state.currentUser.isGuest && (
-                      <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.2 rounded-full font-mono shrink-0">
-                        Convidado
-                      </span>
-                    )}
                   </div>
                   <p className="text-[10px] text-gray-500 truncate lowercase">
-                    {state.currentUser.isGuest
-                      ? "Acesso Convidado / Campo"
-                      : state.currentUser.role === "gestor"
+                    {state.currentUser.role === "gestor"
                       ? "Gestor/Administrador"
                       : state.currentUser.role === "promotor"
                       ? "Promotor"
@@ -810,11 +1002,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-2">
-          {state.currentUser.isGuest && (
-            <span className="text-[9px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-1.5 py-0.5 rounded-full font-mono">
-              Convidado
-            </span>
-          )}
           {/* Quick active profile bubble */}
           <span className="w-7 h-7 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-[10px] uppercase overflow-hidden shrink-0">
             {state.currentUser.avatarUrl && (state.currentUser.avatarUrl.startsWith("http") || state.currentUser.avatarUrl.startsWith("data:")) ? (
@@ -915,7 +1102,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "auditoria" && state.currentUser?.role !== 'promotor' && (
+        {activeTab === "auditoria" && isGestor && (
           <Audit
             records={state.records}
             products={state.products}
@@ -927,7 +1114,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "settings" && (
+        {activeTab === "settings" && isGestor && (
           <Settings
             products={state.products}
             chains={state.chains}
@@ -939,6 +1126,7 @@ export default function App() {
             onDeleteChain={handleDeleteChain}
             onEditChain={handleEditChain}
             onAddUser={handleAddUser}
+            onUpdateUser={handleUpdateUser}
             onDeleteUser={handleDeleteUser}
             onEditProduct={handleEditProduct}
             onNavigate={handleNavigate}
