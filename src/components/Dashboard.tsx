@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   ArrowUpRight, 
   ArrowDownRight, 
@@ -6,9 +6,16 @@ import {
   RefreshCw,
   Building2,
   Calendar,
-  Package
+  Package,
+  ChevronDown,
+  ChevronUp,
+  Camera,
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Globe
 } from 'lucide-react';
-import { Product, Chain, PriceRecord } from '../types';
+import { Product, Chain, PriceRecord, RESEARCH_STATES, isChainInState, getPriceRecordState, getChainStates } from '../types';
 
 interface DashboardProps {
   products: Product[];
@@ -64,6 +71,47 @@ function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md"
     </div>
   );
 }
+
+interface ChainStateAuditInfo {
+  chain: Chain;
+  state: string;
+  lastUpdateDate: string | null;
+  updatedProductsCount: number;
+  totalProductsCount: number;
+  daysSince: number | null;
+  status: 'recent' | 'updated' | 'warning' | 'outdated' | 'never';
+  isOutdated: boolean;
+}
+
+interface StateAuditGroup {
+  name: string;
+  uf: string;
+  chains: ChainStateAuditInfo[];
+  recentChains: ChainStateAuditInfo[];
+  outdatedChains: ChainStateAuditInfo[];
+  outdatedCount: number;
+  latestUpdateDate: string | null;
+}
+
+const STATE_UF_MAP: Record<string, string> = {
+  'Minas Gerais': 'MG',
+  'Goiás': 'GO',
+  'Distrito Federal': 'DF',
+  'Amazonas': 'AM',
+  'Acre': 'AC',
+  'Rondônia': 'RO',
+  'Mato Grosso': 'MT',
+  'Tocantins': 'TO',
+  'São Paulo': 'SP',
+  'Rio de Janeiro': 'RJ',
+};
+
+const getStateUF = (stateName: string): string => {
+  if (STATE_UF_MAP[stateName]) return STATE_UF_MAP[stateName];
+  const found = RESEARCH_STATES.find((s) => s.name.toLowerCase() === stateName.toLowerCase());
+  if (found) return found.uf;
+  return stateName.substring(0, 2).toUpperCase();
+};
 
 export function Dashboard({ products, chains, records, onNavigate }: DashboardProps) {
   // Helper for PT-BR date representation
@@ -172,48 +220,171 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
       .slice(0, 10);
   }, [records, products, chains]);
 
-  // 2. Últimas redes atualizadas
-  const recentUpdatedChains = useMemo(() => {
-    if (chains.length === 0 || records.length === 0) return [];
+  // Estados e controle de expansão do card de redes atualizadas
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [selectedStateFilter, setSelectedStateFilter] = useState<string>('Todas');
+  const [expandedStates, setExpandedStates] = useState<Record<string, boolean>>({});
 
-    const chainRecordsMap: Record<string, PriceRecord[]> = {};
-    records.forEach((r) => {
-      if (!chainRecordsMap[r.chainId]) {
-        chainRecordsMap[r.chainId] = [];
-      }
-      chainRecordsMap[r.chainId].push(r);
+  const toggleStateExpansion = (stateName: string) => {
+    setExpandedStates((prev) => ({
+      ...prev,
+      [stateName]: !prev[stateName],
+    }));
+  };
+
+  // 2. Últimas redes atualizadas organizadas por estado com status de atualização e pendências
+  const stateAuditGroups = useMemo(() => {
+    if (chains.length === 0) return [];
+
+    // Coleta todos os estados válidos que possuem redes ou registros
+    const allStateNames = new Set<string>();
+
+    // Prioriza os estados oficiais de pesquisa na ordem predefinida
+    RESEARCH_STATES.forEach((st) => allStateNames.add(st.name));
+
+    chains.forEach((chain) => {
+      getChainStates(chain).forEach((st) => allStateNames.add(st));
     });
 
-    const chainList = chains.map((chain) => {
-      const chainRecs = chainRecordsMap[chain.id] || [];
+    records.forEach((r) => {
+      const st = getPriceRecordState(r, chains);
+      if (st) allStateNames.add(st);
+    });
 
-      if (chainRecs.length === 0) {
-        return {
-          chain,
-          lastUpdateDate: '',
-          updatedProductsCount: 0,
-        };
-      }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
 
-      const sorted = [...chainRecs].sort((a, b) => b.date.localeCompare(a.date));
-      const lastUpdateDate = sorted[0].date;
+    const groups: StateAuditGroup[] = [];
 
-      const productsOnLastDate = new Set(
-        sorted.filter((r) => r.date === lastUpdateDate).map((r) => r.productId)
+    allStateNames.forEach((stateName) => {
+      // Redes ativas configuradas para este estado ou que possuem registros gravados nele
+      const stateChains = chains.filter(
+        (c) =>
+          c.active &&
+          (isChainInState(c, stateName) ||
+            records.some((r) => r.chainId === c.id && getPriceRecordState(r, chains) === stateName))
       );
 
-      return {
-        chain,
-        lastUpdateDate,
-        updatedProductsCount: productsOnLastDate.size,
-      };
+      if (stateChains.length === 0) return;
+
+      const chainAuditInfos: ChainStateAuditInfo[] = stateChains.map((chain) => {
+        const chainStateRecs = records.filter(
+          (r) => r.chainId === chain.id && getPriceRecordState(r, chains) === stateName
+        );
+
+        if (chainStateRecs.length === 0) {
+          return {
+            chain,
+            state: stateName,
+            lastUpdateDate: null,
+            updatedProductsCount: 0,
+            totalProductsCount: 0,
+            daysSince: null,
+            status: 'never',
+            isOutdated: true,
+          };
+        }
+
+        const sorted = [...chainStateRecs].sort((a, b) => {
+          const cmp = b.date.localeCompare(a.date);
+          if (cmp !== 0) return cmp;
+          return b.id.localeCompare(a.id);
+        });
+
+        const lastDate = sorted[0].date;
+        const productsOnLastDate = new Set(
+          sorted.filter((r) => r.date === lastDate).map((r) => r.productId)
+        );
+        const allUniqueProducts = new Set(sorted.map((r) => r.productId));
+
+        let daysSince: number | null = null;
+        try {
+          const [y, m, d] = lastDate.split('-').map(Number);
+          const recDate = new Date(y, m - 1, d);
+          daysSince = Math.max(0, Math.floor((today.getTime() - recDate.getTime()) / (1000 * 60 * 60 * 24)));
+        } catch {
+          daysSince = 0;
+        }
+
+        let status: 'recent' | 'updated' | 'warning' | 'outdated' | 'never' = 'updated';
+        if (daysSince === null) {
+          status = 'never';
+        } else if (daysSince <= 7) {
+          status = 'recent';
+        } else if (daysSince <= 20) {
+          status = 'updated';
+        } else if (daysSince <= 30) {
+          status = 'warning';
+        } else {
+          status = 'outdated';
+        }
+
+        const isOutdated = daysSince === null || daysSince > 20;
+
+        return {
+          chain,
+          state: stateName,
+          lastUpdateDate: lastDate,
+          updatedProductsCount: productsOnLastDate.size,
+          totalProductsCount: allUniqueProducts.size,
+          daysSince,
+          status,
+          isOutdated,
+        };
+      });
+
+      // Ordena as redes do estado:
+      // Redes com atualização recente primeiro (data desc), depois redes mais desatualizadas / nunca auditadas
+      chainAuditInfos.sort((a, b) => {
+        if (a.lastUpdateDate && b.lastUpdateDate) {
+          return b.lastUpdateDate.localeCompare(a.lastUpdateDate);
+        }
+        if (a.lastUpdateDate && !b.lastUpdateDate) return -1;
+        if (!a.lastUpdateDate && b.lastUpdateDate) return 1;
+        return a.chain.name.localeCompare(b.chain.name);
+      });
+
+      const recentChains = chainAuditInfos.filter((c) => !c.isOutdated);
+      const outdatedChains = chainAuditInfos.filter((c) => c.isOutdated);
+      const latestDate = chainAuditInfos.find((c) => c.lastUpdateDate !== null)?.lastUpdateDate || null;
+
+      groups.push({
+        name: stateName,
+        uf: getStateUF(stateName),
+        chains: chainAuditInfos,
+        recentChains,
+        outdatedChains,
+        outdatedCount: outdatedChains.length,
+        latestUpdateDate: latestDate,
+      });
     });
 
-    return chainList
-      .filter((item) => item.lastUpdateDate !== '')
-      .sort((a, b) => b.lastUpdateDate.localeCompare(a.lastUpdateDate))
-      .slice(0, 10);
+    // Ordenação dos estados: estados com auditorias mais recentes e maior número de redes primeiro
+    return groups.sort((a, b) => {
+      if (a.latestUpdateDate && b.latestUpdateDate) {
+        const cmp = b.latestUpdateDate.localeCompare(a.latestUpdateDate);
+        if (cmp !== 0) return cmp;
+      } else if (a.latestUpdateDate && !b.latestUpdateDate) {
+        return -1;
+      } else if (!a.latestUpdateDate && b.latestUpdateDate) {
+        return 1;
+      }
+      return b.chains.length - a.chains.length;
+    });
   }, [chains, records]);
+
+  // Contagem total de redes desatualizadas somando todos os estados
+  const totalOutdatedCount = useMemo(() => {
+    return stateAuditGroups.reduce((acc, g) => acc + g.outdatedCount, 0);
+  }, [stateAuditGroups]);
+
+  // Grupos visíveis respeitando o filtro de estado selecionado
+  const visibleStateGroups = useMemo(() => {
+    if (selectedStateFilter === 'Todas') {
+      return stateAuditGroups;
+    }
+    return stateAuditGroups.filter((g) => g.name === selectedStateFilter);
+  }, [stateAuditGroups, selectedStateFilter]);
 
   // 3. Section: Top Products by Price Dispersion
   const topDispersions = useMemo(() => {
@@ -265,67 +436,302 @@ export function Dashboard({ products, chains, records, onNavigate }: DashboardPr
 
       {/* Primary Top Cards Container: Full-width stacked layout */}
       <div className="flex flex-col gap-6 w-full" id="dashboard-top-cards">
-        {/* Card 1: Últimas redes atualizadas */}
+        {/* Card 1: Últimas redes atualizadas por estado */}
         <div className="bg-white p-6 sm:p-7 rounded-2xl border border-slate-100 shadow-xs flex flex-col justify-between" id="card-updated-chains">
-          <div>
-            <div className="flex items-center justify-between pb-3 border-b border-slate-50">
+          <div className="space-y-4">
+            {/* Card Header with Expansion Toggle */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100/50">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg border border-blue-100/50 shrink-0">
                   <Building2 className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-extrabold text-slate-400 font-sans uppercase tracking-widest leading-none">
-                    Últimas Redes Atualizadas
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xs font-extrabold text-slate-700 font-sans uppercase tracking-widest leading-none">
+                      Últimas Redes Atualizadas por Estado
+                    </h3>
+                    {totalOutdatedCount > 0 && (
+                      <span className="bg-rose-50 text-rose-700 border border-rose-200 text-[10px] font-black px-2 py-0.5 rounded-full font-mono">
+                        {totalOutdatedCount} {totalOutdatedCount === 1 ? 'desatualizada' : 'desatualizadas'}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-400 font-medium mt-1">
-                    Redes varejistas com pesquisas e auditorias recentes
+                    {isExpanded
+                      ? 'Exibindo todas as redes por estado, incluindo as desatualizadas para auditoria'
+                      : 'Exibindo as últimas redes atualizadas de cada estado. Expanda para ver todas e as pendentes'}
                   </p>
                 </div>
               </div>
-              <button
-                onClick={() => onNavigate('auditoria')}
-                className="text-xs text-[#D40511] font-bold hover:underline cursor-pointer shrink-0"
-              >
-                Ver auditorias &rarr;
-              </button>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  id="btn-toggle-expand-all-chains"
+                  onClick={() => setIsExpanded(!isExpanded)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
+                    isExpanded
+                      ? 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                      : 'bg-[#D40511] text-white border-[#D40511] hover:bg-[#b0040e]'
+                  }`}
+                >
+                  {isExpanded ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+                      <span>Recolher redes</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                      <span>Ver todas as redes {totalOutdatedCount > 0 ? `(${totalOutdatedCount} desatualizadas)` : ''}</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onNavigate('auditoria')}
+                  className="text-xs text-[#D40511] font-bold hover:underline cursor-pointer shrink-0 hidden md:inline-block ml-1"
+                >
+                  Ver auditorias &rarr;
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5 mt-5">
-              {recentUpdatedChains.map((item) => (
-                <div
-                  key={item.chain.id}
-                  onClick={() => onNavigate('produtos', { chainId: item.chain.id })}
-                  className="p-4 rounded-xl border border-slate-100 bg-white hover:border-blue-500/40 hover:bg-slate-50/60 hover:shadow-xs transition-all duration-200 cursor-pointer flex flex-col items-center text-center group"
+            {/* Quick State Tabs Filter */}
+            {stateAuditGroups.length > 1 && (
+              <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1 border-b border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedStateFilter('Todas')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
+                    selectedStateFilter === 'Todas'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
                 >
-                  {/* Highlighted Retailer Logo */}
-                  <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100 mb-3 group-hover:scale-105 group-hover:border-blue-200 transition-all duration-200 flex items-center justify-center">
-                    <RetailerLogo chain={item.chain} size="lg" />
-                  </div>
-
-                  {/* Chain Name */}
-                  <h4 className="text-xs sm:text-sm font-bold text-slate-800 line-clamp-1 group-hover:text-blue-600 transition-colors">
-                    {item.chain.name}
-                  </h4>
-
-                  {/* Date below logo */}
-                  <div className="flex items-center gap-1 text-[11px] text-slate-400 font-medium mt-1.5">
-                    <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
-                    <span>{formatDateBR(item.lastUpdateDate)}</span>
-                  </div>
-
-                  {/* Product count badge below */}
-                  <div className="mt-3">
-                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-blue-700 bg-blue-50 border border-blue-100/80 px-2.5 py-1 rounded-full font-mono">
-                      <Package className="w-3 h-3 text-blue-600 shrink-0" />
-                      <span>{item.updatedProductsCount} {item.updatedProductsCount === 1 ? 'produto' : 'produtos'}</span>
+                  <Globe className="w-3 h-3" />
+                  <span>Todos os Estados ({stateAuditGroups.length})</span>
+                </button>
+                {stateAuditGroups.map((st) => (
+                  <button
+                    type="button"
+                    key={st.name}
+                    onClick={() => setSelectedStateFilter(st.name)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
+                      selectedStateFilter === st.name
+                        ? 'bg-[#0F379A] text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span className="font-mono text-[10px] bg-black/10 px-1 py-0.5 rounded font-black">
+                      {st.uf}
                     </span>
-                  </div>
-                </div>
-              ))}
+                    <span>{st.name}</span>
+                    <span className="text-[10px] opacity-75 font-mono">({st.chains.length})</span>
+                    {st.outdatedCount > 0 && (
+                      <span className="w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" title={`${st.outdatedCount} pendentes`} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
 
-              {recentUpdatedChains.length === 0 && (
-                <div className="col-span-full text-center py-10 text-xs text-slate-400 italic">
-                  Nenhuma rede de supermercado com atualização recente.
+            {/* Info Notice when expanded */}
+            {isExpanded && totalOutdatedCount > 0 && (
+              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-xs">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <p className="leading-relaxed">
+                  <strong>Visão expandida de auditorias:</strong> Exibindo todas as redes por estado, incluindo <strong>{totalOutdatedCount} redes pendentes ou desatualizadas</strong> (mais de 20 dias sem auditoria). Clique no botão <strong>Atualizar Preços</strong> para iniciar a coleta imediata na loja.
+                </p>
+              </div>
+            )}
+
+            {/* State Groups List */}
+            <div className="space-y-6 pt-1">
+              {visibleStateGroups.map((st) => {
+                const isStateExpanded = isExpanded || !!expandedStates[st.name] || selectedStateFilter === st.name;
+                const displayedChains = isStateExpanded
+                  ? st.chains
+                  : (st.recentChains.length > 0 ? st.recentChains.slice(0, 3) : st.chains.slice(0, 3));
+
+                return (
+                  <div key={st.name} className="space-y-3">
+                    {/* State Header Bar */}
+                    <div className="flex items-center justify-between bg-slate-50/90 px-3.5 py-2 rounded-xl border border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <span className="w-6 h-6 rounded-lg bg-[#0F379A] text-white font-mono text-[10px] font-black flex items-center justify-center shadow-2xs">
+                          {st.uf}
+                        </span>
+                        <h4 className="text-xs sm:text-sm font-extrabold text-slate-800 font-sans">
+                          {st.name}
+                        </h4>
+                        <span className="text-[11px] text-slate-400 font-medium">
+                          • {st.chains.length} {st.chains.length === 1 ? 'rede' : 'redes'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {st.outdatedCount > 0 ? (
+                          <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full font-mono">
+                            {st.outdatedCount} {st.outdatedCount === 1 ? 'pendente' : 'pendentes'}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-mono">
+                            Todas em dia
+                          </span>
+                        )}
+
+                        {!isExpanded && selectedStateFilter !== st.name && st.chains.length > 3 && (
+                          <button
+                            type="button"
+                            onClick={() => toggleStateExpansion(st.name)}
+                            className="text-xs text-blue-600 font-bold hover:underline cursor-pointer flex items-center gap-0.5 ml-2"
+                          >
+                            {expandedStates[st.name] ? 'Recolher' : `Ver todas (${st.chains.length})`}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Grid of chains for this state */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3.5">
+                      {displayedChains.map((item) => {
+                        const isOutdated = item.isOutdated;
+                        return (
+                          <div
+                            key={`${st.name}-${item.chain.id}`}
+                            onClick={() => onNavigate('produtos', { chainId: item.chain.id, state: st.name })}
+                            className={`p-3.5 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col items-center text-center group justify-between ${
+                              isOutdated
+                                ? 'border-amber-200/90 bg-amber-50/20 hover:border-[#D40511] hover:bg-red-50/20 shadow-2xs'
+                                : 'border-slate-100 bg-white hover:border-blue-500/40 hover:bg-slate-50/60 hover:shadow-xs'
+                            }`}
+                          >
+                            <div className="w-full flex flex-col items-center">
+                              {/* UF badge & status tag */}
+                              <div className="w-full flex items-center justify-between gap-1 mb-2">
+                                <span className="font-mono text-[9px] font-black bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border border-slate-200">
+                                  {st.uf}
+                                </span>
+                                {item.status === 'recent' && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full font-mono">
+                                    <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
+                                    {item.daysSince === 0 ? 'Hoje' : item.daysSince === 1 ? '1d' : `${item.daysSince}d`}
+                                  </span>
+                                )}
+                                {item.status === 'updated' && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full font-mono">
+                                    <Clock className="w-2.5 h-2.5 text-blue-600 shrink-0" />
+                                    {item.daysSince}d atrás
+                                  </span>
+                                )}
+                                {item.status === 'warning' && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full font-mono">
+                                    <AlertTriangle className="w-2.5 h-2.5 text-amber-600 shrink-0" />
+                                    {item.daysSince}d atrás
+                                  </span>
+                                )}
+                                {item.status === 'outdated' && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-black text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-full font-mono">
+                                    <AlertTriangle className="w-2.5 h-2.5 text-rose-600 shrink-0" />
+                                    {item.daysSince}d atrás
+                                  </span>
+                                )}
+                                {item.status === 'never' && (
+                                  <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded-full font-mono">
+                                    Sem dados
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Highlighted Retailer Logo */}
+                              <div className="p-2.5 bg-slate-50 rounded-2xl border border-slate-100 mb-2 group-hover:scale-105 group-hover:border-blue-200 transition-all duration-200 flex items-center justify-center">
+                                <RetailerLogo chain={item.chain} size="lg" />
+                              </div>
+
+                              {/* Chain Name */}
+                              <h4 className="text-xs sm:text-sm font-bold text-slate-800 line-clamp-1 group-hover:text-blue-600 transition-colors">
+                                {item.chain.name}
+                              </h4>
+
+                              {/* Date below logo */}
+                              <div className="flex items-center gap-1 text-[11px] text-slate-400 font-medium mt-1">
+                                <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
+                                <span>{item.lastUpdateDate ? formatDateBR(item.lastUpdateDate) : 'Nunca auditada'}</span>
+                              </div>
+
+                              {/* Product count badge below */}
+                              {item.lastUpdateDate && (
+                                <div className="mt-1.5">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-blue-700 bg-blue-50 border border-blue-100/80 px-2 py-0.5 rounded-full font-mono">
+                                    <Package className="w-3 h-3 text-blue-600 shrink-0" />
+                                    <span>{item.updatedProductsCount} {item.updatedProductsCount === 1 ? 'produto' : 'produtos'}</span>
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Action Button: Atualizar Preços if outdated, or Ver Catálogo link */}
+                            <div className="w-full mt-3 pt-2 border-t border-slate-100">
+                              {isOutdated ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onNavigate('registrar', { chainId: item.chain.id, state: st.name, skipToStep: 2 });
+                                  }}
+                                  className="w-full py-1.5 px-2 bg-[#D40511] hover:bg-[#b0040e] active:scale-95 text-white text-[11px] font-black rounded-lg transition-all flex items-center justify-center gap-1 shadow-2xs cursor-pointer group/btn"
+                                  title={`Atualizar preços da rede ${item.chain.name} em ${st.name}`}
+                                >
+                                  <Camera className="w-3 h-3 group-hover/btn:scale-110 transition-transform shrink-0" />
+                                  <span className="truncate">Atualizar Preços</span>
+                                </button>
+                              ) : (
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-slate-400 group-hover:text-blue-600 font-medium">Ver catálogo &rarr;</span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onNavigate('registrar', { chainId: item.chain.id, state: st.name, skipToStep: 2 });
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-[#D40511] transition rounded hover:bg-red-50 cursor-pointer"
+                                    title="Auditar novamente"
+                                  >
+                                    <Camera className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Button to expand more chains in this state if collapsed */}
+                    {!isStateExpanded && st.chains.length > displayedChains.length && (
+                      <div className="flex items-center justify-center pt-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleStateExpansion(st.name)}
+                          className="text-xs font-bold text-slate-600 hover:text-[#D40511] bg-slate-50 hover:bg-slate-100 px-3.5 py-1.5 rounded-xl border border-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <ChevronDown className="w-3 h-3" />
+                          <span>
+                            Ver mais {st.chains.length - displayedChains.length} {st.chains.length - displayedChains.length === 1 ? 'rede' : 'redes'} de {st.name}
+                            {st.outdatedCount > 0 ? ` (${st.outdatedCount} desatualizadas)` : ''}
+                          </span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {visibleStateGroups.length === 0 && (
+                <div className="text-center py-10 text-xs text-slate-400 italic">
+                  Nenhuma rede encontrada para o filtro de estado selecionado.
                 </div>
               )}
             </div>

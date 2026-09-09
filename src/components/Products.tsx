@@ -597,6 +597,9 @@ export function Products({
     } else if (pageParams?.chainId) {
       setIsOutdatedFilter(false);
       setSelectedChainId(pageParams.chainId);
+      if (pageParams.state) {
+        setSelectedState(pageParams.state);
+      }
       setActiveView("list");
     } else {
       setIsOutdatedFilter(false);
