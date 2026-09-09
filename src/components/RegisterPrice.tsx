@@ -1576,6 +1576,42 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Dynamic viewport height tracking for mobile browsers with bottom navigation bars (e.g. Safari, Chrome Mobile)
+  const [cameraViewportHeight, setCameraViewportHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!useCamera) return;
+
+    const updateCameraViewport = () => {
+      if (typeof window !== 'undefined' && window.visualViewport) {
+        setCameraViewportHeight(Math.round(window.visualViewport.height));
+      } else if (typeof window !== 'undefined') {
+        setCameraViewportHeight(window.innerHeight);
+      }
+    };
+
+    updateCameraViewport();
+    window.visualViewport?.addEventListener('resize', updateCameraViewport);
+    window.visualViewport?.addEventListener('scroll', updateCameraViewport);
+    window.addEventListener('resize', updateCameraViewport);
+    window.addEventListener('orientationchange', updateCameraViewport);
+
+    // Prevent background page bounce and body scrolling while camera is active
+    const originalOverflow = document.body.style.overflow;
+    const originalTouchAction = document.body.style.touchAction;
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateCameraViewport);
+      window.visualViewport?.removeEventListener('scroll', updateCameraViewport);
+      window.removeEventListener('resize', updateCameraViewport);
+      window.removeEventListener('orientationchange', updateCameraViewport);
+      document.body.style.overflow = originalOverflow;
+      document.body.style.touchAction = originalTouchAction;
+    };
+  }, [useCamera]);
+
   // Dispara modal de aviso ao concluir todos os produtos da fila de auditoria
   useEffect(() => {
     if (
@@ -2526,7 +2562,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 </div>
               ) : useCamera ? (
                 /* Fullscreen camera experience for price registration & shelf auditing */
-                <div className="fixed inset-0 z-50 bg-black overflow-hidden flex flex-col justify-between select-none" id="batch-camera-feed">
+                <div
+                  className="fixed inset-x-0 top-0 z-50 bg-black overflow-hidden flex flex-col justify-between select-none touch-none overscroll-none"
+                  style={{
+                    height: cameraViewportHeight ? `${cameraViewportHeight}px` : '100dvh',
+                    maxHeight: cameraViewportHeight ? `${cameraViewportHeight}px` : '100dvh',
+                  }}
+                  id="batch-camera-feed"
+                >
                   {/* Real-time Video Stream (covers full screen) */}
                   <video
                     ref={videoRef}
@@ -2745,31 +2788,36 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   </div>
 
                   {/* CENTER RETICLE / SCANNER VIEWPORT */}
-                  <div className="relative flex-1 pointer-events-none flex items-center justify-center p-4">
-                    <div className="w-full max-w-xs sm:max-w-sm aspect-4/3 rounded-3xl border-2 border-dashed border-white/25 relative flex items-center justify-center">
-                      <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-red-500 rounded-tl-2xl"></div>
-                      <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-red-500 rounded-tr-2xl"></div>
-                      <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-red-500 rounded-bl-2xl"></div>
-                      <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-red-500 rounded-br-2xl"></div>
+                  <div className="relative flex-1 min-h-0 pointer-events-none flex items-center justify-center p-2 sm:p-4">
+                    <div className="w-full max-w-[220px] xs:max-w-[260px] sm:max-w-xs max-h-[140px] sm:max-h-[220px] aspect-4/3 rounded-2xl sm:rounded-3xl border-2 border-dashed border-white/25 relative flex items-center justify-center">
+                      <div className="absolute top-0 left-0 w-5 h-5 sm:w-6 sm:h-6 border-t-4 border-l-4 border-red-500 rounded-tl-xl sm:rounded-tl-2xl"></div>
+                      <div className="absolute top-0 right-0 w-5 h-5 sm:w-6 sm:h-6 border-t-4 border-r-4 border-red-500 rounded-tr-xl sm:rounded-tr-2xl"></div>
+                      <div className="absolute bottom-0 left-0 w-5 h-5 sm:w-6 sm:h-6 border-b-4 border-l-4 border-red-500 rounded-bl-xl sm:rounded-bl-2xl"></div>
+                      <div className="absolute bottom-0 right-0 w-5 h-5 sm:w-6 sm:h-6 border-b-4 border-r-4 border-red-500 rounded-br-xl sm:rounded-br-2xl"></div>
                       <div className="w-full h-0.5 bg-red-500/35 animate-pulse absolute"></div>
                     </div>
                   </div>
 
-                  {/* BOTTOM OVERLAY: Controls Bar */}
-                  <div className="relative z-30 w-full px-3 sm:px-6 pt-3 pb-5 sm:pb-8 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col items-center gap-3">
+                  {/* BOTTOM OVERLAY: Controls Bar (ajustado dinamicamente para não cortar na barra inferior do navegador) */}
+                  <div
+                    className="relative z-30 w-full px-2 sm:px-6 pt-2 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-2 shrink-0"
+                    style={{
+                      paddingBottom: 'max(0.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem))',
+                    }}
+                  >
                     {/* Carrossel horizontal com fotos capturadas na sessão */}
                     {batchItems.length > 0 && (
-                      <div className="flex items-center gap-2 max-w-md w-full overflow-x-auto scrollbar-none py-1 px-1">
-                        <div className="flex items-center gap-1.5 shrink-0 bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10">
-                          <span className="text-[10px] text-white/70 font-mono font-bold uppercase">Capturadas:</span>
-                          <span className="text-xs font-mono font-black text-white">{batchItems.length}</span>
+                      <div className="flex items-center gap-1.5 sm:gap-2 max-w-md w-full overflow-x-auto scrollbar-none py-0.5 px-1">
+                        <div className="flex items-center gap-1 shrink-0 bg-white/10 backdrop-blur-md px-2 py-0.5 sm:py-1 rounded-lg sm:rounded-xl border border-white/10">
+                          <span className="text-[9px] sm:text-[10px] text-white/70 font-mono font-bold uppercase">Fotos:</span>
+                          <span className="text-[11px] sm:text-xs font-mono font-black text-white">{batchItems.length}</span>
                         </div>
-                        <div className="h-6 w-px bg-white/20 shrink-0" />
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="h-5 sm:h-6 w-px bg-white/20 shrink-0" />
+                        <div className="flex items-center gap-1.5 min-w-0">
                           {batchItems.map((item, idx) => (
                             <div
                               key={item.id}
-                              className={`relative w-10 h-10 rounded-xl border-2 ${
+                              className={`relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg sm:rounded-xl border-2 ${
                                 item.isKeptPrice ? 'border-emerald-400 ring-1 ring-emerald-500/50' : 'border-white/30'
                               } overflow-hidden shrink-0 bg-black/60 shadow-sm`}
                             >
@@ -2780,7 +2828,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 referrerPolicy="no-referrer"
                               />
                               {item.isKeptPrice && (
-                                <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-white text-[7px] font-black text-center py-0.5 leading-none uppercase tracking-tight">
+                                <div className="absolute bottom-0 inset-x-0 bg-emerald-600 text-white text-[6px] sm:text-[7px] font-black text-center py-0.5 leading-none uppercase tracking-tight">
                                   Mantido
                                 </div>
                               )}
@@ -2790,7 +2838,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 className="absolute top-0 right-0 p-0.5 bg-black/80 hover:bg-rose-600 text-white rounded-bl-md transition cursor-pointer"
                                 title="Remover foto"
                               >
-                                <X className="w-3 h-3" />
+                                <X className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
                               </button>
                             </div>
                           ))}
@@ -2799,17 +2847,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                     )}
 
                     {/* Linha de Controles: [Pular item] [Categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
-                    <div className="flex items-center justify-between w-full max-w-md gap-2 sm:gap-3 px-1">
+                    <div className="flex items-center justify-between w-full max-w-md gap-1.5 sm:gap-3 px-1">
                       {/* Left 1: Pular item */}
                       <button
                         type="button"
                         onClick={handleSkipGuidedProduct}
                         disabled={!currentGuidedProduct}
-                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md border border-white/20 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md border border-white/20 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Pular este item individual e tirar foto depois"
                       >
-                        <FastForward className="w-5 h-5 text-amber-400 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[9px] sm:text-[10px] font-black text-white/90 mt-1 leading-none tracking-tight">
+                        <FastForward className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-white/90 mt-0.5 sm:mt-1 leading-none tracking-tight">
                           Pular item
                         </span>
                       </button>
@@ -2819,34 +2867,34 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         type="button"
                         onClick={handleSkipSubcategory}
                         disabled={!currentGuidedProduct}
-                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-indigo-500/25 hover:bg-indigo-500/35 active:scale-95 text-indigo-200 backdrop-blur-md border border-indigo-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-indigo-500/25 hover:bg-indigo-500/35 active:scale-95 text-indigo-200 backdrop-blur-md border border-indigo-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Pular todos os itens desta categoria/subcategoria"
                       >
-                        <ChevronsRight className="w-5 h-5 text-indigo-300 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[9px] sm:text-[10px] font-black text-indigo-100 mt-1 leading-none tracking-tight">
+                        <ChevronsRight className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-300 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-indigo-100 mt-0.5 sm:mt-1 leading-none tracking-tight">
                           Categoria
                         </span>
                       </button>
 
                       {/* Center: Botão Vermelho Redondo de Tirar a Foto */}
-                      <div className="relative flex items-center justify-center shrink-0 mx-1">
+                      <div className="relative flex items-center justify-center shrink-0 mx-0.5 sm:mx-1">
                         <button
                           type="button"
                           id="btn-capture-batch-frame"
                           onClick={handleCaptureGuidedProduct}
-                          className={`w-18 h-18 sm:w-20 sm:h-20 rounded-full border-4 border-white/90 active:scale-90 shadow-2xl flex items-center justify-center transition-all duration-150 cursor-pointer ring-4 ring-black/40 ${
+                          className={`w-15 h-15 xs:w-16 xs:h-16 sm:w-20 sm:h-20 rounded-full border-3 sm:border-4 border-white/90 active:scale-90 shadow-2xl flex items-center justify-center transition-all duration-150 cursor-pointer ring-3 sm:ring-4 ring-black/40 ${
                             keepCurrentPrice
                               ? 'bg-emerald-600 hover:bg-emerald-700 ring-emerald-400/40'
                               : 'bg-[#D40511] hover:bg-[#b0040e]'
                           }`}
                           title={keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
                         >
-                          <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-full border-2 border-white/40 flex items-center justify-center">
-                            <Camera className="w-6 h-6 sm:w-7 sm:h-7 text-white drop-shadow" />
+                          <div className="w-11 h-11 xs:w-12 xs:h-12 sm:w-15 sm:h-15 rounded-full border border-white/40 sm:border-2 flex items-center justify-center">
+                            <Camera className="w-5 h-5 xs:w-6 xs:h-6 sm:w-7 sm:h-7 text-white drop-shadow" />
                           </div>
                         </button>
                         {keepCurrentPrice && (
-                          <span className="absolute -bottom-2 bg-emerald-500 text-white font-black text-[9px] font-mono px-2 py-0.5 rounded-full border border-emerald-300 shadow uppercase tracking-wider">
+                          <span className="absolute -bottom-1.5 sm:-bottom-2 bg-emerald-500 text-white font-black text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full border border-emerald-300 shadow uppercase tracking-wider">
                             Manter
                           </span>
                         )}
@@ -2857,11 +2905,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         type="button"
                         onClick={handleMarkOutOfStock}
                         disabled={!currentGuidedProduct}
-                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 active:scale-95 text-rose-200 backdrop-blur-md border border-rose-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 active:scale-95 text-rose-200 backdrop-blur-md border border-rose-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Marca que o produto não está disponível nesta loja"
                       >
-                        <PackageX className="w-5 h-5 text-rose-300 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[9px] sm:text-[10px] font-black text-rose-100 mt-1 leading-none tracking-tight">
+                        <PackageX className="w-4 h-4 sm:w-5 sm:h-5 text-rose-300 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-rose-100 mt-0.5 sm:mt-1 leading-none tracking-tight">
                           Não tem
                         </span>
                       </button>
@@ -2871,16 +2919,16 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         type="button"
                         id="btn-stop-camera"
                         onClick={stopCamera}
-                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-500/25 hover:bg-emerald-500/35 active:scale-95 text-emerald-200 backdrop-blur-md border border-emerald-400/30 transition cursor-pointer shadow-lg relative group"
+                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-emerald-500/25 hover:bg-emerald-500/35 active:scale-95 text-emerald-200 backdrop-blur-md border border-emerald-400/30 transition cursor-pointer shadow-lg relative group"
                         title="Concluir sessão de fotos e revisar lote"
                       >
                         {batchItems.length > 0 && (
-                          <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white font-mono text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-black shadow">
+                          <span className="absolute -top-1 -right-1 sm:-top-1.5 sm:-right-1.5 bg-emerald-500 text-white font-mono text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center border-2 border-black shadow">
                             {batchItems.length}
                           </span>
                         )}
-                        <CheckCircle2 className="w-5 h-5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[9px] sm:text-[10px] font-black text-emerald-100 mt-1 leading-none tracking-tight">
+                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-emerald-100 mt-0.5 sm:mt-1 leading-none tracking-tight">
                           Concluir
                         </span>
                       </button>
