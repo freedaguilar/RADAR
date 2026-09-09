@@ -203,8 +203,12 @@ export default function App() {
     }
   }, []);
 
-  // Session logout
-  const handleLogout = useCallback(() => {
+  // Logout confirmation modal state
+  const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
+
+  // Session logout execution
+  const executeLogout = useCallback(() => {
+    setShowLogoutConfirmModal(false);
     // 1. Immediately reset active user in state and localStorage synchronously
     setState((prev) => {
       const updated: AppState = {
@@ -246,6 +250,11 @@ export default function App() {
       }
     }
   }, [isConfigured]);
+
+  // Trigger confirmation modal
+  const handleRequestLogout = useCallback(() => {
+    setShowLogoutConfirmModal(true);
+  }, []);
 
   // State modification callbacks
   const handleAddProduct = useCallback(
@@ -726,6 +735,97 @@ export default function App() {
         return true;
       });
 
+  // Modal de Confirmação de Logout
+  const renderLogoutConfirmModal = () => (
+    <AnimatePresence>
+      {showLogoutConfirmModal && (
+        <div
+          id="logout-confirm-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-xs animate-fade-in"
+          onClick={() => setShowLogoutConfirmModal(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 12 }}
+            transition={{ duration: 0.16 }}
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col border border-slate-200 p-6 text-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mx-auto w-14 h-14 rounded-2xl bg-red-50 text-[#D40511] flex items-center justify-center border border-red-100 shadow-2xs mb-4">
+              <LogOut className="w-7 h-7 shrink-0 -translate-x-0.5" />
+            </div>
+
+            <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+              Deseja sair da conta?
+            </h3>
+
+            <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed mt-2 mb-4">
+              {state.currentUser?.isGuest
+                ? "Você sairá do modo convidado e precisará entrar novamente para registrar preços."
+                : "Sua sessão atual será encerrada. Você precisará fazer login novamente para acessar o sistema."}
+            </p>
+
+            {state.currentUser && (
+              <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200/80 rounded-2xl mb-5 text-left">
+                <span className="w-9 h-9 rounded-full bg-red-100 text-[#D40511] flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
+                  {state.currentUser.avatarUrl &&
+                  (state.currentUser.avatarUrl.startsWith("http") ||
+                    state.currentUser.avatarUrl.startsWith("data:")) ? (
+                    <img
+                      src={state.currentUser.avatarUrl}
+                      alt={state.currentUser.name}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    state.currentUser.avatarUrl ||
+                    state.currentUser.name.substring(0, 2).toUpperCase()
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-slate-900 truncate">
+                    {state.currentUser.name}
+                  </p>
+                  <p className="text-[10px] text-slate-500 font-medium capitalize truncate">
+                    {state.currentUser.isGuest
+                      ? "Acesso Convidado"
+                      : state.currentUser.role === "gestor"
+                      ? "Gestor / Administrador"
+                      : state.currentUser.role === "promotor"
+                      ? "Promotor"
+                      : "Vendedor / Campo"}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2.5">
+              <button
+                type="button"
+                id="btn-confirm-logout"
+                onClick={executeLogout}
+                className="w-full py-3 px-4 bg-[#D40511] hover:bg-[#b0040e] active:scale-98 text-white rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Sim, Sair da Conta</span>
+              </button>
+
+              <button
+                type="button"
+                id="btn-cancel-logout"
+                onClick={() => setShowLogoutConfirmModal(false)}
+                className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-xs sm:text-sm font-bold transition flex items-center justify-center cursor-pointer border border-slate-250"
+              >
+                Permanecer Conectado
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+
   // =========================================================================
   // GUEST USER LAYOUT (Dedicated, focused view without navigation menus)
   // =========================================================================
@@ -774,7 +874,7 @@ export default function App() {
 
               <button
                 id="guest-logout-btn"
-                onClick={handleLogout}
+                onClick={handleRequestLogout}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-2xs group"
                 title="Sair do modo convidado"
               >
@@ -833,9 +933,11 @@ export default function App() {
             currentUser={state.currentUser}
             onNavigate={handleNavigate}
             pageParams={registerPageParams}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
           />
         </main>
+
+        {renderLogoutConfirmModal()}
       </div>
     );
   }
@@ -962,7 +1064,7 @@ export default function App() {
 
             <button
               id="sidebar-logout-btn"
-              onClick={handleLogout}
+              onClick={handleRequestLogout}
               className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-2xs group"
             >
               <LogOut className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
@@ -1012,7 +1114,7 @@ export default function App() {
           </span>
           <button
             id="mobile-quick-logout-btn"
-            onClick={handleLogout}
+            onClick={handleRequestLogout}
             className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 rounded-lg text-xs font-bold cursor-pointer transition-colors shadow-2xs"
             title="Sair da Conta"
           >
@@ -1094,7 +1196,7 @@ export default function App() {
             currentUser={state.currentUser}
             onNavigate={handleNavigate}
             pageParams={registerPageParams}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
           />
         )}
 
@@ -1126,7 +1228,7 @@ export default function App() {
             onDeleteUser={handleDeleteUser}
             onEditProduct={handleEditProduct}
             onNavigate={handleNavigate}
-            onLogout={handleLogout}
+            onLogout={handleRequestLogout}
           />
         )}
       </main>
@@ -1173,6 +1275,8 @@ export default function App() {
           );
         })}
       </nav>
+
+      {renderLogoutConfirmModal()}
     </div>
   );
 }
