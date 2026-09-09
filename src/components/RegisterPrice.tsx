@@ -2525,294 +2525,257 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   ) : null}
                 </div>
               ) : useCamera ? (
-                /* Sequential camera views for bulk registering */
-                <div className="space-y-4" id="batch-camera-feed">
+                /* Fullscreen camera experience for price registration & shelf auditing */
+                <div className="fixed inset-0 z-50 bg-black overflow-hidden flex flex-col justify-between select-none" id="batch-camera-feed">
+                  {/* Real-time Video Stream (covers full screen) */}
+                  <video
+                    ref={videoRef}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    playsInline
+                    autoPlay
+                    muted
+                  />
+                  <canvas ref={canvasRef} className="hidden" />
 
-                  {/* GUIDED PRODUCT AUDIT PROMPT BANNER */}
-                  {currentGuidedProduct ? (
-                    <motion.div
-                      key={currentGuidedProduct.id}
-                      initial={{ opacity: 0, y: -8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 8 }}
-                      className="bg-slate-900 border-2 border-[#D40511]/40 rounded-2xl p-4 shadow-xl text-white relative overflow-hidden"
-                    >
-                      {/* Top Header */}
-                      <div className="flex items-center justify-between pb-2.5 border-b border-slate-800">
-                        <div className="flex items-center gap-2">
-                          <span className="flex h-2.5 w-2.5 relative">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
-                          </span>
-                          <span className="text-xs font-black uppercase tracking-wider text-red-400 font-mono">
-                            PRODUTO A AUDITAR ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
-                          </span>
-                        </div>
+                  {/* Visual Shutter Flash Effect */}
+                  {shutterEffect && (
+                    <div className="absolute inset-0 bg-white z-40 pointer-events-none transition-opacity duration-150" />
+                  )}
 
-                        <div className="flex items-center gap-2">
-                          {outOfStockProductIds.length > 0 && (
-                            <button
-                              type="button"
-                              onClick={() => setShowOutOfStockModal(true)}
-                              className="text-[11px] text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 px-2 py-0.5 rounded-lg font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
-                              title="Ver produtos marcados como 'Não tem na loja'"
-                            >
-                              <PackageX className="w-3 h-3 text-rose-400" />
-                              <span>Sem estoque ({outOfStockProductIds.length})</span>
-                            </button>
-                          )}
+                  {/* TOP OVERLAY: Navigation Header + Product Information (sobre a câmera, visual limpo) */}
+                  <div className="relative z-30 w-full px-3 sm:px-6 pt-3 sm:pt-4 pb-2 bg-gradient-to-b from-black/85 via-black/60 to-transparent space-y-2">
+                    {/* Top Navigation Row */}
+                    <div className="flex items-center justify-between gap-2 max-w-2xl mx-auto">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <button
+                          type="button"
+                          onClick={stopCamera}
+                          className="p-2 rounded-full bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md transition cursor-pointer shrink-0"
+                          title="Fechar Câmera"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                        {selectedChainId && (
+                          <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md border border-white/15 px-2.5 py-1 rounded-full text-xs font-bold text-white min-w-0 truncate">
+                            <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                            <span className="truncate max-w-[110px] sm:max-w-[170px]">
+                              {chains.find(c => c.id === selectedChainId)?.name}
+                            </span>
+                            <span className="text-[10px] text-white/70 font-mono">
+                              ({RESEARCH_STATES.find(s => s.name === selectedState)?.uf || selectedState})
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {outOfStockProductIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setShowOutOfStockModal(true)}
+                            className="text-[11px] text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 px-2.5 py-1 rounded-full font-bold transition cursor-pointer flex items-center gap-1 backdrop-blur-sm shadow-xs"
+                            title="Ver produtos marcados como 'Não tem na loja'"
+                          >
+                            <PackageX className="w-3.5 h-3.5 text-rose-400" />
+                            <span className="hidden xs:inline">Sem estoque</span>
+                            <span>({outOfStockProductIds.length})</span>
+                          </button>
+                        )}
+
+                        {useGuidedMode ? (
                           <button
                             type="button"
                             onClick={() => setUseGuidedMode(false)}
-                            className="text-[11px] text-slate-400 hover:text-white font-bold transition cursor-pointer"
+                            className="text-[11px] text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/15 px-2.5 py-1 rounded-full font-bold transition cursor-pointer backdrop-blur-sm"
                           >
                             Modo Livre
                           </button>
-                        </div>
-                      </div>
-
-                      {/* Product Main Detail Row */}
-                      <div className="flex items-center gap-3.5 mt-3">
-                        {currentGuidedProduct.imageUrl ? (
+                        ) : (
                           <button
                             type="button"
-                            onClick={() => setFullscreenProductPhoto({
-                              url: currentGuidedProduct.imageUrl!,
-                              name: currentGuidedProduct.name
-                            })}
-                            className="relative group w-14 h-14 rounded-xl overflow-hidden border border-slate-700 hover:border-red-400 bg-white shrink-0 p-0.5 cursor-pointer transition shadow-xs focus:outline-none"
-                            title="Clique para ver a foto do produto ampliada"
+                            onClick={() => setUseGuidedMode(true)}
+                            className="text-[11px] text-white/95 hover:text-white bg-red-600/80 hover:bg-red-600 border border-red-400/50 px-2.5 py-1 rounded-full font-bold transition cursor-pointer backdrop-blur-sm shadow-xs"
                           >
-                            <img
-                              src={currentGuidedProduct.imageUrl}
-                              alt={currentGuidedProduct.name}
-                              className="w-full h-full object-contain group-hover:scale-105 transition duration-200"
-                              referrerPolicy="no-referrer"
-                            />
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                              <Eye className="w-4 h-4 text-white drop-shadow" />
-                            </div>
+                            Modo Guiado
                           </button>
-                        ) : (
-                          <div className="w-14 h-14 rounded-xl border border-dashed border-slate-700 bg-slate-800/80 flex items-center justify-center shrink-0">
-                            <Package className="w-6 h-6 text-red-400" />
-                          </div>
                         )}
-
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-[10px] font-black text-red-400 uppercase tracking-widest block font-mono">
-                              {currentGuidedProduct.brand || 'Marca'}
-                            </span>
-                            {currentGuidedProduct.category && (
-                              <span className="text-[10px] font-bold text-slate-300 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700 font-mono">
-                                {currentGuidedProduct.category}
-                              </span>
-                            )}
-                          </div>
-                          <h3
-                            className="text-sm sm:text-base font-extrabold text-white truncate leading-snug mt-0.5"
-                            title={currentGuidedProduct.name}
-                          >
-                            {currentGuidedProduct.name}
-                          </h3>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-xs text-slate-300 font-medium">
-                              {currentGuidedProduct.weight || 'Sem peso'}
-                            </span>
-                            {currentGuidedProduct.basePrice > 0 && (
-                              <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-800/80 px-2 py-0.5 rounded-md">
-                                Ref: R$ {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
                       </div>
-                    </motion.div>
-                  ) : null}
-
-                  <div className="relative rounded-2xl overflow-hidden bg-black aspect-4/3 max-h-[380px] shadow-lg border border-slate-800 flex items-center justify-center">
-                    <video ref={videoRef} className="w-full h-full object-cover" playsInline autoPlay muted></video>
-                    <canvas ref={canvasRef} className="hidden" />
-
-                    {/* Visual Shutter Flash Effect */}
-                    {shutterEffect && (
-                      <div className="absolute inset-0 bg-white z-20 pointer-events-none transition-opacity duration-150" />
-                    )}
-
-                    {/* Close button overlay */}
-                    <div className="absolute top-3 right-3 z-10">
-                      <button
-                        type="button"
-                        onClick={stopCamera}
-                        className="p-2 bg-black/60 hover:bg-black/80 text-white rounded-full backdrop-blur-sm transition cursor-pointer"
-                        title="Fechar Câmera"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
                     </div>
 
-                    {/* Scanner aesthetic target frame */}
-                    <div className="absolute inset-x-8 inset-y-8 border-2 border-dashed border-red-500/40 rounded-2xl pointer-events-none flex items-center justify-center">
-                      <div className="w-full h-0.5 bg-red-500/50 animate-pulse absolute"></div>
+                    {/* Informação do produto na parte superior sobre a câmera (sem poluir o visual) */}
+                    {currentGuidedProduct ? (
+                      <motion.div
+                        key={currentGuidedProduct.id}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 6 }}
+                        className="bg-black/65 backdrop-blur-md border border-white/20 rounded-2xl p-2.5 sm:p-3 text-white shadow-2xl max-w-2xl mx-auto"
+                      >
+                        {/* Subheader da auditoria */}
+                        <div className="flex items-center justify-between pb-1.5 border-b border-white/10 mb-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="flex h-2 w-2 relative">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                            </span>
+                            <span className="text-[10px] font-black uppercase tracking-wider text-red-400 font-mono">
+                              AUDITORIA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
+                            </span>
+                          </div>
+
+                          {currentGuidedProduct.category && (
+                            <span className="text-[10px] font-bold text-slate-200 bg-white/10 px-2 py-0.5 rounded-md border border-white/10 font-mono truncate max-w-[150px]">
+                              {currentGuidedProduct.category}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Linha com imagem e detalhes do produto */}
+                        <div className="flex items-center gap-3">
+                          {currentGuidedProduct.imageUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setFullscreenProductPhoto({
+                                url: currentGuidedProduct.imageUrl!,
+                                name: currentGuidedProduct.name
+                              })}
+                              className="relative group w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden border border-white/20 hover:border-red-400 bg-white shrink-0 p-0.5 cursor-pointer transition focus:outline-none"
+                              title="Clique para ver a foto do produto ampliada"
+                            >
+                              <img
+                                src={currentGuidedProduct.imageUrl}
+                                alt={currentGuidedProduct.name}
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <Eye className="w-4 h-4 text-white drop-shadow" />
+                              </div>
+                            </button>
+                          ) : (
+                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl border border-dashed border-white/20 bg-white/10 flex items-center justify-center shrink-0">
+                              <Package className="w-6 h-6 text-red-400" />
+                            </div>
+                          )}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-black text-red-400 uppercase tracking-widest font-mono">
+                                {currentGuidedProduct.brand || 'Marca'}
+                              </span>
+                              {currentGuidedProduct.weight && (
+                                <span className="text-[10px] text-white/70 font-medium">
+                                  • {currentGuidedProduct.weight}
+                                </span>
+                              )}
+                            </div>
+                            <h3
+                              className="text-xs sm:text-sm font-black text-white truncate leading-tight mt-0.5"
+                              title={currentGuidedProduct.name}
+                            >
+                              {currentGuidedProduct.name}
+                            </h3>
+
+                            {/* Preço de Referência, Último Preço na Rede e Manter Preço */}
+                            {(() => {
+                              const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId, selectedState);
+                              const hasLastPrice = !!lastRec && lastRec.price > 0;
+                              const stateUf = RESEARCH_STATES.find(s => s.name === selectedState)?.uf || selectedState;
+
+                              return (
+                                <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
+                                  <div className="flex items-center gap-1.5">
+                                    {hasLastPrice ? (
+                                      <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-950/75 border border-amber-500/40 px-2 py-0.5 rounded-md">
+                                        Último ({stateUf}): R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                                      </span>
+                                    ) : currentGuidedProduct.basePrice > 0 ? (
+                                      <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/75 border border-emerald-500/40 px-2 py-0.5 rounded-md">
+                                        Ref: R$ {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
+                                      </span>
+                                    ) : null}
+                                  </div>
+
+                                  {hasLastPrice && (
+                                    <label
+                                      htmlFor="camera-keep-price-toggle"
+                                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all cursor-pointer select-none shrink-0 ${
+                                        keepCurrentPrice
+                                          ? 'bg-emerald-500/35 border-emerald-400 text-emerald-300 ring-1 ring-emerald-400/60 shadow-xs'
+                                          : 'bg-white/10 hover:bg-white/15 border-white/20 text-white/90'
+                                      }`}
+                                    >
+                                      <input
+                                        id="camera-keep-price-toggle"
+                                        type="checkbox"
+                                        checked={keepCurrentPrice}
+                                        onChange={(e) => setKeepCurrentPrice(e.target.checked)}
+                                        className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-0 border-white/30 bg-black/40 cursor-pointer accent-emerald-500"
+                                      />
+                                      <span className="font-extrabold whitespace-nowrap">
+                                        Manter preço
+                                      </span>
+                                    </label>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      </motion.div>
+                    ) : (
+                      /* Modo Livre Banner */
+                      <div className="bg-black/65 backdrop-blur-md border border-white/20 rounded-2xl p-3 text-white shadow-2xl max-w-2xl mx-auto flex items-center justify-between">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-9 h-9 rounded-xl bg-red-600/30 border border-red-500/50 flex items-center justify-center text-red-400">
+                            <Camera className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-black text-white block">Modo Livre</span>
+                            <span className="text-[11px] text-white/70 block">Aponte para o produto e etiqueta de preço</span>
+                          </div>
+                        </div>
+                        {batchItems.length > 0 && (
+                          <span className="text-xs font-mono font-bold text-white bg-white/15 px-2.5 py-1 rounded-lg border border-white/20">
+                            {batchItems.length} {batchItems.length === 1 ? 'foto' : 'fotos'}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* CENTER RETICLE / SCANNER VIEWPORT */}
+                  <div className="relative flex-1 pointer-events-none flex items-center justify-center p-4">
+                    <div className="w-full max-w-xs sm:max-w-sm aspect-4/3 rounded-3xl border-2 border-dashed border-white/25 relative flex items-center justify-center">
+                      <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-red-500 rounded-tl-2xl"></div>
+                      <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-red-500 rounded-tr-2xl"></div>
+                      <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-red-500 rounded-bl-2xl"></div>
+                      <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-red-500 rounded-br-2xl"></div>
+                      <div className="w-full h-0.5 bg-red-500/35 animate-pulse absolute"></div>
                     </div>
                   </div>
 
-                  {/* Badge de Último Preço na Rede & Opção de Manter Preço (abaixo da câmera, acima do botão de tirar foto) */}
-                  {currentGuidedProduct && (() => {
-                    const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId, selectedState);
-                    const hasLastPrice = !!lastRec && lastRec.price > 0;
-                    const recState = lastRec ? (lastRec.state || 'Minas Gerais') : null;
-                    const isExactState = recState === selectedState;
-                    const stateUf = RESEARCH_STATES.find(s => s.name === selectedState)?.uf || selectedState;
-                    const recUf = recState ? (RESEARCH_STATES.find(s => s.name === recState)?.uf || recState) : '';
-
-                    return (
-                      <div className="bg-slate-900 border border-slate-800 rounded-2xl px-4 py-3 flex items-center justify-between gap-3 shadow-md">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400 shrink-0 border border-amber-500/30">
-                            <Tag className="w-4 h-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <span className="text-[10px] font-extrabold text-slate-400 block uppercase tracking-wider leading-none font-mono">
-                              Último preço na rede ({stateUf})
-                            </span>
-                            {hasLastPrice ? (
-                              <div className="flex items-baseline gap-1.5 flex-wrap">
-                                <span className="text-sm sm:text-base font-black font-mono text-amber-300 leading-tight">
-                                  R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                                </span>
-                                {!isExactState && (
-                                  <span className="text-[10px] text-amber-400/80 font-medium">
-                                    (ref. {recUf})
-                                  </span>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-xs font-medium text-slate-400 leading-tight">
-                                Sem preço anterior em {stateUf}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {hasLastPrice && (
-                          <label
-                            htmlFor="camera-keep-price-toggle"
-                            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
-                              keepCurrentPrice
-                                ? 'bg-emerald-500/25 border-emerald-500 text-emerald-300 shadow-xs ring-1 ring-emerald-500/50'
-                                : 'bg-slate-800 hover:bg-slate-750 border-slate-700 text-slate-300'
-                            }`}
-                          >
-                            <input
-                              id="camera-keep-price-toggle"
-                              type="checkbox"
-                              checked={keepCurrentPrice}
-                              onChange={(e) => setKeepCurrentPrice(e.target.checked)}
-                              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0 border-slate-600 bg-slate-900 cursor-pointer accent-emerald-500"
-                            />
-                            <span className="font-extrabold whitespace-nowrap">
-                              Manter preço
-                            </span>
-                          </label>
-                        )}
-                      </div>
-                    );
-                  })()}
-
-                  {/* Actions Bar */}
-                  <div className="space-y-3">
-                    {/* Botão Principal de Tirar Foto */}
-                    <div>
-                      <button
-                        type="button"
-                        id="btn-capture-batch-frame"
-                        onClick={handleCaptureGuidedProduct}
-                        className={`w-full py-4 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-black transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow-md uppercase tracking-wide h-13 ${
-                          keepCurrentPrice
-                            ? 'bg-emerald-600 hover:bg-emerald-700'
-                            : 'bg-[#D40511] hover:bg-[#b0040e]'
-                        }`}
-                      >
-                        <Camera className="w-5 h-5 shrink-0" />
-                        <span>
-                          {keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
-                        </span>
-                      </button>
-                    </div>
-
-                    {/* Secondary Guided Buttons: Pular item, Pular categoria, Não tem na loja (um abaixo do outro no mobile, 3 colunas no desktop) */}
-                    {currentGuidedProduct && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <button
-                          type="button"
-                          onClick={handleSkipGuidedProduct}
-                          className="w-full py-3 px-3 bg-slate-100 hover:bg-slate-200 active:scale-98 text-slate-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-slate-250 shadow-2xs text-center"
-                          title="Pular este item individual e tirar foto depois"
-                        >
-                          <FastForward className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                          <span>Pular item</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleSkipSubcategory}
-                          className="w-full py-3 px-3 bg-indigo-50/80 hover:bg-indigo-100/80 active:scale-98 text-indigo-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-indigo-200/80 shadow-2xs text-center"
-                          title="Pular todos os itens desta categoria/subcategoria"
-                        >
-                          <ChevronsRight className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                          <span>Pular categoria</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleMarkOutOfStock}
-                          className="w-full py-3 px-3 bg-rose-50/80 hover:bg-rose-100/80 active:scale-98 text-rose-700 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-1.5 cursor-pointer border border-rose-200/80 shadow-2xs text-center"
-                          title="Marca que o produto não está disponível nesta loja"
-                        >
-                          <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                          <span>Não tem na loja</span>
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Botão de recuperar itens marcados como 'Não tem na loja' */}
-                    {outOfStockProductIds.length > 0 && (
-                      <button
-                        type="button"
-                        id="btn-open-out-of-stock-list"
-                        onClick={() => setShowOutOfStockModal(true)}
-                        className="w-full py-2.5 px-3 bg-rose-950/40 hover:bg-rose-900/50 active:scale-98 text-rose-200 border border-rose-800/60 rounded-xl text-xs font-bold transition-all duration-150 flex items-center justify-center gap-2 cursor-pointer shadow-2xs text-center"
-                      >
-                        <PackageX className="w-4 h-4 text-rose-400 shrink-0" />
-                        <span>Ver itens marcados como "Não tem na loja" ({outOfStockProductIds.length})</span>
-                      </button>
-                    )}
-
-                    {/* Horizontal carousel of photos taken in this camera session (Badge de Fotos Capturadas) */}
+                  {/* BOTTOM OVERLAY: Controls Bar */}
+                  <div className="relative z-30 w-full px-3 sm:px-6 pt-3 pb-5 sm:pb-8 bg-gradient-to-t from-black/95 via-black/75 to-transparent flex flex-col items-center gap-3">
+                    {/* Carrossel horizontal com fotos capturadas na sessão */}
                     {batchItems.length > 0 && (
-                      <div className="bg-slate-900 rounded-2xl p-2.5 sm:p-3 flex items-center gap-3 overflow-x-auto scrollbar-none border border-slate-800 shadow-sm">
-                        <div className="flex flex-col shrink-0 pl-1 pr-2">
-                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider font-mono">
-                            Capturadas:
-                          </span>
-                          <span className="text-xs sm:text-sm text-white font-black font-mono">
-                            {batchItems.length} {batchItems.length === 1 ? 'foto' : 'fotos'}
-                          </span>
+                      <div className="flex items-center gap-2 max-w-md w-full overflow-x-auto scrollbar-none py-1 px-1">
+                        <div className="flex items-center gap-1.5 shrink-0 bg-white/10 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10">
+                          <span className="text-[10px] text-white/70 font-mono font-bold uppercase">Capturadas:</span>
+                          <span className="text-xs font-mono font-black text-white">{batchItems.length}</span>
                         </div>
-                        <div className="h-9 w-px bg-slate-800 shrink-0" />
+                        <div className="h-6 w-px bg-white/20 shrink-0" />
                         <div className="flex items-center gap-2 min-w-0">
                           {batchItems.map((item, idx) => (
                             <div
                               key={item.id}
-                              className={`relative w-12 h-12 rounded-xl border-2 ${
-                                item.isKeptPrice ? 'border-emerald-400 ring-1 ring-emerald-500/50' : 'border-slate-700'
-                              } overflow-hidden shrink-0 bg-slate-950 group shadow-sm`}
+                              className={`relative w-10 h-10 rounded-xl border-2 ${
+                                item.isKeptPrice ? 'border-emerald-400 ring-1 ring-emerald-500/50' : 'border-white/30'
+                              } overflow-hidden shrink-0 bg-black/60 shadow-sm`}
                             >
                               <img
                                 src={item.imagePreview}
-                                alt={`Captura ${idx + 1}`}
+                                alt={`Foto ${idx + 1}`}
                                 className="w-full h-full object-cover"
                                 referrerPolicy="no-referrer"
                               />
@@ -2824,10 +2787,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                               <button
                                 type="button"
                                 onClick={() => removeBatchItem(item)}
-                                className="absolute top-0 right-0 p-1 bg-black/85 text-white rounded-bl-lg hover:bg-rose-600 transition cursor-pointer"
+                                className="absolute top-0 right-0 p-0.5 bg-black/80 hover:bg-rose-600 text-white rounded-bl-md transition cursor-pointer"
                                 title="Remover foto"
                               >
-                                <XCircle className="w-3.5 h-3.5" />
+                                <X className="w-3 h-3" />
                               </button>
                             </div>
                           ))}
@@ -2835,16 +2798,93 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
                     )}
 
-                    {/* Botão de Concluir posicionado abaixo do badge de capturadas */}
-                    <button
-                      type="button"
-                      id="btn-stop-camera"
-                      onClick={stopCamera}
-                      className="w-full py-4 px-6 bg-slate-800 hover:bg-slate-900 active:scale-98 text-white rounded-2xl text-xs sm:text-sm font-bold transition-all duration-150 inline-flex items-center justify-center gap-2 cursor-pointer shadow h-13"
-                    >
-                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <span>Concluir ({batchItems.length})</span>
-                    </button>
+                    {/* Linha de Controles: [Pular item] [Categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
+                    <div className="flex items-center justify-between w-full max-w-md gap-2 sm:gap-3 px-1">
+                      {/* Left 1: Pular item */}
+                      <button
+                        type="button"
+                        onClick={handleSkipGuidedProduct}
+                        disabled={!currentGuidedProduct}
+                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md border border-white/20 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        title="Pular este item individual e tirar foto depois"
+                      >
+                        <FastForward className="w-5 h-5 text-amber-400 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[9px] sm:text-[10px] font-black text-white/90 mt-1 leading-none tracking-tight">
+                          Pular item
+                        </span>
+                      </button>
+
+                      {/* Left 2: Categoria (Pular categoria) */}
+                      <button
+                        type="button"
+                        onClick={handleSkipSubcategory}
+                        disabled={!currentGuidedProduct}
+                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-indigo-500/25 hover:bg-indigo-500/35 active:scale-95 text-indigo-200 backdrop-blur-md border border-indigo-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        title="Pular todos os itens desta categoria/subcategoria"
+                      >
+                        <ChevronsRight className="w-5 h-5 text-indigo-300 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[9px] sm:text-[10px] font-black text-indigo-100 mt-1 leading-none tracking-tight">
+                          Categoria
+                        </span>
+                      </button>
+
+                      {/* Center: Botão Vermelho Redondo de Tirar a Foto */}
+                      <div className="relative flex items-center justify-center shrink-0 mx-1">
+                        <button
+                          type="button"
+                          id="btn-capture-batch-frame"
+                          onClick={handleCaptureGuidedProduct}
+                          className={`w-18 h-18 sm:w-20 sm:h-20 rounded-full border-4 border-white/90 active:scale-90 shadow-2xl flex items-center justify-center transition-all duration-150 cursor-pointer ring-4 ring-black/40 ${
+                            keepCurrentPrice
+                              ? 'bg-emerald-600 hover:bg-emerald-700 ring-emerald-400/40'
+                              : 'bg-[#D40511] hover:bg-[#b0040e]'
+                          }`}
+                          title={keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
+                        >
+                          <div className="w-13 h-13 sm:w-15 sm:h-15 rounded-full border-2 border-white/40 flex items-center justify-center">
+                            <Camera className="w-6 h-6 sm:w-7 sm:h-7 text-white drop-shadow" />
+                          </div>
+                        </button>
+                        {keepCurrentPrice && (
+                          <span className="absolute -bottom-2 bg-emerald-500 text-white font-black text-[9px] font-mono px-2 py-0.5 rounded-full border border-emerald-300 shadow uppercase tracking-wider">
+                            Manter
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Right 1: Não tem na loja */}
+                      <button
+                        type="button"
+                        onClick={handleMarkOutOfStock}
+                        disabled={!currentGuidedProduct}
+                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 active:scale-95 text-rose-200 backdrop-blur-md border border-rose-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        title="Marca que o produto não está disponível nesta loja"
+                      >
+                        <PackageX className="w-5 h-5 text-rose-300 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[9px] sm:text-[10px] font-black text-rose-100 mt-1 leading-none tracking-tight">
+                          Não tem
+                        </span>
+                      </button>
+
+                      {/* Right 2: Concluir */}
+                      <button
+                        type="button"
+                        id="btn-stop-camera"
+                        onClick={stopCamera}
+                        className="flex flex-col items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-emerald-500/25 hover:bg-emerald-500/35 active:scale-95 text-emerald-200 backdrop-blur-md border border-emerald-400/30 transition cursor-pointer shadow-lg relative group"
+                        title="Concluir sessão de fotos e revisar lote"
+                      >
+                        {batchItems.length > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white font-mono text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border-2 border-black shadow">
+                            {batchItems.length}
+                          </span>
+                        )}
+                        <CheckCircle2 className="w-5 h-5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
+                        <span className="text-[9px] sm:text-[10px] font-black text-emerald-100 mt-1 leading-none tracking-tight">
+                          Concluir
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : isAnalyzingBatch ? (
