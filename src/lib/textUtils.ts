@@ -7,8 +7,9 @@ export const removeAccents = (str: string): string => {
   return str.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 };
 
-export const normalizeString = (str: string): string => {
-  return removeAccents(str.toLowerCase().trim());
+export const normalizeString = (str?: string | null): string => {
+  if (!str) return '';
+  return removeAccents(String(str).toLowerCase().trim());
 };
 
 export const matchText = (text: string, search: string): boolean => {

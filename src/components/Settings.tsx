@@ -250,9 +250,9 @@ export function Settings({
     allBrands.sort((a, b) => b.length - a.length);
 
     let foundBrand = "";
-    const nameLower = newProdName.toLowerCase();
+    const nameLower = (newProdName || "").toLowerCase();
     for (const b of allBrands) {
-      if (nameLower.includes(b.toLowerCase())) {
+      if (b && nameLower.includes(b.toLowerCase())) {
         foundBrand = b;
         break;
       }
@@ -269,7 +269,7 @@ export function Settings({
       // Direct substring match
       const sortedItems = [...items].sort((a, b) => b.length - a.length);
       for (const item of sortedItems) {
-        if (typedLower.includes(item.toLowerCase())) {
+        if (item && typedLower.includes(item.toLowerCase())) {
           return item;
         }
       }
@@ -280,7 +280,7 @@ export function Settings({
       let maxScore = 0;
       
       for (const item of items) {
-        const itemWords = item.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        const itemWords = (item || "").toLowerCase().split(/\s+/).filter(w => w.length > 2);
         let score = 0;
         for (const w of itemWords) {
           if (typedWords.includes(w)) {
@@ -562,7 +562,7 @@ export function Settings({
     }
 
     const nameExists = chains.some(
-      (c) => c.id !== editingChainId && c.name.toLowerCase() === newChainName.trim().toLowerCase()
+      (c) => c.id !== editingChainId && (c.name || "").toLowerCase() === (newChainName || "").trim().toLowerCase()
     );
     if (nameExists) {
       setChainFormError("Esta rede já está cadastrada no sistema.");
@@ -624,7 +624,7 @@ export function Settings({
 
     if (
       users.some(
-        (u) => u.email.toLowerCase() === newUserEmail.trim().toLowerCase(),
+        (u) => Boolean(u.email) && u.email.toLowerCase() === (newUserEmail || "").trim().toLowerCase(),
       )
     ) {
       setUserFormError("O e-mail informado já está cadastrado.");
@@ -1365,7 +1365,7 @@ export function Settings({
                             <button
                               key={st.uf}
                               type="button"
-                              id={`chain-state-btn-${st.uf.toLowerCase()}`}
+                              id={`chain-state-btn-${(st.uf || "").toLowerCase()}`}
                               onClick={() => {
                                 setNewChainStates((prev) =>
                                   prev.includes(st.name)

@@ -331,6 +331,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     return counts;
   }, [records, selectedChainId, selectedState]);
 
+  // Count occurrences per product for the currently selected chain in Minas Gerais
+  const mgChainRecordCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (records && records.length > 0) {
+      records.forEach(r => {
+        const rState = r.state || 'Minas Gerais';
+        if (r.productId && (!selectedChainId || r.chainId === selectedChainId) && rState === 'Minas Gerais') {
+          counts[r.productId] = (counts[r.productId] || 0) + 1;
+        }
+      });
+    }
+    return counts;
+  }, [records, selectedChainId]);
+
   // Category ordering priority rank
   const getCategoryRank = (categoryName?: string) => {
     if (!categoryName) return 50;
@@ -422,13 +436,52 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
     const activeProds = products.filter(p => p.active);
 
-    // 1. Filtrar produtos ativos que possuem pelo menos 1 registro de preço na rede selecionada
-    let eligibleProducts = activeProds.filter(p => (chainRecordCounts[p.id] || 0) > 0);
+    const isMG = !selectedState || selectedState === 'Minas Gerais';
+    const selectedChain = chains.find(c => c.id === selectedChainId);
+    const chainStates = selectedChain ? getChainStates(selectedChain) : [];
+    const chainHasMG = chainStates.includes('Minas Gerais') ||
+      (selectedChainId ? records.some(r => r.chainId === selectedChainId && (r.state || 'Minas Gerais') === 'Minas Gerais') : false);
 
-    // Fallback: se a rede ainda não possuir nenhum registro de preço (ex: rede nova), exibe os produtos ativos com registros gerais ou todo o catálogo ativo
-    if (eligibleProducts.length === 0) {
-      const prodsWithAnyRecord = activeProds.filter(p => (productRecordCounts[p.id] || 0) > 0);
-      eligibleProducts = prodsWithAnyRecord.length > 0 ? prodsWithAnyRecord : activeProds;
+    let eligibleProducts: Product[] = [];
+
+    if (isMG) {
+      // 1. Em Minas Gerais: produtos ativos que possuem pelo menos 1 registro nesta rede em MG
+      eligibleProducts = activeProds.filter(p => (mgChainRecordCounts[p.id] || 0) > 0);
+
+      // Fallback: se a rede ainda não possuir nenhum registro de preço (ex: rede nova), exibe os produtos ativos com registros gerais ou todo o catálogo ativo
+      if (eligibleProducts.length === 0) {
+        const prodsWithAnyRecord = activeProds.filter(p => (productRecordCounts[p.id] || 0) > 0);
+        eligibleProducts = prodsWithAnyRecord.length > 0 ? prodsWithAnyRecord : activeProds;
+      }
+    } else if (!chainHasMG) {
+      // 2. Redes que NÃO possuem em MG:
+      // Seguir a regra antiga: listar todos os produtos e após isso, seguir com a listagem de itens com registros.
+      eligibleProducts = activeProds.filter(p => (chainRecordCounts[p.id] || 0) > 0);
+
+      if (eligibleProducts.length === 0) {
+        const prodsWithAnyRecord = activeProds.filter(p => (productRecordCounts[p.id] || 0) > 0);
+        eligibleProducts = prodsWithAnyRecord.length > 0 ? prodsWithAnyRecord : activeProds;
+      }
+    } else {
+      // 3. Redes que possuem em MG, sendo auditadas em outros estados:
+      // Obrigatoriamente tem a mesma listagem de Minas Gerais + produtos registrados naquele estado
+      const mgProductIds = new Set(
+        activeProds.filter(p => (mgChainRecordCounts[p.id] || 0) > 0).map(p => p.id)
+      );
+
+      const stateProductIds = new Set(
+        activeProds.filter(p => (chainRecordCounts[p.id] || 0) > 0).map(p => p.id)
+      );
+
+      const combinedProductIds = new Set([...mgProductIds, ...stateProductIds]);
+
+      if (combinedProductIds.size > 0) {
+        eligibleProducts = activeProds.filter(p => combinedProductIds.has(p.id));
+      } else {
+        // Fallback: se a rede ainda não possuir nenhum registro nem em MG nem no estado atual
+        const prodsWithAnyRecord = activeProds.filter(p => (productRecordCounts[p.id] || 0) > 0);
+        eligibleProducts = prodsWithAnyRecord.length > 0 ? prodsWithAnyRecord : activeProds;
+      }
     }
 
     // 2. Ordenar por:
@@ -483,14 +536,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         if (brandCompare !== 0) return brandCompare;
       }
 
-      // Frequência de auditoria na rede
-      const countA = chainRecordCounts[a.id] || 0;
-      const countB = chainRecordCounts[b.id] || 0;
+      // Frequência de auditoria na rede (prioriza contagem no estado selecionado, e contagem em MG para desempate)
+      const countA = (chainRecordCounts[a.id] || 0) > 0 ? (chainRecordCounts[a.id] || 0) : (mgChainRecordCounts[a.id] || 0);
+      const countB = (chainRecordCounts[b.id] || 0) > 0 ? (chainRecordCounts[b.id] || 0) : (mgChainRecordCounts[b.id] || 0);
       if (countB !== countA) return countB - countA;
 
       return a.name.localeCompare(b.name);
     });
-  }, [products, chainRecordCounts, productRecordCounts]);
+  }, [products, chains, records, selectedChainId, selectedState, chainRecordCounts, mgChainRecordCounts, productRecordCounts]);
 
   const [guidedQueue, setGuidedQueue] = useState<Product[]>([]);
   const [outOfStockProductIds, setOutOfStockProductIds] = useState<string[]>([]);
@@ -502,7 +555,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [showFreeModeNoticeModal, setShowFreeModeNoticeModal] = useState<boolean>(false);
   const [hasShownFreeModeNotice, setHasShownFreeModeNotice] = useState<boolean>(false);
 
-  // Inicializa ou reinicia a fila guiada quando a rede muda
+  // Inicializa ou reinicia a fila guiada quando a rede ou estado muda
   useEffect(() => {
     setCapturedProductIds([]);
     setOutOfStockProductIds([]);
@@ -510,7 +563,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setKeepCurrentPrice(false);
     setHasShownFreeModeNotice(false);
     setShowFreeModeNoticeModal(false);
-  }, [selectedChainId]);
+  }, [selectedChainId, selectedState]);
 
   // Inicializa a fila na primeira carga se estiver vazia
   useEffect(() => {
@@ -951,7 +1004,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const restoreProductToGuidedQueue = (productId?: string, productNameFallback?: string) => {
     if (!productId && !productNameFallback) return;
     const prod = products.find(p => p.id === productId) ||
-      (productNameFallback ? products.find(p => p.name.toLowerCase().trim() === productNameFallback.toLowerCase().trim()) : null);
+      (productNameFallback ? products.find(p => p.name && p.name.toLowerCase().trim() === productNameFallback.toLowerCase().trim()) : null);
 
     if (!prod) return;
 
@@ -1578,6 +1631,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
   // Dynamic viewport height tracking for mobile browsers with bottom navigation bars (e.g. Safari, Chrome Mobile)
   const [cameraViewportHeight, setCameraViewportHeight] = useState<number | null>(null);
+  const [cameraViewportTop, setCameraViewportTop] = useState<number>(0);
 
   useEffect(() => {
     if (!useCamera) return;
@@ -1585,8 +1639,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     const updateCameraViewport = () => {
       if (typeof window !== 'undefined' && window.visualViewport) {
         setCameraViewportHeight(Math.round(window.visualViewport.height));
+        setCameraViewportTop(Math.round(window.visualViewport.offsetTop || 0));
       } else if (typeof window !== 'undefined') {
         setCameraViewportHeight(window.innerHeight);
+        setCameraViewportTop(0);
       }
     };
 
@@ -2149,7 +2205,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 <button
                   key={st.uf}
                   type="button"
-                  id={`select-state-${st.uf.toLowerCase()}`}
+                  id={`select-state-${(st.uf || '').toLowerCase()}`}
                   onClick={() => {
                     setSelectedState(st.name);
                     setSelectedChainId('');
@@ -2563,8 +2619,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
               ) : useCamera ? (
                 /* Fullscreen camera experience for price registration & shelf auditing */
                 <div
-                  className="fixed inset-x-0 top-0 z-50 bg-black overflow-hidden flex flex-col justify-between select-none touch-none overscroll-none"
+                  className="fixed inset-x-0 z-50 bg-black overflow-hidden flex flex-col justify-between select-none touch-none overscroll-none"
                   style={{
+                    top: `${cameraViewportTop}px`,
                     height: cameraViewportHeight ? `${cameraViewportHeight}px` : '100dvh',
                     maxHeight: cameraViewportHeight ? `${cameraViewportHeight}px` : '100dvh',
                   }}
@@ -2723,14 +2780,15 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                             {(() => {
                               const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId, selectedState);
                               const hasLastPrice = !!lastRec && lastRec.price > 0;
-                              const stateUf = RESEARCH_STATES.find(s => s.name === selectedState)?.uf || selectedState;
+                              const recState = lastRec?.state || selectedState || 'Minas Gerais';
+                              const recUf = RESEARCH_STATES.find(s => s.name === recState)?.uf || recState;
 
                               return (
                                 <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
                                   <div className="flex items-center gap-1.5">
                                     {hasLastPrice ? (
                                       <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-950/75 border border-amber-500/40 px-2 py-0.5 rounded-md">
-                                        Último ({stateUf}): R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                                        Último ({recUf}): R$ {lastRec.price.toFixed(2).replace('.', ',')}
                                       </span>
                                     ) : currentGuidedProduct.basePrice > 0 ? (
                                       <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/75 border border-emerald-500/40 px-2 py-0.5 rounded-md">
@@ -2788,8 +2846,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   </div>
 
                   {/* CENTER RETICLE / SCANNER VIEWPORT */}
-                  <div className="relative flex-1 min-h-0 pointer-events-none flex items-center justify-center p-2 sm:p-4">
-                    <div className="w-full max-w-[220px] xs:max-w-[260px] sm:max-w-xs max-h-[140px] sm:max-h-[220px] aspect-4/3 rounded-2xl sm:rounded-3xl border-2 border-dashed border-white/25 relative flex items-center justify-center">
+                  <div className="relative flex-1 min-h-0 pointer-events-none flex items-center justify-center p-1 sm:p-4">
+                    <div className="w-full max-w-[200px] xs:max-w-[240px] sm:max-w-xs max-h-[110px] xs:max-h-[135px] sm:max-h-[220px] aspect-4/3 rounded-2xl sm:rounded-3xl border-2 border-dashed border-white/25 relative flex items-center justify-center">
                       <div className="absolute top-0 left-0 w-5 h-5 sm:w-6 sm:h-6 border-t-4 border-l-4 border-red-500 rounded-tl-xl sm:rounded-tl-2xl"></div>
                       <div className="absolute top-0 right-0 w-5 h-5 sm:w-6 sm:h-6 border-t-4 border-r-4 border-red-500 rounded-tr-xl sm:rounded-tr-2xl"></div>
                       <div className="absolute bottom-0 left-0 w-5 h-5 sm:w-6 sm:h-6 border-b-4 border-l-4 border-red-500 rounded-bl-xl sm:rounded-bl-2xl"></div>
@@ -2800,9 +2858,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
                   {/* BOTTOM OVERLAY: Controls Bar (ajustado dinamicamente para não cortar na barra inferior do navegador) */}
                   <div
-                    className="relative z-30 w-full px-2 sm:px-6 pt-2 bg-gradient-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-2 shrink-0"
+                    className="relative z-30 w-full px-2 sm:px-6 pt-2 bg-gradient-to-t from-black/95 via-black/85 to-transparent flex flex-col items-center gap-2 shrink-0"
                     style={{
-                      paddingBottom: 'max(0.75rem, calc(env(safe-area-inset-bottom, 0px) + 0.5rem))',
+                      paddingBottom: 'max(1.75rem, calc(env(safe-area-inset-bottom, 0px) + 1.25rem))',
                     }}
                   >
                     {/* Carrossel horizontal com fotos capturadas na sessão */}

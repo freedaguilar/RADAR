@@ -147,7 +147,7 @@ export default function App() {
   const handleLoginSuccess = (user: User) => {
     setState((prev) => {
       const exists = prev.users.some(
-        (u) => u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase()
+        (u) => u.id === user.id || (Boolean(u.email) && Boolean(user.email) && u.email.toLowerCase() === user.email.toLowerCase())
       );
       return {
         ...prev,
@@ -1180,6 +1180,9 @@ export default function App() {
             onDeleteRecord={handleDeletePriceRecord}
             onAddProduct={handleAddProduct}
             onEditProduct={handleEditProduct}
+            onUpdateRecord={handleUpdatePriceRecord}
+            onSaveRecord={handleSavePriceRecord}
+            currentUser={state.currentUser}
             pageParams={productPageParams}
             onNavigate={handleNavigate}
           />

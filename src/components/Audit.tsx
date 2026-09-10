@@ -292,7 +292,7 @@ export function Audit({
         if (!productMatched && data.produto) {
           const activeProducts = products.filter(p => p.active);
           const fuzzyMatches = searchAndRankProducts(activeProducts, data.produto);
-          const exact = activeProducts.find(p => p.name.toLowerCase().trim() === data.produto.toLowerCase().trim());
+          const exact = activeProducts.find(p => p.name && data.produto && p.name.toLowerCase().trim() === data.produto.toLowerCase().trim());
           if (exact) {
             productMatched = exact;
           } else if (fuzzyMatches.length > 0) {
@@ -434,9 +434,10 @@ export function Audit({
         const matchesChain = selectedChainId === 'Todas' || rec.chainId === selectedChainId;
         
         // Notes or submitter email/name filter search
-        const matchesSearch = !searchNotes || 
-          rec.userName.toLowerCase().includes(searchNotes.toLowerCase()) || 
-          (rec.notes && rec.notes.toLowerCase().includes(searchNotes.toLowerCase()));
+        const queryLower = (searchNotes || '').toLowerCase();
+        const matchesSearch = !queryLower || 
+          (rec.userName ? rec.userName.toLowerCase().includes(queryLower) : false) || 
+          (rec.notes ? rec.notes.toLowerCase().includes(queryLower) : false);
  
         // Period filter based on days
         let matchesPeriod = true;
@@ -524,7 +525,7 @@ export function Audit({
     }
 
     if (!matchedProduct && meta.aiProductSuggested) {
-      const exact = activeProducts.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
+      const exact = activeProducts.find(p => p.name && meta.aiProductSuggested && p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
       if (exact) {
         matchedProduct = exact;
       } else {
@@ -629,7 +630,7 @@ export function Audit({
       matchedProd = activeProducts.find(p => p.id === rec.productId) || products.find(p => p.id === rec.productId) || null;
     }
     if (!matchedProd && meta.aiProductSuggested) {
-      const exact = activeProducts.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
+      const exact = activeProducts.find(p => p.name && meta.aiProductSuggested && p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim());
       if (exact) {
         matchedProd = exact;
       } else {
@@ -1796,7 +1797,7 @@ export function Audit({
                       const suggestedName = aiDetectedTextFromRecheck || meta.aiProductSuggested;
                       const suggestedProdId = aiDetectedTextFromRecheck
                         ? aiSuggestedProductIdFromRecheck
-                        : (products.find(p => p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim())?.id || null);
+                        : (meta.aiProductSuggested ? (products.find(p => p.name && p.name.toLowerCase().trim() === meta.aiProductSuggested.toLowerCase().trim())?.id || null) : null);
 
                       if (suggestedName) {
                         const correctProdId = selectedProductForPending!.id;

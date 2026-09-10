@@ -23,8 +23,11 @@ import {
   Download,
   MapPin,
   Globe,
+  Pencil,
+  CheckCircle2,
+  Loader2,
 } from "lucide-react";
-import { Product, Chain, PriceRecord, RESEARCH_STATES, getPriceRecordState, getChainStates } from "../types";
+import { Product, Chain, PriceRecord, User, RESEARCH_STATES, getPriceRecordState, getChainStates } from "../types";
 import { normalizeString } from "../lib/textUtils";
 import { getOutdatedProducts } from "../lib/productUtils";
 
@@ -80,6 +83,9 @@ interface ProductsProps {
   onDeleteRecord?: (recordId: string) => void;
   onAddProduct: (product: Product) => void;
   onEditProduct: (product: Product) => void;
+  onUpdateRecord?: (record: PriceRecord) => Promise<void> | void;
+  onSaveRecord?: (record: PriceRecord) => Promise<void> | void;
+  currentUser?: User | null;
   pageParams?: any;
   onNavigate?: (page: string, params?: any) => void;
 }
@@ -92,6 +98,9 @@ export function Products({
   onAddProduct,
   onEditProduct,
   onDeleteRecord,
+  onUpdateRecord,
+  onSaveRecord,
+  currentUser,
   pageParams,
   onNavigate,
 }: ProductsProps) {
@@ -105,6 +114,123 @@ export function Products({
   const [displayMode, setDisplayMode] = useState<"grid" | "list">("grid");
   const [productPhotoModal, setProductPhotoModal] = useState<{ url: string; name: string } | null>(null);
   const [showRegisterPriceModal, setShowRegisterPriceModal] = useState(false);
+
+  // Edit Chain Price Modal state inside product detail
+  const [editPriceModal, setEditPriceModal] = useState<{
+    chain: Chain;
+    product: Product;
+    record?: PriceRecord;
+    stateName: string;
+  } | null>(null);
+  const [editPriceValue, setEditPriceValue] = useState<string>("");
+  const [editPriceDate, setEditPriceDate] = useState<string>("");
+  const [editPriceNotes, setEditPriceNotes] = useState<string>("");
+  const [editPriceFeedback, setEditPriceFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [isSavingPrice, setIsSavingPrice] = useState<boolean>(false);
+
+  const formatPriceInput = (inputValue: string): string => {
+    const digits = inputValue.replace(/\D/g, '');
+    if (!digits) return '0,00';
+    const cents = parseInt(digits, 10);
+    return (cents / 100).toFixed(2).replace('.', ',');
+  };
+
+  const handleOpenEditPriceModal = (chain: Chain, record?: PriceRecord, stateName?: string) => {
+    const targetProduct = products.find(p => p.id === selectedProductId);
+    if (!targetProduct) return;
+    const targetState = stateName || record?.state || (chain.states && chain.states[0]) || chain.state || "Minas Gerais";
+    setEditPriceModal({
+      chain,
+      product: targetProduct,
+      record,
+      stateName: targetState,
+    });
+    setEditPriceValue(
+      record && record.price > 0
+        ? record.price.toFixed(2).replace('.', ',')
+        : (targetProduct.basePrice > 0 ? targetProduct.basePrice.toFixed(2).replace('.', ',') : "0,00")
+    );
+    setEditPriceDate(record?.date || new Date().toISOString().split("T")[0]);
+    setEditPriceNotes(record?.notes || "");
+    setEditPriceFeedback(null);
+    setIsSavingPrice(false);
+  };
+
+  const handleSaveEditedPrice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editPriceModal) return;
+
+    const rawVal = editPriceValue.replace(/\./g, '').replace(',', '.');
+    const numericPrice = parseFloat(rawVal);
+
+    if (isNaN(numericPrice) || numericPrice <= 0) {
+      setEditPriceFeedback({
+        type: "error",
+        message: "Por favor, informe um valor de preço válido maior que zero.",
+      });
+      return;
+    }
+
+    setIsSavingPrice(true);
+    try {
+      const todayStr = editPriceDate || new Date().toISOString().split("T")[0];
+      if (editPriceModal.record && onUpdateRecord) {
+        const updatedRecord: PriceRecord = {
+          ...editPriceModal.record,
+          price: numericPrice,
+          date: todayStr,
+          notes: editPriceNotes.trim() ? editPriceNotes.trim() : (editPriceModal.record.notes || undefined),
+          state: editPriceModal.stateName,
+          productId: editPriceModal.product.id,
+          chainId: editPriceModal.chain.id,
+        };
+        await onUpdateRecord(updatedRecord);
+        setEditPriceFeedback({
+          type: "success",
+          message: `Preço atualizado com sucesso para R$ ${numericPrice.toFixed(2).replace('.', ',')} em ${editPriceModal.chain.name}!`,
+        });
+        setTimeout(() => {
+          setEditPriceModal(null);
+          setIsSavingPrice(false);
+        }, 800);
+      } else if (onSaveRecord) {
+        const newRecord: PriceRecord = {
+          id: `rec-manual-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          productId: editPriceModal.product.id,
+          chainId: editPriceModal.chain.id,
+          price: numericPrice,
+          date: todayStr,
+          imageUrl: "",
+          notes: editPriceNotes.trim() ? editPriceNotes.trim() : `Preço ajustado manualmente no perfil de produto`,
+          userName: currentUser?.name || "Usuário",
+          userEmail: currentUser?.email || "usuario@dr-oetker.com",
+          state: editPriceModal.stateName,
+        };
+        await onSaveRecord(newRecord);
+        setEditPriceFeedback({
+          type: "success",
+          message: `Preço cadastrado com sucesso para R$ ${numericPrice.toFixed(2).replace('.', ',')} em ${editPriceModal.chain.name}!`,
+        });
+        setTimeout(() => {
+          setEditPriceModal(null);
+          setIsSavingPrice(false);
+        }, 800);
+      } else {
+        setEditPriceFeedback({
+          type: "error",
+          message: "Função de salvamento não disponível.",
+        });
+        setIsSavingPrice(false);
+      }
+    } catch (err) {
+      console.error("Erro ao salvar preço:", err);
+      setEditPriceFeedback({
+        type: "error",
+        message: "Erro ao atualizar o preço. Tente novamente.",
+      });
+      setIsSavingPrice(false);
+    }
+  };
 
   // Excel Export Modal states
   const [showExportModal, setShowExportModal] = useState(false);
@@ -754,7 +880,7 @@ export function Products({
     return products.filter((prod) => {
       if (!prod.active) return false;
 
-      const searchTerms = searchTerm.toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
+      const searchTerms = (searchTerm || "").toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
       const matchesSearch = searchTerms.every((term) => {
         const nameMatch = normalizeString(prod.name).includes(term);
         const categoryMatch = normalizeString(prod.category).includes(term);
@@ -2626,25 +2752,32 @@ export function Products({
               // Get all distinct states present in records for this product
               const recordedStatesSet = new Set<string>();
               selectedProductHistory.forEach((r) => {
-                recordedStatesSet.add(r.state || "Minas Gerais");
+                const st = r.state || "Minas Gerais";
+                if (st && typeof st === "string" && st.trim()) {
+                  recordedStatesSet.add(st.trim());
+                }
               });
 
               // Also include states from chains that have active retail presence
               chains.forEach((ch) => {
-                getChainStates(ch).forEach((st) => recordedStatesSet.add(st));
+                getChainStates(ch).forEach((st) => {
+                  if (st && typeof st === "string" && st.trim()) {
+                    recordedStatesSet.add(st.trim());
+                  }
+                });
               });
 
               const allInvolvedStates = Array.from(recordedStatesSet).sort((a, b) => {
                 const aCount = selectedProductHistory.filter((r) => (r.state || "Minas Gerais") === a).length;
                 const bCount = selectedProductHistory.filter((r) => (r.state || "Minas Gerais") === b).length;
                 if (aCount !== bCount) return bCount - aCount;
-                return a.localeCompare(b);
+                return (a || "").localeCompare(b || "");
               });
 
               // Breakdown per state
               const stateBreakdowns = allInvolvedStates.map((stateName) => {
                 const stateInfo = RESEARCH_STATES.find((s) => s.name === stateName);
-                const uf = stateInfo?.uf || stateName.substring(0, 2).toUpperCase();
+                const uf = stateInfo?.uf || (typeof stateName === "string" && stateName.length >= 2 ? stateName.substring(0, 2).toUpperCase() : "UF");
 
                 // Records for this state
                 const stateRecords = selectedProductHistory.filter(
@@ -2656,12 +2789,24 @@ export function Products({
                   (ch) => getChainStates(ch).includes(stateName) || stateRecords.some((r) => r.chainId === ch.id)
                 );
 
-                // Latest record per chain in this state
-                const chainPricedList = stateChains.map((chain) => {
-                  const recordsForChainInState = stateRecords.filter((r) => r.chainId === chain.id);
-                  const latestRecord = recordsForChainInState[recordsForChainInState.length - 1];
-                  return { chain, latestRecord };
-                });
+                // Latest record per chain in this state, sorted from cheapest to most expensive
+                const chainPricedList = stateChains
+                  .map((chain) => {
+                    const recordsForChainInState = stateRecords.filter((r) => r.chainId === chain.id);
+                    const latestRecord = recordsForChainInState[recordsForChainInState.length - 1];
+                    return { chain, latestRecord };
+                  })
+                  .sort((a, b) => {
+                    // Both have prices: sort ascending from cheapest to most expensive
+                    if (a.latestRecord && b.latestRecord) {
+                      return a.latestRecord.price - b.latestRecord.price;
+                    }
+                    // Chains with prices come before unpriced chains
+                    if (a.latestRecord && !b.latestRecord) return -1;
+                    if (!a.latestRecord && b.latestRecord) return 1;
+                    // If neither has price, sort by chain name
+                    return a.chain.name.localeCompare(b.chain.name);
+                  });
 
                 const pricedRecordsInState = chainPricedList
                   .filter((item) => item.latestRecord !== undefined)
@@ -2771,14 +2916,16 @@ export function Products({
                     title={tooltipText}
                     onClick={(e) => {
                       e.stopPropagation();
-                      latestRecord && setSelectedRecord(latestRecord);
+                      if (latestRecord?.imageUrl) {
+                        setSelectedRecord(latestRecord);
+                      } else {
+                        handleOpenEditPriceModal(chain, latestRecord, stateName);
+                      }
                     }}
-                    className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-xs min-h-[115px] ${borderStyle} ${bgStyle} ${
-                      latestRecord ? "cursor-pointer hover:scale-[1.02]" : "opacity-75"
-                    }`}
-                    id={`current-price-card-${chain.id}-${stateUF.toLowerCase()}`}
+                    className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-xs min-h-[115px] group ${borderStyle} ${bgStyle} cursor-pointer hover:scale-[1.02]`}
+                    id={`current-price-card-${chain.id}-${(stateUF || "").toLowerCase()}`}
                   >
-                    {/* Top Row: Logo & Chain Name & State Badge */}
+                    {/* Top Row: Logo & Chain Name & State Badge & Quick Edit Button */}
                     <div className="flex items-center gap-2 min-w-0">
                       <span
                         style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
@@ -2807,17 +2954,37 @@ export function Products({
                       </div>
                     </div>
 
-                    {/* Price in prominence */}
+                    {/* Price in prominence - Click to edit */}
                     <div className="my-2 text-left">
                       {latestRecord ? (
-                        <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline">
-                          <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
-                          {latestRecord.price.toFixed(2)}
-                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditPriceModal(chain, latestRecord, stateName);
+                          }}
+                          className="group/price flex items-baseline gap-1.5 text-left rounded-md px-1.5 py-1 -mx-1.5 hover:bg-black/5 hover:ring-1 hover:ring-[#D40511]/40 transition-all cursor-pointer w-fit"
+                          title="Clique para alterar este preço"
+                        >
+                          <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline group-hover/price:text-[#D40511]">
+                            <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
+                            {latestRecord.price.toFixed(2)}
+                          </div>
+                        </button>
                       ) : (
-                        <div className="text-[10px] font-bold text-gray-350 italic">
-                          ————
-                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleOpenEditPriceModal(chain, undefined, stateName);
+                          }}
+                          className="group/price flex items-center gap-1 text-left rounded-md px-1 py-0.5 -mx-1 hover:bg-black/5 hover:ring-1 hover:ring-[#D40511]/40 transition-all cursor-pointer"
+                          title="Clique para cadastrar preço nesta rede"
+                        >
+                          <span className="text-[10px] font-bold text-gray-400 italic group-hover/price:text-[#D40511]">
+                            + Inserir preço
+                          </span>
+                        </button>
                       )}
                     </div>
 
@@ -3116,7 +3283,7 @@ export function Products({
                             <div
                               key={st.stateName}
                               className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 space-y-3"
-                              id={`state-group-${st.uf.toLowerCase()}`}
+                              id={`state-group-${(st.uf || "").toLowerCase()}`}
                             >
                               {/* State Sub-header */}
                               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 border-b border-gray-200/80 pb-2.5">
@@ -3169,7 +3336,7 @@ export function Products({
                       selectedStateData && (
                         <div
                           className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 space-y-3"
-                          id={`state-single-group-${selectedStateData.uf.toLowerCase()}`}
+                          id={`state-single-group-${(selectedStateData.uf || "").toLowerCase()}`}
                         >
                           <div className="flex items-center justify-between border-b border-gray-200/80 pb-2.5">
                             <div className="flex items-center gap-2">
@@ -3849,16 +4016,46 @@ export function Products({
                 className="max-h-[70vh] rounded-lg object-contain w-full"
               />
             )}
-            <div className="p-4 flex items-center justify-between">
-              <p className="text-xs text-gray-500 font-sans font-medium">
-                Foto de Auditoria Comprobatória
-              </p>
-              <button
-                onClick={() => setShowDeleteConfirm(true)}
-                className="flex items-center gap-1 text-[10px] text-red-600 hover:text-red-700 font-bold"
-              >
-                <Trash2 className="w-3.5 h-3.5" /> Excluir Registro
-              </button>
+            {/* Audit Lightbox Info & Actions */}
+            <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-t border-gray-100 bg-gray-50/70 rounded-b-lg">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-gray-800 uppercase tracking-tight">
+                    {chains.find((c) => c.id === selectedRecord.chainId)?.name || "Rede"}
+                  </span>
+                  {selectedRecord.state && (
+                    <span className="text-[10px] font-mono font-bold text-gray-500 bg-white border border-gray-200 px-1.5 py-0.5 rounded">
+                      {RESEARCH_STATES.find(s => s.name === selectedRecord.state)?.uf || selectedRecord.state}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-500 font-mono">
+                  <span>Preço na foto: <strong className="text-gray-900 font-black">R$ {selectedRecord.price.toFixed(2)}</strong></span>
+                  <span>•</span>
+                  <span>{formatDateBR(selectedRecord.date)}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const ch = chains.find((c) => c.id === selectedRecord.chainId);
+                    if (ch) {
+                      handleOpenEditPriceModal(ch, selectedRecord, selectedRecord.state);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-gray-300 hover:border-[#D40511] text-gray-700 hover:text-[#D40511] rounded-lg text-xs font-bold transition shadow-2xs cursor-pointer"
+                >
+                  <Pencil className="w-3.5 h-3.5" /> Alterar Preço
+                </button>
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="flex items-center gap-1 px-3 py-1.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg font-bold transition cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Excluir
+                </button>
+              </div>
             </div>
             
             {showDeleteConfirm && (
@@ -4362,6 +4559,234 @@ export function Products({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Edit Chain Price Modal */}
+      {editPriceModal && (
+        <div
+          id="edit-chain-price-modal-backdrop"
+          onClick={() => {
+            if (!isSavingPrice) setEditPriceModal(null);
+          }}
+          className="fixed inset-0 z-55 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 cursor-pointer"
+        >
+          <div
+            className="bg-white rounded-3xl max-w-md w-full border border-gray-150 overflow-hidden shadow-2xl relative cursor-default flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+            id="edit-chain-price-modal-card"
+          >
+            {/* Modal Header */}
+            <div className="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-[#F8F9FA]">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-red-50 text-[#D40511] border border-red-150 flex items-center justify-center shrink-0">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-black text-[#1A1A1A] font-sans uppercase tracking-wider">
+                    Alterar Preço na Rede
+                  </h3>
+                  <p className="text-[10px] text-gray-500 font-sans font-semibold">
+                    {editPriceModal.record ? "Atualize o preço praticado para esta rede" : "Cadastre um preço para esta rede"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSavingPrice}
+                onClick={() => setEditPriceModal(null)}
+                className="text-gray-400 hover:text-gray-600 rounded-lg p-1 transition cursor-pointer"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body Form */}
+            <form onSubmit={handleSaveEditedPrice} className="p-5 space-y-4">
+              {/* Product & Chain Header Summary Card */}
+              <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-white border border-slate-200 overflow-hidden p-1 flex items-center justify-center shrink-0">
+                    {editPriceModal.product.imageUrl ? (
+                      <img
+                        src={editPriceModal.product.imageUrl}
+                        alt={editPriceModal.product.name}
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      <Package className="w-5 h-5 text-gray-400" />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-[9px] font-black uppercase text-[#D40511] font-mono tracking-wide block">
+                      {editPriceModal.product.brand || "Dr. Oetker"}
+                    </span>
+                    <h4 className="text-xs font-black text-slate-800 truncate leading-tight">
+                      {editPriceModal.product.name}
+                    </h4>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      Preço Base: R$ {editPriceModal.product.basePrice.toFixed(2).replace('.', ',')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Chain Badge */}
+                <div className="flex flex-col items-end shrink-0 pl-2 border-l border-slate-200">
+                  <div className="flex items-center gap-1.5">
+                    <span
+                      style={editPriceModal.chain.logoColor?.startsWith("#") ? { backgroundColor: editPriceModal.chain.logoColor } : {}}
+                      className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-white text-[8px] shrink-0 overflow-hidden border border-gray-100 ${
+                        editPriceModal.chain.logoColor?.startsWith("#") ? "" : (editPriceModal.chain.logoColor || "bg-gray-400")
+                      }`}
+                    >
+                      {editPriceModal.chain.logoUrl ? (
+                        <img
+                          src={editPriceModal.chain.logoUrl}
+                          alt={editPriceModal.chain.name}
+                          className="w-full h-full object-contain p-0.5 bg-white"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span>{editPriceModal.chain.name.substring(0, 2).toUpperCase()}</span>
+                      )}
+                    </span>
+                    <span className="text-xs font-black text-slate-800">
+                      {editPriceModal.chain.name}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold text-slate-500 mt-0.5">
+                    {RESEARCH_STATES.find(s => s.name === editPriceModal.stateName)?.uf || editPriceModal.stateName}
+                  </span>
+                </div>
+              </div>
+
+              {/* Price Input Field with Calculator Format */}
+              <div className="bg-slate-50 border-2 border-slate-200 focus-within:border-[#D40511] focus-within:bg-white rounded-2xl p-3.5 transition flex flex-col items-center justify-center">
+                <label htmlFor="input-edit-price-val" className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
+                  Novo Preço de Gôndola (R$) *
+                </label>
+                <div className="flex items-baseline justify-center gap-1.5 w-full">
+                  <span className="text-2xl font-black text-slate-400 font-mono">R$</span>
+                  <input
+                    id="input-edit-price-val"
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    required
+                    value={editPriceValue}
+                    onChange={(e) => {
+                      const val = formatPriceInput(e.target.value);
+                      setEditPriceValue(val);
+                    }}
+                    className="w-48 text-center text-3xl font-black font-mono text-[#D40511] bg-transparent outline-none border-b-2 border-slate-300 focus:border-[#D40511] tracking-tight"
+                    placeholder="0,00"
+                  />
+                </div>
+                {/* Quick Shortcuts */}
+                <div className="flex items-center gap-2 mt-2.5">
+                  {editPriceModal.product.basePrice > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditPriceValue(editPriceModal.product.basePrice.toFixed(2).replace('.', ','))}
+                      className="text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:border-slate-300 px-2 py-0.5 rounded-md transition cursor-pointer"
+                    >
+                      Preço Base (R$ {editPriceModal.product.basePrice.toFixed(2).replace('.', ',')})
+                    </button>
+                  )}
+                  {editPriceModal.record && editPriceModal.record.price > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditPriceValue(editPriceModal.record!.price.toFixed(2).replace('.', ','))}
+                      className="text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:border-slate-300 px-2 py-0.5 rounded-md transition cursor-pointer"
+                    >
+                      Preço Anterior (R$ {editPriceModal.record.price.toFixed(2).replace('.', ',')})
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Date Field */}
+              <div>
+                <label htmlFor="input-edit-price-date" className="block text-[10px] font-extrabold uppercase tracking-widest text-slate-500 mb-1">
+                  Data de Coleta
+                </label>
+                <div className="relative">
+                  <Calendar className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
+                  <input
+                    id="input-edit-price-date"
+                    type="date"
+                    value={editPriceDate}
+                    onChange={(e) => setEditPriceDate(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold font-mono text-slate-800 focus:outline-none focus:bg-white focus:border-[#D40511]"
+                  />
+                </div>
+              </div>
+
+              {/* Notes / Observação */}
+              <div>
+                <label htmlFor="input-edit-price-notes" className="block text-[10px] font-extrabold uppercase tracking-widest text-slate-500 mb-1">
+                  Observações (Opcional)
+                </label>
+                <input
+                  id="input-edit-price-notes"
+                  type="text"
+                  placeholder="Ex: Promoção de encarte, etiqueta amarela, etc."
+                  value={editPriceNotes}
+                  onChange={(e) => setEditPriceNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:bg-white focus:border-[#D40511]"
+                />
+              </div>
+
+              {/* Feedback Alert */}
+              {editPriceFeedback && (
+                <div
+                  className={`p-3 rounded-xl border text-xs font-bold flex items-center gap-2 ${
+                    editPriceFeedback.type === "success"
+                      ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                      : "bg-rose-50 border-rose-200 text-rose-800"
+                  }`}
+                >
+                  {editPriceFeedback.type === "success" ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  )}
+                  <span>{editPriceFeedback.message}</span>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={isSavingPrice}
+                  onClick={() => setEditPriceModal(null)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPrice || !editPriceValue || editPriceValue === "0,00"}
+                  className="px-6 py-2.5 bg-[#D40511] hover:bg-[#b0040e] disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-extrabold transition shadow flex items-center gap-1.5 cursor-pointer uppercase tracking-wider"
+                >
+                  {isSavingPrice ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Salvando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4 text-white" />
+                      <span>Salvar Preço</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

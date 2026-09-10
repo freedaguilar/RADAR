@@ -46,7 +46,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
   const allUsers = React.useMemo(() => {
     const list = [...availableUsers];
     INITIAL_USERS.forEach((initUser) => {
-      if (!list.some((u) => u.email.toLowerCase() === initUser.email.toLowerCase())) {
+      if (!list.some((u) => u.email && initUser.email && u.email.toLowerCase() === initUser.email.toLowerCase())) {
         list.push(initUser);
       }
     });
@@ -110,7 +110,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
       // 2. Fallback to registered users in state/mockData
       if (!authenticatedUser) {
         const matched = allUsers.find(
-          (u) => u.email.toLowerCase() === cleanEmail
+          (u) => u.email && u.email.toLowerCase() === cleanEmail
         );
 
         if (!matched) {

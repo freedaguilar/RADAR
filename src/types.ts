@@ -36,8 +36,10 @@ export interface Chain {
 }
 
 export function getChainStates(chain: Chain): string[] {
+  if (!chain) return ['Minas Gerais'];
   if (Array.isArray(chain.states) && chain.states.length > 0) {
-    return chain.states;
+    const valid = chain.states.filter((s): s is string => typeof s === 'string' && s.trim().length > 0);
+    if (valid.length > 0) return valid;
   }
   if (typeof chain.state === 'string' && chain.state.trim()) {
     return chain.state.split(',').map((s) => s.trim()).filter(Boolean);
@@ -46,6 +48,7 @@ export function getChainStates(chain: Chain): string[] {
 }
 
 export function isChainInState(chain: Chain, stateName: string): boolean {
+  if (!chain || !stateName) return false;
   const states = getChainStates(chain);
   return states.includes(stateName);
 }
@@ -64,10 +67,11 @@ export interface PriceRecord {
 }
 
 export function getPriceRecordState(record: PriceRecord, chains?: Chain[]): string {
-  if (record.state && record.state.trim()) {
+  if (!record) return 'Minas Gerais';
+  if (typeof record.state === 'string' && record.state.trim()) {
     return record.state.trim();
   }
-  if (record.notes) {
+  if (typeof record.notes === 'string' && record.notes) {
     const match = record.notes.match(/\[Estado:\s*([^\]]+)\]/i);
     if (match && match[1]) {
       return match[1].trim();

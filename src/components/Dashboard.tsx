@@ -106,11 +106,12 @@ const STATE_UF_MAP: Record<string, string> = {
   'Rio de Janeiro': 'RJ',
 };
 
-const getStateUF = (stateName: string): string => {
+const getStateUF = (stateName?: string | null): string => {
+  if (!stateName) return "";
   if (STATE_UF_MAP[stateName]) return STATE_UF_MAP[stateName];
-  const found = RESEARCH_STATES.find((s) => s.name.toLowerCase() === stateName.toLowerCase());
+  const found = RESEARCH_STATES.find((s) => s.name && s.name.toLowerCase() === stateName.toLowerCase());
   if (found) return found.uf;
-  return stateName.substring(0, 2).toUpperCase();
+  return stateName ? stateName.substring(0, 2).toUpperCase() : "";
 };
 
 export function Dashboard({ products, chains, records, onNavigate }: DashboardProps) {
