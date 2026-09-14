@@ -281,6 +281,7 @@ export interface ResearchSessionMeta {
   sessionTime?: string;
   startedAt?: string;
   completedAt?: string;
+  isConcluded?: boolean;
   outOfStockProductIds?: string[];
   outOfStockProductNames?: string[];
   completedEarly?: boolean;
@@ -344,6 +345,7 @@ export function parsePriceRecordMeta(notes: string | undefined): ParsedPriceReco
         sessionTime: meta.sessionTime,
         startedAt: meta.startedAt,
         completedAt: meta.completedAt,
+        isConcluded: typeof meta.isConcluded === 'boolean' ? meta.isConcluded : undefined,
         outOfStockProductIds: Array.isArray(meta.outOfStockProductIds) ? meta.outOfStockProductIds : [],
         outOfStockProductNames: Array.isArray(meta.outOfStockProductNames) ? meta.outOfStockProductNames : [],
         completedEarly: meta.completedEarly,
@@ -386,6 +388,7 @@ export function parsePriceRecordMeta(notes: string | undefined): ParsedPriceReco
             sessionTime: meta.sessionTime,
             startedAt: meta.startedAt,
             completedAt: meta.completedAt,
+            isConcluded: typeof meta.isConcluded === 'boolean' ? meta.isConcluded : undefined,
             outOfStockProductIds: Array.isArray(meta.outOfStockProductIds) ? meta.outOfStockProductIds : [],
             outOfStockProductNames: Array.isArray(meta.outOfStockProductNames) ? meta.outOfStockProductNames : [],
             completedEarly: meta.completedEarly,
@@ -427,6 +430,7 @@ export function serializePendingMeta(
     if (sessionMeta.sessionTime) meta.sessionTime = sessionMeta.sessionTime;
     if (sessionMeta.startedAt) meta.startedAt = sessionMeta.startedAt;
     if (sessionMeta.completedAt) meta.completedAt = sessionMeta.completedAt;
+    if (typeof sessionMeta.isConcluded === 'boolean') meta.isConcluded = sessionMeta.isConcluded;
     if (sessionMeta.outOfStockProductIds) meta.outOfStockProductIds = sessionMeta.outOfStockProductIds;
     if (sessionMeta.outOfStockProductNames) meta.outOfStockProductNames = sessionMeta.outOfStockProductNames;
     if (typeof sessionMeta.completedEarly === 'boolean') meta.completedEarly = sessionMeta.completedEarly;
@@ -450,6 +454,7 @@ export function serializeSessionMeta(
     sessionTime: sessionMeta.sessionTime,
     startedAt: sessionMeta.startedAt,
     completedAt: sessionMeta.completedAt,
+    isConcluded: sessionMeta.isConcluded,
     outOfStockProductIds: sessionMeta.outOfStockProductIds || [],
     outOfStockProductNames: sessionMeta.outOfStockProductNames || [],
     completedEarly: sessionMeta.completedEarly,

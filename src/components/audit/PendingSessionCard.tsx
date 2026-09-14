@@ -214,6 +214,12 @@ export function PendingSessionCard({
                 <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
                 {session.pendingRecords.length} {session.pendingRecords.length === 1 ? 'foto pendente' : 'fotos pendentes'}
               </span>
+              {!session.isConcluded && (
+                <span className="text-[11px] font-bold bg-sky-100 text-sky-800 border border-sky-300 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse" title="O usuário ainda está no processo de pesquisa e não clicou no botão Concluir Pesquisa">
+                  <Clock className="w-3 h-3 text-sky-600" />
+                  <span>Pesquisa em andamento</span>
+                </span>
+              )}
             </div>
 
             <div className="flex items-center gap-3 text-xs text-slate-500 mt-1 flex-wrap font-medium">
@@ -291,9 +297,14 @@ export function PendingSessionCard({
         <div>
           {/* Survey Metadata Details Bar */}
           <div className="px-5 py-3 bg-amber-50/30 border-b border-amber-100 flex flex-wrap items-center justify-between gap-2.5 text-xs text-slate-600">
-            {/* Queue Completion Status */}
+            {/* Queue Completion Status / In-progress Status */}
             <div className="flex items-center gap-2">
-              {session.completedEarly ? (
+              {!session.isConcluded ? (
+                <span className="inline-flex items-center gap-1.5 text-sky-900 font-bold bg-sky-50 border border-sky-300 px-2.5 py-1 rounded-lg">
+                  <Clock className="w-3.5 h-3.5 text-sky-600 shrink-0 animate-pulse" />
+                  <span>Pesquisa em andamento: O usuário ainda não concluiu a pesquisa</span>
+                </span>
+              ) : session.completedEarly ? (
                 <span className="inline-flex items-center gap-1.5 text-amber-900 font-bold bg-amber-100/80 border border-amber-300 px-2.5 py-1 rounded-lg">
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   <span>Fila Incompleta: Pesquisa encerrada com {session.remainingQueueCount} produtos restantes na fila recomendada</span>

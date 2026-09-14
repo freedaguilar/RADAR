@@ -176,9 +176,16 @@ export function SessionDetailModal({
 
         {/* Detailed Survey Status Banner */}
         <div className="px-6 py-3.5 bg-slate-100/60 border-b border-slate-150 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-          {/* Queue completion alert */}
+          {/* Queue completion alert / In-progress alert */}
           <div className="flex items-center gap-2">
-            {session.completedEarly ? (
+            {!session.isConcluded ? (
+              <div className="flex items-center gap-2 text-sky-900 bg-sky-50 border border-sky-300 px-3 py-1.5 rounded-xl font-medium">
+                <Clock className="w-4 h-4 text-sky-600 shrink-0 animate-pulse" />
+                <span>
+                  <strong>Pesquisa em Andamento:</strong> O usuário ainda não concluiu a pesquisa (fotos registradas em tempo real).
+                </span>
+              </div>
+            ) : session.completedEarly ? (
               <div className="flex items-center gap-2 text-amber-900 bg-amber-50 border border-amber-300 px-3 py-1.5 rounded-xl font-medium">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                 <span>

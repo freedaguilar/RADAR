@@ -28,6 +28,7 @@ export interface ResearchSession {
   remainingQueueCount: number;
   queueTotal: number;
   hasExplicitSession: boolean;
+  isConcluded: boolean;
 
   // Stats
   totalItems: number;
@@ -208,6 +209,8 @@ export function groupRecordsIntoResearchSessions(
     let remainingQueueCount = 0;
     let queueTotal = 0;
     let hasExplicitSession = Boolean(bucket.explicitSessionId);
+    let hasExplicitConcludedMeta = false;
+    let isConcluded = false;
 
     for (const meta of bucket.sessionMetas) {
       if (meta.startedAt && !startedAt) startedAt = meta.startedAt;
@@ -226,6 +229,12 @@ export function groupRecordsIntoResearchSessions(
       if (meta.outOfStockProductNames) {
         meta.outOfStockProductNames.forEach((n) => outOfStockNamesSet.add(n));
       }
+      if (typeof meta.isConcluded === 'boolean') {
+        hasExplicitConcludedMeta = true;
+        if (meta.isConcluded) {
+          isConcluded = true;
+        }
+      }
     }
 
     // Populate missing out of stock product names from productMap
@@ -240,6 +249,18 @@ export function groupRecordsIntoResearchSessions(
     bucket.timestamps.sort((a, b) => a - b);
     const earliestTs = bucket.timestamps[0] || Date.now();
     const latestTs = bucket.timestamps[bucket.timestamps.length - 1] || earliestTs;
+
+    // If no record has explicit isConcluded flag, deduce for legacy records
+    if (!hasExplicitConcludedMeta) {
+      const ageMs = Date.now() - latestTs;
+      // Only mark legacy sessions as concluded if explicitly marked completedEarly or completedAt,
+      // or if inactive for more than 4 hours. Do NOT conclude just because some record was consolidated.
+      if (completedAt || completedEarly || ageMs > 4 * 60 * 60 * 1000) {
+        isConcluded = true;
+      } else {
+        isConcluded = false;
+      }
+    }
 
     // Time display calculation
     let timeDisplay = '';
@@ -306,6 +327,7 @@ export function groupRecordsIntoResearchSessions(
       remainingQueueCount,
       queueTotal,
       hasExplicitSession,
+      isConcluded,
       totalItems,
       totalPriceSum,
       averagePrice,

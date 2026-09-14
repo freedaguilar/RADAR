@@ -572,7 +572,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       sessionId: researchSessionId,
       sessionTime: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
       startedAt: researchStartTime,
-      completedAt: now.toISOString(),
+      completedAt: isFinal ? now.toISOString() : undefined,
+      isConcluded: isFinal,
       outOfStockProductIds: [...outOfStockProductIds],
       outOfStockProductNames: outOfStockNames,
       completedEarly,
@@ -1113,7 +1114,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
           // Registra na auditoria imediatamente (como pendente de preenchimento)
           const todayStr = new Date().toISOString().split('T')[0];
           const recordId = `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-          const finalNotes = serializePendingMeta('', 0, '');
+          const currentSessionMeta = getCurrentSessionMeta(false);
+          const finalNotes = serializePendingMeta('', 0, '', currentSessionMeta);
 
           const newRecord: PriceRecord = {
             id: recordId,
@@ -1518,6 +1520,25 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         idx++;
       }
 
+      // Also ensure all other records already registered under this sessionId get the finalized meta
+      if (onUpdateRecord) {
+        const savedIds = new Set(batchItems.map(b => b.recordId).filter(Boolean));
+        records.forEach((r) => {
+          if (!savedIds.has(r.id)) {
+            const { session, isPending, aiProductSuggested, aiPriceSuggested, originalNotes } = parsePriceRecordMeta(r.notes);
+            if (session?.sessionId === researchSessionId) {
+              const updatedNotes = isPending
+                ? serializePendingMeta(aiProductSuggested, aiPriceSuggested, originalNotes, sessionMeta)
+                : serializeSessionMeta(originalNotes, sessionMeta);
+              onUpdateRecord({
+                ...r,
+                notes: updatedNotes,
+              });
+            }
+          }
+        });
+      }
+
       const count = batchItems.length;
       const chainObj = chains.find(c => c.id === selectedChainId);
       const isGuest = !!currentUser?.isGuest;
@@ -1568,24 +1589,65 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
       // Finalize session metadata on existing records created during this batch
       if (onUpdateRecord) {
+        const updatedRecordIds = new Set<string>();
         for (const item of batchItems) {
           if (item.recordId) {
+            updatedRecordIds.add(item.recordId);
             const existing = records.find(r => r.id === item.recordId);
+            const numPrice = parseFloat(item.price.replace(',', '.')) || 0;
+            const meta = existing ? parsePriceRecordMeta(existing.notes) : { aiProductSuggested: '', aiPriceSuggested: 0, originalNotes: '' };
+            const isPending = !existing || !existing.notes || existing.notes.startsWith('__PENDING_METADATA__');
+            const updatedNotes = isPending
+              ? serializePendingMeta(
+                  meta.aiProductSuggested || item.selectedProductId,
+                  meta.aiPriceSuggested || numPrice,
+                  meta.originalNotes || item.notes,
+                  finalSessionMeta
+                )
+              : serializeSessionMeta(
+                  meta.originalNotes || item.notes,
+                  finalSessionMeta
+                );
+
             if (existing) {
-              const meta = parsePriceRecordMeta(existing.notes);
-              const updatedNotes = serializePendingMeta(
-                meta.aiProductSuggested || item.selectedProductId,
-                meta.aiPriceSuggested || parseFloat(item.price.replace(',', '.')) || 0,
-                meta.originalNotes || item.notes,
-                finalSessionMeta
-              );
               onUpdateRecord({
                 ...existing,
+                productId: item.selectedProductId || existing.productId,
+                price: numPrice > 0 ? numPrice : existing.price,
                 notes: updatedNotes,
+              });
+            } else {
+              onUpdateRecord({
+                id: item.recordId,
+                productId: item.selectedProductId,
+                chainId: item.selectedChainId || selectedChainId,
+                price: numPrice,
+                date: now.toISOString().split('T')[0],
+                imageUrl: item.imageUrl || '',
+                notes: updatedNotes,
+                userName: currentUser?.name || 'Vendedor Autônomo',
+                userEmail: currentUser?.email || 'vendas@radar.com',
+                state: item.state || selectedState,
               });
             }
           }
         }
+
+        // Also update any other records in state belonging to this researchSessionId
+        records.forEach((r) => {
+          if (!updatedRecordIds.has(r.id)) {
+            const { session, isPending, aiProductSuggested, aiPriceSuggested, originalNotes } = parsePriceRecordMeta(r.notes);
+            if (session?.sessionId === researchSessionId) {
+              const updatedNotes = isPending
+                ? serializePendingMeta(aiProductSuggested, aiPriceSuggested, originalNotes, finalSessionMeta)
+                : serializeSessionMeta(originalNotes, finalSessionMeta);
+              onUpdateRecord({
+                ...r,
+                notes: updatedNotes,
+              });
+            }
+          }
+        });
       }
 
       setCompletionData({

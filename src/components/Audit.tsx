@@ -51,7 +51,7 @@ export function Audit({
   const [sessionsPerPage, setSessionsPerPage] = useState(6);
   const [selectedStateFilter, setSelectedStateFilter] = useState('Todos');
   const [ruptureFilter, setRuptureFilter] = useState<'all' | 'with_rupture' | 'no_rupture'>('all');
-  const [queueFilter, setQueueFilter] = useState<'all' | 'early' | 'completed'>('all');
+  const [queueFilter, setQueueFilter] = useState<'all' | 'early' | 'completed' | 'in_progress'>('all');
   const [analyzingRecordsMap, setAnalyzingRecordsMap] = useState<Record<string, boolean>>({});
 
   // Pagination states for audited records (legacy photo grid)
@@ -543,8 +543,9 @@ export function Audit({
       if (ruptureFilter === 'no_rupture' && session.outOfStockProductIds.length > 0) return false;
 
       // Queue status filter
-      if (queueFilter === 'early' && !session.completedEarly) return false;
-      if (queueFilter === 'completed' && session.completedEarly) return false;
+      if (queueFilter === 'in_progress' && session.isConcluded) return false;
+      if (queueFilter === 'early' && (!session.isConcluded || !session.completedEarly)) return false;
+      if (queueFilter === 'completed' && (!session.isConcluded || session.completedEarly)) return false;
 
       // Text search
       if (searchNotes.trim()) {
@@ -1018,6 +1019,7 @@ export function Audit({
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] font-sans h-9"
               >
                 <option value="all">Todos os Status</option>
+                <option value="in_progress">Pesquisa em Andamento</option>
                 <option value="early">Finalizada Antes da Fila</option>
                 <option value="completed">Fila 100% Concluída</option>
               </select>

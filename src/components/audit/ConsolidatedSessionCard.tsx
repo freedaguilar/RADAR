@@ -120,8 +120,16 @@ export function ConsolidatedSessionCard({
           <span>{session.consolidatedRecords.length} {session.consolidatedRecords.length === 1 ? 'registro consolidado' : 'registros consolidados'}</span>
         </span>
 
-        {/* Queue Completion Status */}
-        {session.completedEarly ? (
+        {/* Queue Completion Status / In-progress Status */}
+        {!session.isConcluded ? (
+          <span
+            className="text-[11px] font-bold bg-sky-50 text-sky-900 border border-sky-300 px-2.5 py-0.5 rounded-full flex items-center gap-1"
+            title="O usuário ainda está no processo de pesquisa e não clicou em Concluir Pesquisa"
+          >
+            <Clock className="w-3 h-3 text-sky-600 animate-pulse" />
+            <span>Pesquisa em andamento: Usuário ainda não concluiu</span>
+          </span>
+        ) : session.completedEarly ? (
           <span
             className="text-[11px] font-bold bg-amber-50 text-amber-900 border border-amber-300/80 px-2.5 py-0.5 rounded-full flex items-center gap-1"
             title={`O pesquisador encerrou a pesquisa antes de passar por toda a lista de produtos (${session.remainingQueueCount} itens restantes na fila)`}
