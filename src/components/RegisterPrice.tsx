@@ -3,7 +3,7 @@ import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Slider
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
-import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta } from '../lib/textUtils';
+import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, ResearchSessionMeta } from '../lib/textUtils';
 
 // Summary data for the research completion screen
 interface CompletionSummary {
@@ -555,6 +555,32 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [showFreeModeNoticeModal, setShowFreeModeNoticeModal] = useState<boolean>(false);
   const [hasShownFreeModeNotice, setHasShownFreeModeNotice] = useState<boolean>(false);
 
+  // Research session tracking (associates all records in this survey with session metadata)
+  const [researchSessionId, setResearchSessionId] = useState<string>(() => `pesq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+  const [researchStartTime, setResearchStartTime] = useState<string>(() => new Date().toISOString());
+
+  // Helper to generate comprehensive session metadata
+  const getCurrentSessionMeta = (isFinal = false): ResearchSessionMeta => {
+    const outOfStockNames = products
+      .filter((p) => outOfStockProductIds.includes(p.id))
+      .map((p) => p.name);
+
+    const completedEarly = isFinal ? guidedQueue.length > 0 : false;
+    const now = new Date();
+
+    return {
+      sessionId: researchSessionId,
+      sessionTime: now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+      startedAt: researchStartTime,
+      completedAt: now.toISOString(),
+      outOfStockProductIds: [...outOfStockProductIds],
+      outOfStockProductNames: outOfStockNames,
+      completedEarly,
+      remainingQueueCount: guidedQueue.length,
+      queueTotal: frequentProductsList.length,
+    };
+  };
+
   // Inicializa ou reinicia a fila guiada quando a rede ou estado muda
   useEffect(() => {
     setCapturedProductIds([]);
@@ -563,6 +589,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setKeepCurrentPrice(false);
     setHasShownFreeModeNotice(false);
     setShowFreeModeNoticeModal(false);
+    setResearchSessionId(`pesq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    setResearchStartTime(new Date().toISOString());
   }, [selectedChainId, selectedState]);
 
   // Inicializa a fila na primeira carga se estiver vazia
@@ -698,9 +726,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
       // Se for convidado, marca como pendente para auditoria de gestor!
       const isGuest = !!currentUser?.isGuest;
+      const sessionMeta = getCurrentSessionMeta(false);
       const finalNotes = isGuest
-        ? serializePendingMeta(prodSearch, numericPrice, `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`)
-        : (capturedTargetProduct ? `[Preço Digitado] ${capturedTargetProduct.name}` : '');
+        ? serializePendingMeta(prodSearch, numericPrice, `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
+        : serializeSessionMeta(capturedTargetProduct ? `[Preço Digitado] ${capturedTargetProduct.name}` : '', sessionMeta);
 
       const newRecord: PriceRecord = {
         id: recordId,
@@ -1207,12 +1236,13 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       const numPrice = keepPrice ? priceToKeep : (parseFloat(initialPrice.replace(',', '.')) || 0);
 
       const isGuest = !!currentUser?.isGuest;
+      const sessionMeta = getCurrentSessionMeta(false);
       // Se for convidado, marca como pendente para auditoria de gestor
       const finalNotes = isGuest
-        ? serializePendingMeta(prodSearch, numPrice, `[Registro Convidado - Preço Mantido: ${currentUser?.name || 'Convidado'}]`)
+        ? serializePendingMeta(prodSearch, numPrice, `[Registro Convidado - Preço Mantido: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
         : (keepPrice
-            ? `[Preço Mantido] ${targetProduct?.name || ''}`
-            : serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : ''));
+            ? serializeSessionMeta(`[Preço Mantido] ${targetProduct?.name || ''}`, sessionMeta)
+            : serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '', sessionMeta));
 
       const newRecord: PriceRecord = {
         id: recordId,
@@ -1417,6 +1447,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setBatchSaveProgress({ current: 0, total: batchItems.length });
     try {
       const todayStr = new Date().toISOString().split('T')[0];
+      const sessionMeta = getCurrentSessionMeta(true);
 
       let idx = 0;
       for (const item of batchItems) {
@@ -1426,6 +1457,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         if (!item.isKeptPrice && item.aiAnalysisMessage) {
           finalNotes = finalNotes ? `[Lote / IA] ${finalNotes}` : '[Lote / IA] Monitorado via Scanner Inteligente';
         }
+        const serializedNotes = serializeSessionMeta(finalNotes, sessionMeta);
 
         const priceNum = parseFloat(item.price.replace(',', '.'));
 
@@ -1438,7 +1470,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
             price: priceNum,
             date: todayStr,
             imageUrl: item.imageUrl || '',
-            notes: finalNotes || undefined,
+            notes: serializedNotes || undefined,
             userName: currentUser?.name || 'Vendedor Autônomo',
             userEmail: currentUser?.email || 'vendas@radar.com',
             state: item.state || selectedState,
@@ -1458,7 +1490,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
             price: priceNum,
             date: todayStr,
             imageUrl: finalImageUrl || undefined,
-            notes: finalNotes || undefined,
+            notes: serializedNotes || undefined,
             userName: currentUser?.name || 'Vendedor Autônomo',
             userEmail: currentUser?.email || 'vendas@radar.com',
             state: item.state || selectedState,
@@ -1532,6 +1564,29 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       const isGuest = !!currentUser?.isGuest;
       const chainName = chainObj ? chainObj.name : (isGuest ? 'Rede Pesquisada' : 'Rede Auditada');
       const now = new Date();
+      const finalSessionMeta = getCurrentSessionMeta(true);
+
+      // Finalize session metadata on existing records created during this batch
+      if (onUpdateRecord) {
+        for (const item of batchItems) {
+          if (item.recordId) {
+            const existing = records.find(r => r.id === item.recordId);
+            if (existing) {
+              const meta = parsePriceRecordMeta(existing.notes);
+              const updatedNotes = serializePendingMeta(
+                meta.aiProductSuggested || item.selectedProductId,
+                meta.aiPriceSuggested || parseFloat(item.price.replace(',', '.')) || 0,
+                meta.originalNotes || item.notes,
+                finalSessionMeta
+              );
+              onUpdateRecord({
+                ...existing,
+                notes: updatedNotes,
+              });
+            }
+          }
+        }
+      }
 
       setCompletionData({
         state: selectedState,
@@ -1568,6 +1623,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setBatchProductSearches({});
     setBatchShowSearchDropdowns({});
     setSelectedProductId('');
+    setCapturedProductIds([]);
+    setOutOfStockProductIds([]);
+    setGuidedQueue(frequentProductsList);
+    setResearchSessionId(`pesq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`);
+    setResearchStartTime(new Date().toISOString());
     setSelectedChainId('');
     setSelectedState('');
     setPrice('0,00');
@@ -2904,51 +2964,55 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
                     )}
 
-                    {/* Linha de Controles: [Pular item] [Categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
-                    <div className="flex items-center justify-between w-full max-w-md gap-1.5 sm:gap-3 px-1">
+                    {/* Linha de Controles: [Pular item] [Pular Categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
+                    <div className="flex items-center justify-between w-full max-w-md gap-1 xs:gap-1.5 sm:gap-2.5 px-1">
                       {/* Left 1: Pular item */}
                       <button
                         type="button"
                         onClick={handleSkipGuidedProduct}
                         disabled={!currentGuidedProduct}
-                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md border border-white/20 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md border border-white/20 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Pular este item individual e tirar foto depois"
                       >
-                        <FastForward className="w-4 h-4 sm:w-5 sm:h-5 text-amber-400 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-white/90 mt-0.5 sm:mt-1 leading-none tracking-tight">
-                          Pular item
-                        </span>
+                        <FastForward className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-400 group-hover:scale-110 transition shrink-0" />
+                        <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
+                          <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-white/90 leading-[1.05] tracking-tight text-center">
+                            Pular item
+                          </span>
+                        </div>
                       </button>
 
-                      {/* Left 2: Categoria (Pular categoria) */}
+                      {/* Left 2: Pular Categoria */}
                       <button
                         type="button"
                         onClick={handleSkipSubcategory}
                         disabled={!currentGuidedProduct}
-                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-indigo-500/25 hover:bg-indigo-500/35 active:scale-95 text-indigo-200 backdrop-blur-md border border-indigo-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-indigo-500/25 hover:bg-indigo-500/35 active:scale-95 text-indigo-200 backdrop-blur-md border border-indigo-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Pular todos os itens desta categoria/subcategoria"
                       >
-                        <ChevronsRight className="w-4 h-4 sm:w-5 sm:h-5 text-indigo-300 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-indigo-100 mt-0.5 sm:mt-1 leading-none tracking-tight">
-                          Categoria
-                        </span>
+                        <ChevronsRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-indigo-300 group-hover:scale-110 transition shrink-0" />
+                        <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
+                          <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-indigo-100 leading-[1.05] tracking-tight text-center">
+                            Pular Categoria
+                          </span>
+                        </div>
                       </button>
 
                       {/* Center: Botão Vermelho Redondo de Tirar a Foto */}
-                      <div className="relative flex items-center justify-center shrink-0 mx-0.5 sm:mx-1">
+                      <div className="relative flex items-center justify-center shrink-0 mx-0.5 sm:mx-1.5">
                         <button
                           type="button"
                           id="btn-capture-batch-frame"
                           onClick={handleCaptureGuidedProduct}
-                          className={`w-15 h-15 xs:w-16 xs:h-16 sm:w-20 sm:h-20 rounded-full border-3 sm:border-4 border-white/90 active:scale-90 shadow-2xl flex items-center justify-center transition-all duration-150 cursor-pointer ring-3 sm:ring-4 ring-black/40 ${
+                          className={`w-14 h-14 xs:w-15 xs:h-15 sm:w-18 sm:h-18 rounded-full border-3 sm:border-4 border-white/90 active:scale-90 shadow-2xl flex items-center justify-center transition-all duration-150 cursor-pointer ring-3 sm:ring-4 ring-black/40 ${
                             keepCurrentPrice
                               ? 'bg-emerald-600 hover:bg-emerald-700 ring-emerald-400/40'
                               : 'bg-[#D40511] hover:bg-[#b0040e]'
                           }`}
                           title={keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
                         >
-                          <div className="w-11 h-11 xs:w-12 xs:h-12 sm:w-15 sm:h-15 rounded-full border border-white/40 sm:border-2 flex items-center justify-center">
-                            <Camera className="w-5 h-5 xs:w-6 xs:h-6 sm:w-7 sm:h-7 text-white drop-shadow" />
+                          <div className="w-10 h-10 xs:w-11 xs:h-11 sm:w-14 sm:h-14 rounded-full border border-white/40 sm:border-2 flex items-center justify-center">
+                            <Camera className="w-5 h-5 xs:w-5.5 xs:h-5.5 sm:w-6.5 sm:h-6.5 text-white drop-shadow" />
                           </div>
                         </button>
                         {keepCurrentPrice && (
@@ -2963,13 +3027,15 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         type="button"
                         onClick={handleMarkOutOfStock}
                         disabled={!currentGuidedProduct}
-                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 active:scale-95 text-rose-200 backdrop-blur-md border border-rose-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
+                        className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-rose-500/25 hover:bg-rose-500/35 active:scale-95 text-rose-200 backdrop-blur-md border border-rose-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Marca que o produto não está disponível nesta loja"
                       >
-                        <PackageX className="w-4 h-4 sm:w-5 sm:h-5 text-rose-300 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-rose-100 mt-0.5 sm:mt-1 leading-none tracking-tight">
-                          Não tem
-                        </span>
+                        <PackageX className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-rose-300 group-hover:scale-110 transition shrink-0" />
+                        <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
+                          <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-rose-100 leading-[1.05] tracking-tight text-center">
+                            Não tem na loja
+                          </span>
+                        </div>
                       </button>
 
                       {/* Right 2: Concluir */}
@@ -2977,7 +3043,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         type="button"
                         id="btn-stop-camera"
                         onClick={stopCamera}
-                        className="flex flex-col items-center justify-center w-12 h-12 xs:w-13 xs:h-13 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl bg-emerald-500/25 hover:bg-emerald-500/35 active:scale-95 text-emerald-200 backdrop-blur-md border border-emerald-400/30 transition cursor-pointer shadow-lg relative group"
+                        className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-emerald-500/25 hover:bg-emerald-500/35 active:scale-95 text-emerald-200 backdrop-blur-md border border-emerald-400/30 transition cursor-pointer shadow-lg relative group"
                         title="Concluir sessão de fotos e revisar lote"
                       >
                         {batchItems.length > 0 && (
@@ -2985,10 +3051,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                             {batchItems.length}
                           </span>
                         )}
-                        <CheckCircle2 className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
-                        <span className="text-[8px] xs:text-[9px] sm:text-[10px] font-black text-emerald-100 mt-0.5 sm:mt-1 leading-none tracking-tight">
-                          Concluir
-                        </span>
+                        <CheckCircle2 className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
+                        <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
+                          <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-emerald-100 leading-[1.05] tracking-tight text-center">
+                            Concluir
+                          </span>
+                        </div>
                       </button>
                     </div>
                   </div>

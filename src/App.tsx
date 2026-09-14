@@ -1208,6 +1208,7 @@ export default function App() {
             records={state.records}
             products={state.products}
             chains={state.chains}
+            users={state.users}
             initialSelectedRecordId={selectedAuditRecordId}
             onDeleteRecord={handleDeletePriceRecord}
             onUpdateRecord={handleUpdatePriceRecord}

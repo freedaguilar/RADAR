@@ -276,24 +276,87 @@ export function safeParseJSON(text: string): any {
   return null;
 }
 
-/**
- * Decodes metadata from a PriceRecord notes column if it was saved as pending.
- */
-export function parsePriceRecordMeta(notes: string | undefined): {
+export interface ResearchSessionMeta {
+  sessionId?: string;
+  sessionTime?: string;
+  startedAt?: string;
+  completedAt?: string;
+  outOfStockProductIds?: string[];
+  outOfStockProductNames?: string[];
+  completedEarly?: boolean;
+  remainingQueueCount?: number;
+  queueTotal?: number;
+}
+
+export interface ParsedPriceRecordMeta {
   isPending: boolean;
   aiProductSuggested: string;
   aiPriceSuggested: number;
   originalNotes: string;
-} {
-  if (notes && notes.startsWith('__PENDING_METADATA__:')) {
+  session?: ResearchSessionMeta;
+}
+
+/**
+ * Removes internal metadata prefixes (__SESSION_META__:...__ or __PENDING_METADATA__:...)
+ * to get pure human-readable notes for UI display.
+ */
+export function stripSessionMetaPrefix(notes: string | undefined): string {
+  if (!notes) return '';
+  if (notes.startsWith('__PENDING_METADATA__:')) {
     try {
       const jsonStr = notes.substring('__PENDING_METADATA__:'.length);
       const meta = JSON.parse(jsonStr);
+      return (meta.originalNotes || '').trim();
+    } catch {
+      return '';
+    }
+  }
+  if (notes.startsWith('__SESSION_META__:')) {
+    const endIdx = notes.indexOf('__', '__SESSION_META__:'.length);
+    if (endIdx !== -1) {
+      return notes.substring(endIdx + 2).trim();
+    }
+  }
+  return notes.trim();
+}
+
+/**
+ * Decodes metadata from a PriceRecord notes column if it was saved as pending or with session meta.
+ */
+export function parsePriceRecordMeta(notes: string | undefined): ParsedPriceRecordMeta {
+  if (!notes) {
+    return {
+      isPending: false,
+      aiProductSuggested: '',
+      aiPriceSuggested: 0,
+      originalNotes: '',
+    };
+  }
+
+  // 1. Pending metadata check
+  if (notes.startsWith('__PENDING_METADATA__:')) {
+    try {
+      const jsonStr = notes.substring('__PENDING_METADATA__:'.length);
+      const meta = JSON.parse(jsonStr);
+      const hasSession = Boolean(meta.sessionId || meta.sessionTime || meta.outOfStockProductIds);
+      const sessionObj: ResearchSessionMeta | undefined = hasSession ? {
+        sessionId: meta.sessionId,
+        sessionTime: meta.sessionTime,
+        startedAt: meta.startedAt,
+        completedAt: meta.completedAt,
+        outOfStockProductIds: Array.isArray(meta.outOfStockProductIds) ? meta.outOfStockProductIds : [],
+        outOfStockProductNames: Array.isArray(meta.outOfStockProductNames) ? meta.outOfStockProductNames : [],
+        completedEarly: meta.completedEarly,
+        remainingQueueCount: meta.remainingQueueCount,
+        queueTotal: meta.queueTotal,
+      } : undefined;
+
       return {
         isPending: meta.status === 'pendente',
         aiProductSuggested: meta.aiProductSuggested || '',
         aiPriceSuggested: meta.aiPriceSuggested || 0,
-        originalNotes: meta.originalNotes || ''
+        originalNotes: meta.originalNotes || '',
+        session: sessionObj,
       };
     } catch (e) {
       return {
@@ -304,6 +367,38 @@ export function parsePriceRecordMeta(notes: string | undefined): {
       };
     }
   }
+
+  // 2. Session metadata check for consolidated records
+  if (notes.startsWith('__SESSION_META__:')) {
+    try {
+      const endIdx = notes.indexOf('__', '__SESSION_META__:'.length);
+      if (endIdx !== -1) {
+        const jsonStr = notes.substring('__SESSION_META__:'.length, endIdx);
+        const meta = JSON.parse(jsonStr);
+        const cleanNotes = notes.substring(endIdx + 2).trim();
+        return {
+          isPending: false,
+          aiProductSuggested: '',
+          aiPriceSuggested: 0,
+          originalNotes: cleanNotes,
+          session: {
+            sessionId: meta.sessionId,
+            sessionTime: meta.sessionTime,
+            startedAt: meta.startedAt,
+            completedAt: meta.completedAt,
+            outOfStockProductIds: Array.isArray(meta.outOfStockProductIds) ? meta.outOfStockProductIds : [],
+            outOfStockProductNames: Array.isArray(meta.outOfStockProductNames) ? meta.outOfStockProductNames : [],
+            completedEarly: meta.completedEarly,
+            remainingQueueCount: meta.remainingQueueCount,
+            queueTotal: meta.queueTotal,
+          }
+        };
+      }
+    } catch (e) {
+      // Fall through to plain text
+    }
+  }
+
   return {
     isPending: false,
     aiProductSuggested: '',
@@ -315,14 +410,53 @@ export function parsePriceRecordMeta(notes: string | undefined): {
 /**
  * Encodes metadata for pending audit records.
  */
-export function serializePendingMeta(aiProductSuggested?: string, aiPriceSuggested?: number, originalNotes?: string): string {
-  const meta = {
+export function serializePendingMeta(
+  aiProductSuggested?: string, 
+  aiPriceSuggested?: number, 
+  originalNotes?: string,
+  sessionMeta?: ResearchSessionMeta
+): string {
+  const meta: any = {
     status: 'pendente',
     aiProductSuggested: aiProductSuggested || '',
     aiPriceSuggested: aiPriceSuggested || 0,
-    originalNotes: originalNotes || ''
+    originalNotes: originalNotes ? stripSessionMetaPrefix(originalNotes) : '',
   };
+  if (sessionMeta) {
+    if (sessionMeta.sessionId) meta.sessionId = sessionMeta.sessionId;
+    if (sessionMeta.sessionTime) meta.sessionTime = sessionMeta.sessionTime;
+    if (sessionMeta.startedAt) meta.startedAt = sessionMeta.startedAt;
+    if (sessionMeta.completedAt) meta.completedAt = sessionMeta.completedAt;
+    if (sessionMeta.outOfStockProductIds) meta.outOfStockProductIds = sessionMeta.outOfStockProductIds;
+    if (sessionMeta.outOfStockProductNames) meta.outOfStockProductNames = sessionMeta.outOfStockProductNames;
+    if (typeof sessionMeta.completedEarly === 'boolean') meta.completedEarly = sessionMeta.completedEarly;
+    if (typeof sessionMeta.remainingQueueCount === 'number') meta.remainingQueueCount = sessionMeta.remainingQueueCount;
+    if (typeof sessionMeta.queueTotal === 'number') meta.queueTotal = sessionMeta.queueTotal;
+  }
   return `__PENDING_METADATA__:${JSON.stringify(meta)}`;
+}
+
+/**
+ * Encodes session metadata for consolidated audit records.
+ */
+export function serializeSessionMeta(
+  notes?: string,
+  sessionMeta?: ResearchSessionMeta
+): string {
+  if (!sessionMeta || !sessionMeta.sessionId) return notes || '';
+  const cleanNotes = notes ? stripSessionMetaPrefix(notes) : '';
+  const meta: any = {
+    sessionId: sessionMeta.sessionId,
+    sessionTime: sessionMeta.sessionTime,
+    startedAt: sessionMeta.startedAt,
+    completedAt: sessionMeta.completedAt,
+    outOfStockProductIds: sessionMeta.outOfStockProductIds || [],
+    outOfStockProductNames: sessionMeta.outOfStockProductNames || [],
+    completedEarly: sessionMeta.completedEarly,
+    remainingQueueCount: sessionMeta.remainingQueueCount,
+    queueTotal: sessionMeta.queueTotal,
+  };
+  return `__SESSION_META__:${JSON.stringify(meta)}__${cleanNotes}`;
 }
 
 

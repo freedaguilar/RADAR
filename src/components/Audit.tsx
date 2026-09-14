@@ -1,13 +1,20 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, X, Maximize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, History, ArrowRight } from 'lucide-react';
-import { PriceRecord, Product, Chain } from '../types';
-import { parsePriceRecordMeta, searchAndRankProducts } from '../lib/textUtils';
+import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, X, Maximize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, History, ArrowRight, Store, PackageX, Clock, Layers, CheckCheck } from 'lucide-react';
+import { PriceRecord, Product, Chain, User as AppUser } from '../types';
+import { parsePriceRecordMeta, searchAndRankProducts, serializePendingMeta } from '../lib/textUtils';
 import { supabase, recordAiCorrection } from '../lib/supabase';
+import { groupRecordsIntoResearchSessions, ResearchSession, formatDateBR as formatSessionDateBR } from '../lib/researchSessions';
+import { PendingSessionCard } from './audit/PendingSessionCard';
+import { ConsolidatedSessionCard } from './audit/ConsolidatedSessionCard';
+import { SessionDetailModal } from './audit/SessionDetailModal';
+import { OutOfStockModal } from './audit/OutOfStockModal';
+import { SessionPagination } from './audit/SessionPagination';
 
 interface AuditProps {
   records: PriceRecord[];
   products: Product[];
   chains: Chain[];
+  users?: AppUser[];
   initialSelectedRecordId?: string | null;
   onDeleteRecord?: (recordId: string) => void;
   onUpdateRecord?: (record: PriceRecord) => void;
@@ -18,6 +25,7 @@ export function Audit({
   records, 
   products, 
   chains, 
+  users,
   initialSelectedRecordId, 
   onDeleteRecord, 
   onUpdateRecord,
@@ -35,7 +43,18 @@ export function Audit({
   const [isLoadingMorePending, setIsLoadingMorePending] = useState(false);
   const pendingSentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Pagination states for audited records
+  // Research Session & Detail Modal states
+  const [selectedSessionForDetail, setSelectedSessionForDetail] = useState<ResearchSession | null>(null);
+  const [selectedSessionForOutOfStock, setSelectedSessionForOutOfStock] = useState<ResearchSession | null>(null);
+  const [consolidatedViewMode, setConsolidatedViewMode] = useState<'sessions' | 'photos'>('sessions');
+  const [sessionPage, setSessionPage] = useState(1);
+  const [sessionsPerPage, setSessionsPerPage] = useState(6);
+  const [selectedStateFilter, setSelectedStateFilter] = useState('Todos');
+  const [ruptureFilter, setRuptureFilter] = useState<'all' | 'with_rupture' | 'no_rupture'>('all');
+  const [queueFilter, setQueueFilter] = useState<'all' | 'early' | 'completed'>('all');
+  const [analyzingRecordsMap, setAnalyzingRecordsMap] = useState<Record<string, boolean>>({});
+
+  // Pagination states for audited records (legacy photo grid)
   const [auditCurrentPage, setAuditCurrentPage] = useState(1);
   const [auditItemsPerPage, setAuditItemsPerPage] = useState(12);
 
@@ -321,6 +340,61 @@ export function Audit({
     }
   };
 
+  // Re-analyze specific record inside a pending research session card
+  const handleReanalyzeRecord = async (rec: PriceRecord) => {
+    setAnalyzingRecordsMap((prev) => ({ ...prev, [rec.id]: true }));
+    try {
+      const response = await fetch('/api/analyze-price', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: rec.imageUrl,
+          chainId: rec.chainId,
+          products: products.map((p) => ({
+            id: p.id,
+            name: p.name,
+            brand: p.brand,
+          })),
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Falha na resposta da API.');
+      }
+
+      const data = await response.json();
+      if (data && data.price !== undefined) {
+        let matchedId = data.matchedProductId || rec.productId;
+        if (!matchedId && data.produto) {
+          const activeProducts = products.filter((p) => p.active);
+          const matches = searchAndRankProducts(activeProducts, data.produto);
+          if (matches.length > 0) matchedId = matches[0].id;
+        }
+
+        const currentMeta = parsePriceRecordMeta(rec.notes);
+        const updatedNotes = serializePendingMeta(
+          data.produto || currentMeta.aiProductSuggested,
+          data.price,
+          currentMeta.originalNotes,
+          currentMeta.session
+        );
+
+        onUpdateRecord?.({
+          ...rec,
+          productId: matchedId,
+          price: data.price,
+          notes: updatedNotes,
+        });
+      }
+    } catch (err) {
+      console.error('Erro na re-análise do item pendente:', err);
+    } finally {
+      setAnalyzingRecordsMap((prev) => ({ ...prev, [rec.id]: false }));
+    }
+  };
+
   const handleCloseLightbox = () => {
     setSelectedRecordId(null);
     setShowDeleteConfirm(false);
@@ -425,6 +499,83 @@ export function Audit({
       return rec.productId && !isPending;
     });
   }, [records]);
+
+  // Group pending records into distinct research sessions
+  const pendingResearchSessions = useMemo(() => {
+    const sessions = groupRecordsIntoResearchSessions(pendingRecords, chains, products, users);
+    return sessions.filter((s) => s.pendingRecords.length > 0);
+  }, [pendingRecords, chains, products, users]);
+
+  // Group consolidated (audited) records into distinct research sessions
+  const consolidatedResearchSessions = useMemo(() => {
+    const sessions = groupRecordsIntoResearchSessions(auditedRecords, chains, products, users);
+    return sessions.filter((s) => s.consolidatedRecords.length > 0);
+  }, [auditedRecords, chains, products, users]);
+
+  // Unique list of states for filter dropdown
+  const availableStates = useMemo(() => {
+    const set = new Set<string>();
+    chains.forEach((c) => (c.states || []).forEach((s) => set.add(s)));
+    records.forEach((r) => { if (r.state) set.add(r.state); });
+    return Array.from(set).sort();
+  }, [chains, records]);
+
+  // Filter consolidated research sessions
+  const filteredConsolidatedSessions = useMemo(() => {
+    return consolidatedResearchSessions.filter((session) => {
+      // Chain filter
+      if (selectedChainId !== 'Todas' && session.chainId !== selectedChainId) return false;
+
+      // State filter
+      if (selectedStateFilter !== 'Todos' && session.state !== selectedStateFilter) return false;
+
+      // Period filter
+      if (filterPeriodDays !== 'Todas') {
+        const limitDays = parseInt(filterPeriodDays, 10);
+        const limitDate = new Date();
+        limitDate.setDate(limitDate.getDate() - limitDays);
+        const sessionDate = new Date(session.date);
+        if (sessionDate < limitDate) return false;
+      }
+
+      // Rupture filter
+      if (ruptureFilter === 'with_rupture' && session.outOfStockProductIds.length === 0) return false;
+      if (ruptureFilter === 'no_rupture' && session.outOfStockProductIds.length > 0) return false;
+
+      // Queue status filter
+      if (queueFilter === 'early' && !session.completedEarly) return false;
+      if (queueFilter === 'completed' && session.completedEarly) return false;
+
+      // Text search
+      if (searchNotes.trim()) {
+        const query = searchNotes.toLowerCase().trim();
+        const matchChain = session.chainName.toLowerCase().includes(query);
+        const matchState = session.state.toLowerCase().includes(query);
+        const matchUser = session.userName.toLowerCase().includes(query) || session.userEmail.toLowerCase().includes(query);
+        const matchOutOfStock = session.outOfStockProductNames.some((n) => n.toLowerCase().includes(query));
+        const matchRecords = session.consolidatedRecords.some((r) => {
+          const prod = products.find((p) => p.id === r.productId);
+          return (prod?.name?.toLowerCase().includes(query)) || (r.notes?.toLowerCase().includes(query));
+        });
+        if (!matchChain && !matchState && !matchUser && !matchOutOfStock && !matchRecords) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [consolidatedResearchSessions, selectedChainId, selectedStateFilter, filterPeriodDays, ruptureFilter, queueFilter, searchNotes, products]);
+
+  // Reset session page when filters change
+  useEffect(() => {
+    setSessionPage(1);
+  }, [selectedChainId, selectedStateFilter, filterPeriodDays, ruptureFilter, queueFilter, searchNotes, sessionsPerPage]);
+
+  // Paginated consolidated sessions
+  const paginatedConsolidatedSessions = useMemo(() => {
+    const start = (sessionPage - 1) * sessionsPerPage;
+    return filteredConsolidatedSessions.slice(start, start + sessionsPerPage);
+  }, [filteredConsolidatedSessions, sessionPage, sessionsPerPage]);
 
   // Filter audited records based on options
   const filteredAuditRecords = useMemo(() => {
@@ -687,672 +838,446 @@ export function Audit({
         </p>
       </div>
 
-      {/* 1. SEÇÃO PENDENTE DE ANÁLISE - LISTA COM AUDITORIA RÁPIDA E LAZY LOADING */}
-      {pendingRecords.length > 0 && (
-        <div className="bg-amber-50/30 border border-amber-200/90 p-5 sm:p-6 rounded-3xl space-y-4 shadow-2xs" id="pending-audits-section">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-200/60 pb-3">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="flex h-3 w-3 relative">
+      {/* 1. SEÇÃO PENDENTE DE ANÁLISE - ORGANIZADA POR PESQUISAS DE CAMPO */}
+      {pendingResearchSessions.length > 0 && (
+        <div className="bg-amber-50/40 border border-amber-200/90 p-5 sm:p-6 rounded-3xl space-y-6 shadow-2xs" id="pending-audits-section">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-amber-200/70 pb-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="flex h-3.5 w-3.5 relative">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500"></span>
               </span>
-              <h2 className="text-sm font-extrabold text-amber-950 uppercase tracking-widest font-sans">
-                Pendentes de Análise ({pendingRecords.length})
-              </h2>
-              {pendingRecords.length > PENDING_BATCH_SIZE && (
-                <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 font-bold px-2 py-0.5 rounded-full font-mono">
-                  Exibindo {visiblePendingRecords.length} de {pendingRecords.length}
-                </span>
-              )}
+              <div>
+                <h2 className="text-base font-extrabold text-amber-950 uppercase tracking-wider font-sans flex items-center gap-2">
+                  Pendentes de Análise
+                  <span className="text-xs bg-amber-200 text-amber-900 border border-amber-300 font-bold px-2.5 py-0.5 rounded-full font-mono">
+                    {pendingResearchSessions.length} {pendingResearchSessions.length === 1 ? 'Pesquisa' : 'Pesquisas'} &bull; {pendingRecords.length} {pendingRecords.length === 1 ? 'Foto' : 'Fotos'}
+                  </span>
+                </h2>
+                <p className="text-xs text-amber-800 font-sans font-medium mt-0.5">
+                  Pesquisas de campo agrupadas com identificação de auditor, horário de realização, conferência de rupturas ("não tem") e status da fila.
+                </p>
+              </div>
             </div>
-            <p className="text-[11px] text-amber-800 font-sans font-medium">
-              Auditoria rápida em lista com carregamento incremental. Altere ou mantenha o último preço e confirme diretamente.
-            </p>
           </div>
-          
+
           <div className="space-y-4">
-            {visiblePendingRecords.map((rec) => {
-              const itemState = getOrInitItemState(rec);
-              const meta = parsePriceRecordMeta(rec.notes);
-              const activeProducts = products.filter(p => p.active);
-              const matchedProduct = itemState.productId ? products.find(p => p.id === itemState.productId) : null;
-              const latestPrice = matchedProduct ? getLatestPriceForProductInChain(matchedProduct.id, itemState.chainId) : null;
-              const latestRecord = matchedProduct ? getLatestPriceRecordForProductInChain(matchedProduct.id, itemState.chainId) : null;
-              
-              const filteredProdsForThis = itemState.searchQuery
-                ? searchAndRankProducts(activeProducts, itemState.searchQuery)
-                : activeProducts.slice(0, 6);
-
-              const priceNum = parseFloat(itemState.price.replace(',', '.')) || 0;
-              const isReadyToConfirm = Boolean(itemState.productId && priceNum > 0);
-
-              return (
-                <div
-                  id={`pending-row-${rec.id}`}
-                  key={rec.id}
-                  className="bg-white border border-amber-200/90 hover:border-amber-400 rounded-2xl p-4 transition-all shadow-2xs relative group"
-                >
-                  <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-                    {/* Column 1: Thumbnail & Metadata (Date & User under image) */}
-                    <div className="flex flex-col items-center gap-1.5 shrink-0 w-24 sm:w-28">
-                      <div 
-                        onClick={() => {
-                          setPreviewImageRecord(rec);
-                          setPreviewZoom(1);
-                        }}
-                        className="w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden relative border border-slate-200 bg-slate-100 cursor-pointer shrink-0 group/img shadow-2xs"
-                        title="Clique para visualizar a foto da evidência em alta resolução"
-                      >
-                        <img
-                          src={rec.imageUrl}
-                          alt="Evidência pendente"
-                          referrerPolicy="no-referrer"
-                          loading="lazy"
-                          className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
-                        />
-                        <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center text-white">
-                          <ZoomIn className="w-5 h-5 drop-shadow-md" />
-                        </div>
-                        <div className="absolute top-1 left-1 bg-amber-500 text-white font-black text-[7.5px] px-1.5 py-0.5 rounded uppercase tracking-wider shadow-xs">
-                          Pendente
-                        </div>
-                      </div>
-
-                      {/* Date and User strictly below image */}
-                      <div className="w-full flex flex-col items-center text-center space-y-0.5 px-0.5">
-                        <span className="text-[9.5px] text-slate-500 font-mono inline-flex items-center justify-center gap-1 w-full truncate">
-                          <Calendar className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span className="truncate">{formatDateBR(rec.date)}</span>
-                        </span>
-                        <span className="text-[9.5px] text-slate-700 font-medium inline-flex items-center justify-center gap-1 w-full truncate" title={rec.userName}>
-                          <User className="w-3 h-3 text-slate-400 shrink-0" />
-                          <span className="truncate">{rec.userName}</span>
-                          {(rec.notes?.includes('[Registro Convidado') || rec.userName?.toLowerCase().includes('convidado')) && (
-                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[7.5px] font-black px-1 py-0.2 rounded font-mono shrink-0">
-                              Convidado
-                            </span>
-                          )}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Column 2: Audit Form Fields (Balanced Grid on Desktop) */}
-                    <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 items-start">
-                      {/* Field 1: Store / Chain (4 cols on Web) */}
-                      <div className="sm:col-span-1 lg:col-span-4">
-                        <label className="block text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500 mb-1 font-sans">
-                          1. Rede / Loja
-                        </label>
-                        <select
-                          value={itemState.chainId}
-                          onChange={(e) => updateQuickItemState(rec.id, { chainId: e.target.value })}
-                          className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:bg-white focus:border-[#D40511] h-9 shadow-2xs"
-                        >
-                          {chains.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      {/* Field 2: Product selection (5 cols on Web - generous space for readable names) */}
-                      <div className="sm:col-span-1 lg:col-span-5 relative">
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-[9.5px] font-extrabold uppercase tracking-wider text-slate-500 font-sans">
-                            2. <span className="sm:hidden">Produto Vinculado</span><span className="hidden sm:inline">Produto</span>
-                          </label>
-                          {matchedProduct && (
-                            <button
-                              type="button"
-                              onClick={() => updateQuickItemState(rec.id, { productId: null, searchQuery: '', isDropdownOpen: true })}
-                              className="text-[9.5px] text-[#D40511] hover:underline font-bold cursor-pointer transition-colors"
-                            >
-                              Alterar
-                            </button>
-                          )}
-                        </div>
-
-                        {matchedProduct ? (
-                          <div 
-                            onClick={() => {
-                              if (matchedProduct.imageUrl) {
-                                setPreviewProduct(matchedProduct);
-                              }
-                            }}
-                            className={`flex items-center gap-2 px-2.5 py-1 bg-emerald-50/80 border border-emerald-200 rounded-lg h-9 shadow-2xs transition-all ${matchedProduct.imageUrl ? 'hover:bg-emerald-100 hover:border-emerald-300 cursor-pointer group/prod' : ''}`}
-                            title={matchedProduct.imageUrl ? 'Clique para visualizar a imagem do produto' : `${matchedProduct.name} ${matchedProduct.weight ? `(${matchedProduct.weight})` : ''}`}
-                          >
-                            {matchedProduct.imageUrl ? (
-                              <img 
-                                src={matchedProduct.imageUrl} 
-                                alt={matchedProduct.name} 
-                                referrerPolicy="no-referrer"
-                                className="w-6 h-6 object-contain bg-white rounded border border-slate-100 shrink-0 group-hover/prod:scale-110 transition-transform" 
-                              />
-                            ) : (
-                              <div className="w-6 h-6 rounded bg-white flex items-center justify-center border border-slate-200 shrink-0">
-                                <ImageIcon className="w-3 h-3 text-slate-400" />
-                              </div>
-                            )}
-                            <span className="text-xs font-bold text-slate-800 truncate flex-1" title={`${matchedProduct.name} ${matchedProduct.weight ? `(${matchedProduct.weight})` : ''}`}>
-                              {matchedProduct.name}
-                            </span>
-                            {matchedProduct.imageUrl && (
-                              <span className="text-[9px] text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider shrink-0 flex items-center gap-1 group-hover/prod:bg-emerald-200">
-                                <Eye className="w-3 h-3 text-emerald-700" />
-                                <span className="hidden sm:inline">Ver</span>
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="relative">
-                            <input
-                              type="text"
-                              placeholder="Buscar produto..."
-                              value={itemState.searchQuery}
-                              onFocus={() => updateQuickItemState(rec.id, { isDropdownOpen: true })}
-                              onBlur={() => setTimeout(() => updateQuickItemState(rec.id, { isDropdownOpen: false }), 250)}
-                              onChange={(e) => updateQuickItemState(rec.id, { searchQuery: e.target.value, isDropdownOpen: true })}
-                              className="w-full pl-7 pr-2 py-1.5 bg-slate-50 border border-amber-300 rounded-lg text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none focus:bg-white focus:border-[#D40511] h-9 shadow-2xs"
-                            />
-                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2 top-2.5" />
-
-                            {itemState.isDropdownOpen && (
-                              <div className="absolute left-0 right-0 top-10 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-56 overflow-y-auto">
-                                {filteredProdsForThis.length > 0 ? (
-                                  filteredProdsForThis.map(p => (
-                                    <button
-                                      key={p.id}
-                                      type="button"
-                                      onClick={() => {
-                                        updateQuickItemState(rec.id, {
-                                          productId: p.id,
-                                          searchQuery: p.name,
-                                          isDropdownOpen: false,
-                                        });
-                                      }}
-                                      className="w-full text-left px-2.5 py-2 text-[10px] font-bold text-slate-700 hover:bg-amber-50/60 flex items-center justify-between border-b border-slate-100 last:border-none cursor-pointer gap-2 transition-colors"
-                                    >
-                                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                                        {p.imageUrl ? (
-                                          <img
-                                            src={p.imageUrl}
-                                            alt={p.name}
-                                            referrerPolicy="no-referrer"
-                                            className="w-6 h-6 rounded object-contain bg-white border border-slate-100 shrink-0"
-                                          />
-                                        ) : (
-                                          <div className="w-6 h-6 rounded bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
-                                            <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
-                                          </div>
-                                        )}
-                                        <div className="flex flex-col min-w-0">
-                                          <span className="truncate text-slate-800">{p.name} {p.weight ? `(${p.weight})` : ''}</span>
-                                          {(() => {
-                                            const prodPrice = getLatestPriceForProductInChain(p.id, itemState.chainId);
-                                            return prodPrice !== null ? (
-                                              <span className="text-[8.5px] text-[#D40511] font-mono font-bold">
-                                                Último: R$ {prodPrice.toFixed(2).replace('.', ',')}
-                                              </span>
-                                            ) : null;
-                                          })()}
-                                        </div>
-                                      </div>
-                                      <span className="text-[8px] bg-slate-100 text-slate-500 font-mono px-1.5 py-0.5 rounded uppercase shrink-0">
-                                        {p.category}
-                                      </span>
-                                    </button>
-                                  ))
-                                ) : (
-                                  <div className="p-3 text-[10px] text-slate-400 italic text-center">
-                                    Nenhum produto correspondente.
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Field 3: Price + "Manter preço" Button (3 cols on Web) */}
-                      <div className="sm:col-span-1 lg:col-span-3">
-                        <div className="flex items-center justify-between mb-1">
-                          <label className="block text-[9.5px] font-extrabold uppercase tracking-wider text-[#D40511] font-sans">
-                            3. Preço (R$) *
-                          </label>
-                          {/* Mobile version of Maintain Price button */}
-                          {latestPrice !== null && (
-                            <button
-                              type="button"
-                              onClick={() => updateQuickItemState(rec.id, { price: latestPrice.toFixed(2).replace('.', ',') })}
-                              className="sm:hidden text-[9px] font-extrabold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded inline-flex items-center gap-1 cursor-pointer shadow-2xs active:scale-95 transition-all"
-                              title="Preencher com o último preço registrado para este produto nesta rede"
-                            >
-                              <RotateCcw className="w-2.5 h-2.5 text-emerald-600" />
-                              Manter R$ {latestPrice.toFixed(2).replace('.', ',')}
-                            </button>
-                          )}
-                        </div>
-
-                        <div className="relative rounded-lg h-9">
-                          <span className="absolute left-2.5 top-2 text-[10px] font-extrabold text-[#D40511]">R$</span>
-                          <input
-                            type="text"
-                            placeholder="0,00"
-                            value={itemState.price}
-                            onChange={(e) => updateQuickItemState(rec.id, { price: formatToCalculatorPrice(e.target.value) })}
-                            className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-mono font-bold text-[#D40511] focus:outline-none focus:bg-white focus:border-[#D40511] h-9 shadow-2xs"
-                          />
-                        </div>
-
-                        {/* Web/Desktop exclusive version of Maintain Price button (clean, un-truncated button below input) */}
-                        {latestPrice !== null && (
-                          <div className="hidden sm:block mt-1">
-                            <button
-                              type="button"
-                              onClick={() => updateQuickItemState(rec.id, { price: latestPrice.toFixed(2).replace('.', ',') })}
-                              className="w-full text-[9.5px] font-extrabold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300/80 hover:border-emerald-400 px-2 py-1 rounded-lg inline-flex items-center justify-center gap-1 cursor-pointer shadow-2xs active:scale-95 transition-all whitespace-nowrap"
-                              title={`Preencher com o último preço registrado nesta rede: R$ ${latestPrice.toFixed(2).replace('.', ',')}`}
-                            >
-                              <RotateCcw className="w-3 h-3 text-emerald-600 shrink-0" />
-                              <span>Manter R$ {latestPrice.toFixed(2).replace('.', ',')}</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Field 4: Observações (Exclusively on Tablet & Mobile) */}
-                      <div className="sm:col-span-2 lg:hidden">
-                        <label className="block text-[9.5px] font-extrabold uppercase tracking-wider text-slate-400 mb-1 font-sans">
-                          4. Observações
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Opcional..."
-                          value={itemState.notes}
-                          onChange={(e) => updateQuickItemState(rec.id, { notes: e.target.value })}
-                          className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none focus:bg-white focus:border-slate-400 h-9 placeholder-slate-400 shadow-2xs"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Column 3: Quick Action Buttons */}
-                    <div className="flex flex-row lg:flex-col items-stretch lg:items-center justify-center gap-1.5 shrink-0 pt-2 lg:pt-0 border-t lg:border-t-0 border-slate-100 lg:w-32">
-                      <button
-                        type="button"
-                        disabled={!isReadyToConfirm}
-                        onClick={() => {
-                          if (!itemState.productId || priceNum <= 0) return;
-                          handleExecuteAuditConfirm({
-                            record: rec,
-                            productId: itemState.productId,
-                            chainId: itemState.chainId,
-                            priceNum,
-                            notes: itemState.notes,
-                            suggestedName: meta.aiProductSuggested,
-                            suggestedProdId: null,
-                          });
-                        }}
-                        className="flex-1 xl:flex-initial w-full bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-xl text-[10px] font-extrabold disabled:bg-slate-300 disabled:cursor-not-allowed transition uppercase shadow-2xs flex items-center justify-center gap-1.5 cursor-pointer font-sans h-9 tracking-wider shrink-0"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-100 shrink-0" />
-                        Confirmar
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenPendingConfirm(rec)}
-                        className="flex-1 xl:flex-initial w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-xl text-[9.5px] font-bold border border-slate-200 transition flex items-center justify-center gap-1 cursor-pointer font-sans h-8"
-                        title="Abrir imagem em alta definição, zoom e re-leitura com IA"
-                      >
-                        <Eye className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-                        <span className="truncate">Análise Detalhada</span>
-                      </button>
-
-                      {itemState.showDeleteConfirm ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              onDeleteRecord?.(rec.id);
-                            }}
-                            className="bg-red-600 text-white text-[9px] font-bold px-2 py-1.5 rounded-lg cursor-pointer"
-                          >
-                            Descartar
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => updateQuickItemState(rec.id, { showDeleteConfirm: false })}
-                            className="bg-slate-200 text-slate-700 text-[9px] font-bold px-2 py-1.5 rounded-lg cursor-pointer"
-                          >
-                            X
-                          </button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => updateQuickItemState(rec.id, { showDeleteConfirm: true })}
-                          className="p-2 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition cursor-pointer"
-                          title="Descartar foto"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Sentinel and Lazy Loading Controls for Pending Records */}
-            {visiblePendingRecords.length < pendingRecords.length && (
-              <div 
-                ref={pendingSentinelRef} 
-                className="pt-2 pb-1 flex flex-col items-center justify-center gap-2.5 bg-amber-100/40 border border-dashed border-amber-300/80 rounded-2xl p-4 transition-all"
-              >
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-950 font-sans">
-                  {isLoadingMorePending ? (
-                    <>
-                      <Loader2 className="w-4 h-4 text-amber-700 animate-spin" />
-                      <span>Carregando mais itens pendentes...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                      <span>
-                        Exibindo {visiblePendingRecords.length} de {pendingRecords.length} fotos pendentes (rolagem automática)
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                {/* Progress bar */}
-                <div className="w-full max-w-xs bg-amber-200/80 rounded-full h-1.5 overflow-hidden">
-                  <div 
-                    className="bg-amber-600 h-full transition-all duration-300 rounded-full"
-                    style={{ width: `${(visiblePendingRecords.length / pendingRecords.length) * 100}%` }}
-                  />
-                </div>
-
-                <div className="flex items-center gap-2 mt-1">
-                  <button
-                    type="button"
-                    onClick={handleLoadMorePending}
-                    disabled={isLoadingMorePending}
-                    className="px-3 py-1.5 bg-white hover:bg-amber-50 border border-amber-300 text-amber-900 rounded-xl text-xs font-bold shadow-2xs transition-all cursor-pointer inline-flex items-center gap-1.5"
-                  >
-                    {isLoadingMorePending ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-700" />
-                    ) : (
-                      <ArrowRight className="w-3.5 h-3.5 text-amber-700" />
-                    )}
-                    <span>Carregar mais (+{Math.min(PENDING_BATCH_SIZE, pendingRecords.length - visiblePendingCount)})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleLoadAllPending}
-                    disabled={isLoadingMorePending}
-                    className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-extrabold shadow-2xs transition-all cursor-pointer"
-                  >
-                    Mostrar todos ({pendingRecords.length})
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {pendingRecords.length > PENDING_BATCH_SIZE && visiblePendingRecords.length >= pendingRecords.length && (
-              <div className="text-center py-2 text-[11px] font-bold text-amber-800/80 font-sans">
-                ✓ Todos os {pendingRecords.length} itens pendentes foram carregados.
-              </div>
-            )}
+            {pendingResearchSessions.map((session, index) => (
+              <PendingSessionCard
+                key={session.id}
+                session={session}
+                chains={chains}
+                products={products}
+                records={records}
+                isInitiallyExpanded={index === 0 || pendingResearchSessions.length <= 2}
+                onOpenOutOfStock={(s) => setSelectedSessionForOutOfStock(s)}
+                onPreviewImage={(rec) => {
+                  setPreviewImageRecord(rec);
+                  setPreviewZoom(1);
+                }}
+                onPreviewProduct={(prod) => setPreviewProduct(prod)}
+                onConfirmRecord={handleExecuteAuditConfirm}
+                onDeleteRecord={(recId) => onDeleteRecord?.(recId)}
+                onReanalyze={handleReanalyzeRecord}
+                analyzingRecords={analyzingRecordsMap}
+              />
+            ))}
           </div>
         </div>
       )}
 
-      {/* 2. SEÇÃO DE REGISTROS AUDITADOS / CONFIRMADOS COM PAGINAÇÃO */}
+      {/* 2. SEÇÃO DE REGISTROS AUDITADOS / CONSOLIDADOS - ORGANIZADA POR PESQUISAS DE CAMPO & REPAGINADA */}
       <div className="space-y-6" id="audited-logs-section">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-          <h2 className="text-sm font-extrabold text-slate-800 uppercase tracking-widest leading-none font-sans flex items-center gap-1.5">
-            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            Registros Consolidados & Auditados
-          </h2>
-          <span className="text-xs text-slate-400 font-mono font-semibold">Total: {auditedRecords.length} ({filteredAuditRecords.length} filtrados)</span>
-        </div>
-
-        {/* Advanced Filters */}
-        <div className="bg-white p-4 rounded-xl border border-[#E0E0E0] shadow-2xs grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4" id="audit-filters-grid">
-          {/* Filter Product */}
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Filtrar por Produto</label>
-            <select
-              id="audit-product-filter"
-              value={selectedProductId}
-              onChange={(e) => setSelectedProductId(e.target.value)}
-              className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511] font-sans"
-            >
-              <option value="Todos">Todos os Produtos</option>
-              {products.map((prod) => (
-                <option key={prod.id} value={prod.id}>{prod.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Filter Chain */}
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Filtrar por Rede</label>
-            <select
-              id="audit-chain-filter"
-              value={selectedChainId}
-              onChange={(e) => setSelectedChainId(e.target.value)}
-              className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511] font-sans"
-            >
-              <option value="Todas">Todas as Redes/Bandeiras</option>
-              {chains.map((chain) => (
-                <option key={chain.id} value={chain.id}>{chain.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Period selection */}
-          <div>
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Período de Envio</label>
-            <select
-              id="audit-period-filter"
-              value={filterPeriodDays}
-              onChange={(e) => setFilterPeriodDays(e.target.value)}
-              className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511] font-sans"
-            >
-              <option value="7">Últimos 7 dias</option>
-              <option value="15">Últimos 15 dias</option>
-              <option value="30">Últimos 30 dias</option>
-              <option value="Todas">Todo o histórico</option>
-            </select>
-          </div>
-
-          {/* Search Observations text input */}
-          <div className="relative">
-            <label className="block text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1">Buscar por Observador/Notas</label>
-            <input
-              id="audit-text-search"
-              type="text"
-              placeholder="Ex: Carla Souza, Promo..."
-              value={searchNotes}
-              onChange={(e) => setSearchNotes(e.target.value)}
-              className="w-full bg-[#F5F5F5] border border-[#E0E0E0] rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] placeholder-gray-400 focus:outline-none focus:border-[#D40511] font-sans"
-            />
-          </div>
-        </div>
-
-        {/* Gallery Photo Results (Paginated) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6" id="audit-gallery-results">
-          {paginatedAuditRecords.map((rec) => {
-            const product = products.find((p) => p.id === rec.productId);
-            const chain = chains.find((c) => c.id === rec.chainId);
-
-            return (
-              <div
-                id={`audit-photo-card-${rec.id}`}
-                key={rec.id}
-                onClick={() => setSelectedRecordId(rec.id)}
-                className="bg-white rounded-2xl border border-[#E0E0E0] hover:border-[#D40511] overflow-hidden shadow-2xs hover:shadow-md transition-all group cursor-pointer flex flex-col justify-between"
-              >
-                {/* Image box */}
-                <div className="aspect-video bg-gray-100 overflow-hidden relative">
-                  <img
-                    src={rec.imageUrl}
-                    alt={product?.name}
-                    referrerPolicy="no-referrer"
-                    className="w-full h-full object-cover group-hover:scale-102 transition-transform"
-                  />
-                  
-                  {/* Embedded quick price label and chain badge */}
-                  <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
-                    <span className="bg-[#1A1A1A] text-white font-mono text-[10px] font-black px-2 py-0.5 rounded shadow">
-                      R$ {rec.price.toFixed(2)}
-                    </span>
-                    <span className="text-[8px] bg-red-100/90 text-[#D40511] font-bold px-1.5 py-0.5 rounded shadow">
-                      {chain?.name.split(' ')[0]}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Text Meta Container */}
-                <div className="p-4 flex-1 flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      {product?.imageUrl && (
-                        <img src={product.imageUrl} alt={product.name} className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100 shrink-0" />
-                      )}
-                      <h4 
-                        className="text-xs font-bold text-[#1A1A1A] line-clamp-1 leading-normal font-sans hover:text-[#D40511] cursor-pointer" 
-                        title={product?.name}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNavigate?.('produtos', { action: 'detail', productId: rec.productId });
-                        }}
-                      >
-                        {product ? product.name : 'Produto Indisponível'} {product?.weight ? `(${product.weight})` : ''}
-                      </h4>
-                    </div>
-                    <p className="text-[10px] text-gray-500 font-sans truncate mt-1">
-                      Rede: {chain ? chain.name : 'Indefinida'}
-                    </p>
-                  </div>
-
-                  <div className="pt-2 border-t border-[#F5F5F5] flex items-center justify-between text-[9px] text-gray-400 font-sans">
-                    <span className="truncate max-w-[100px] inline-flex items-center gap-0.5" title={rec.userName}>
-                      <User className="w-2.5 h-2.5 shrink-0" /> {rec.userName}
-                    </span>
-                    <span className="flex items-center gap-0.5">
-                      <Calendar className="w-2.5 h-2.5 shrink-0" /> {formatDateBR(rec.date)}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-
-          {filteredAuditRecords.length === 0 && (
-            <div className="col-span-full py-16 bg-white border border-[#E0E0E0] rounded-2xl text-center" id="empty-audits-view">
-              <p className="text-gray-400 italic font-sans text-sm">Nenhuma foto de auditoria atende aos critérios informados.</p>
-              <button
-                onClick={() => { setSelectedProductId('Todos'); setSelectedChainId('Todas'); setSearchNotes(''); setFilterPeriodDays('Todas'); }}
-                className="mt-3 text-xs text-[#D40511] font-bold hover:underline"
-              >
-                Resetar filtros de pesquisa
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Pagination Toolbar */}
-        {filteredAuditRecords.length > 0 && (
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xs">
-            <div className="flex items-center gap-3 text-xs text-slate-600 font-medium">
-              <span>
-                Mostrando <strong>{(auditCurrentPage - 1) * auditItemsPerPage + 1}</strong> a <strong>{Math.min(auditCurrentPage * auditItemsPerPage, filteredAuditRecords.length)}</strong> de <strong>{filteredAuditRecords.length}</strong> registros
+        {/* Header with stats and View Mode toggle */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-200 pb-4">
+          <div className="space-y-1">
+            <h2 className="text-base font-extrabold text-slate-800 uppercase tracking-wider font-sans flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              Registros Consolidados
+              <span className="text-xs bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold px-2.5 py-0.5 rounded-full font-mono">
+                {consolidatedResearchSessions.length} {consolidatedResearchSessions.length === 1 ? 'Pesquisa' : 'Pesquisas'} &bull; {auditedRecords.length} {auditedRecords.length === 1 ? 'Preço' : 'Preços'}
               </span>
-              <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200 pl-3">
-                <span className="text-[11px] text-slate-500">Por página:</span>
-                <select
-                  value={auditItemsPerPage}
-                  onChange={(e) => setAuditItemsPerPage(Number(e.target.value))}
-                  className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none"
-                >
-                  <option value={12}>12</option>
-                  <option value={24}>24</option>
-                  <option value={48}>48</option>
-                  <option value={96}>96</option>
-                </select>
-              </div>
+            </h2>
+            <p className="text-xs text-slate-500 font-sans font-medium">
+              Histórico consolidado organizado por pesquisas de campo. Clique na pesquisa para inspecionar todos os itens, rupturas e horários de coleta.
+            </p>
+          </div>
+
+          {/* Toggle View Mode: Pesquisas vs Fotos Individuais */}
+          <div className="inline-flex items-center p-1 bg-slate-100 border border-slate-200 rounded-xl shrink-0 self-start sm:self-auto shadow-2xs">
+            <button
+              type="button"
+              onClick={() => setConsolidatedViewMode('sessions')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                consolidatedViewMode === 'sessions'
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Por Pesquisas ({filteredConsolidatedSessions.length})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setConsolidatedViewMode('photos')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                consolidatedViewMode === 'photos'
+                  ? 'bg-white text-slate-900 shadow-xs border border-slate-200'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-blue-600" />
+              <span>Fotos Individuais ({filteredAuditRecords.length})</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Enhanced Multi-Filter Grid */}
+        <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4" id="audit-filters-grid">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            {/* Filter 1: Chain */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Rede / Bandeira
+              </label>
+              <select
+                id="audit-chain-filter"
+                value={selectedChainId}
+                onChange={(e) => setSelectedChainId(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] font-sans h-9"
+              >
+                <option value="Todas">Todas as Redes</option>
+                {chains.map((chain) => (
+                  <option key={chain.id} value={chain.id}>{chain.name}</option>
+                ))}
+              </select>
             </div>
 
-            {totalAuditPages > 1 && (
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  disabled={auditCurrentPage === 1}
-                  onClick={() => setAuditCurrentPage(1)}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
-                  title="Primeira página"
-                >
-                  &laquo;
-                </button>
-                <button
-                  type="button"
-                  disabled={auditCurrentPage === 1}
-                  onClick={() => setAuditCurrentPage(prev => Math.max(1, prev - 1))}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"
-                  title="Página anterior"
-                >
-                  <ChevronLeft className="w-3.5 h-3.5" />
-                </button>
+            {/* Filter 2: State (UF) */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Estado (UF)
+              </label>
+              <select
+                id="audit-state-filter"
+                value={selectedStateFilter}
+                onChange={(e) => setSelectedStateFilter(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] font-sans h-9"
+              >
+                <option value="Todos">Todos os Estados</option>
+                {availableStates.map((st) => (
+                  <option key={st} value={st}>{st}</option>
+                ))}
+              </select>
+            </div>
 
-                {/* Page number buttons */}
-                {Array.from({ length: Math.min(5, totalAuditPages) }, (_, i) => {
-                  let pageNum = i + 1;
-                  if (totalAuditPages > 5) {
-                    if (auditCurrentPage > 3) {
-                      pageNum = auditCurrentPage - 2 + i;
-                    }
-                    if (pageNum > totalAuditPages) {
-                      pageNum = totalAuditPages - (4 - i);
-                    }
-                  }
-                  return (
-                    <button
-                      key={pageNum}
-                      type="button"
-                      onClick={() => setAuditCurrentPage(pageNum)}
-                      className={`min-w-[32px] h-8 rounded-lg text-xs font-bold transition cursor-pointer ${
-                        auditCurrentPage === pageNum
-                          ? 'bg-[#D40511] text-white shadow-2xs'
-                          : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
-                      }`}
+            {/* Filter 3: Period */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Período
+              </label>
+              <select
+                id="audit-period-filter"
+                value={filterPeriodDays}
+                onChange={(e) => setFilterPeriodDays(e.target.value)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] font-sans h-9"
+              >
+                <option value="7">Últimos 7 dias</option>
+                <option value="15">Últimos 15 dias</option>
+                <option value="30">Últimos 30 dias</option>
+                <option value="Todas">Todo o histórico</option>
+              </select>
+            </div>
+
+            {/* Filter 4: Ruptures ("Não tem") */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Ruptura ("Não Tem")
+              </label>
+              <select
+                id="audit-rupture-filter"
+                value={ruptureFilter}
+                onChange={(e) => setRuptureFilter(e.target.value as any)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] font-sans h-9"
+              >
+                <option value="all">Todas as Pesquisas</option>
+                <option value="with_rupture">Com Ruptura Registrada</option>
+                <option value="no_rupture">Sem Rupturas</option>
+              </select>
+            </div>
+
+            {/* Filter 5: Fila Status */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Status da Fila
+              </label>
+              <select
+                id="audit-queue-filter"
+                value={queueFilter}
+                onChange={(e) => setQueueFilter(e.target.value as any)}
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] font-sans h-9"
+              >
+                <option value="all">Todos os Status</option>
+                <option value="early">Finalizada Antes da Fila</option>
+                <option value="completed">Fila 100% Concluída</option>
+              </select>
+            </div>
+
+            {/* Filter 6: Search */}
+            <div>
+              <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                Pesquisador / Produto / Notas
+              </label>
+              <div className="relative">
+                <input
+                  id="audit-text-search"
+                  type="text"
+                  placeholder="Pesquisador, item..."
+                  value={searchNotes}
+                  onChange={(e) => setSearchNotes(e.target.value)}
+                  className="w-full pl-8 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#D40511] font-sans h-9"
+                />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* View Mode 1: Research Sessions View (Default & Primary) */}
+        {consolidatedViewMode === 'sessions' ? (
+          <div className="space-y-4">
+            {paginatedConsolidatedSessions.length > 0 ? (
+              <>
+                <div className="space-y-4">
+                  {paginatedConsolidatedSessions.map((session, index) => (
+                    <ConsolidatedSessionCard
+                      key={session.id}
+                      session={session}
+                      chains={chains}
+                      products={products}
+                      onOpenDetail={(s) => setSelectedSessionForDetail(s)}
+                      onOpenOutOfStock={(s) => setSelectedSessionForOutOfStock(s)}
+                      onPreviewImage={(rec) => {
+                        setPreviewImageRecord(rec);
+                        setPreviewZoom(1);
+                      }}
+                      onPreviewProduct={(prod) => setPreviewProduct(prod)}
+                      onSelectRecord={(recId) => setSelectedRecordId(recId)}
+                      isInitiallyExpanded={index === 0 && paginatedConsolidatedSessions.length === 1}
+                    />
+                  ))}
+                </div>
+
+                {/* Session Pagination */}
+                <SessionPagination
+                  currentPage={sessionPage}
+                  totalPages={Math.max(1, Math.ceil(filteredConsolidatedSessions.length / sessionsPerPage))}
+                  totalItems={filteredConsolidatedSessions.length}
+                  itemsPerPage={sessionsPerPage}
+                  onPageChange={setSessionPage}
+                  onItemsPerPageChange={(newVal) => {
+                    setSessionsPerPage(newVal);
+                    setSessionPage(1);
+                  }}
+                  itemLabel="pesquisas consolidadas"
+                />
+              </>
+            ) : (
+              <div className="py-16 bg-white border border-slate-200 rounded-3xl text-center shadow-2xs">
+                <PackageX className="w-10 h-10 text-slate-300 mx-auto mb-2" />
+                <p className="text-slate-500 font-sans text-sm font-semibold">
+                  Nenhuma pesquisa consolidada encontrada para os filtros selecionados.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedChainId('Todas');
+                    setSelectedStateFilter('Todos');
+                    setFilterPeriodDays('Todas');
+                    setRuptureFilter('all');
+                    setQueueFilter('all');
+                    setSearchNotes('');
+                  }}
+                  className="mt-3 text-xs text-[#D40511] font-bold hover:underline cursor-pointer"
+                >
+                  Limpar todos os filtros
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* View Mode 2: Legacy / Individual Photo Card Grid */
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6" id="audit-gallery-results">
+              {paginatedAuditRecords.map((rec) => {
+                const product = products.find((p) => p.id === rec.productId);
+                const chain = chains.find((c) => c.id === rec.chainId);
+
+                return (
+                  <div
+                    id={`audit-photo-card-${rec.id}`}
+                    key={rec.id}
+                    onClick={() => setSelectedRecordId(rec.id)}
+                    className="bg-white rounded-2xl border border-[#E0E0E0] hover:border-[#D40511] overflow-hidden shadow-2xs hover:shadow-md transition-all group cursor-pointer flex flex-col justify-between"
+                  >
+                    {/* Image box */}
+                    <div className="aspect-video bg-gray-100 overflow-hidden relative">
+                      <img
+                        src={rec.imageUrl}
+                        alt={product?.name}
+                        referrerPolicy="no-referrer"
+                        className="w-full h-full object-cover group-hover:scale-102 transition-transform"
+                      />
+                      
+                      {/* Embedded quick price label and chain badge */}
+                      <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between">
+                        <span className="bg-[#1A1A1A] text-white font-mono text-[10px] font-black px-2 py-0.5 rounded shadow">
+                          R$ {rec.price.toFixed(2)}
+                        </span>
+                        <span className="text-[8px] bg-red-100/90 text-[#D40511] font-bold px-1.5 py-0.5 rounded shadow">
+                          {chain?.name.split(' ')[0]}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Text Meta Container */}
+                    <div className="p-4 flex-1 flex flex-col justify-between space-y-2">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          {product?.imageUrl && (
+                            <img src={product.imageUrl} alt={product.name} className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100 shrink-0" />
+                          )}
+                          <h4 
+                            className="text-xs font-bold text-[#1A1A1A] line-clamp-1 leading-normal font-sans hover:text-[#D40511] cursor-pointer" 
+                            title={product?.name}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNavigate?.('produtos', { action: 'detail', productId: rec.productId });
+                            }}
+                          >
+                            {product ? product.name : 'Produto Indisponível'} {product?.weight ? `(${product.weight})` : ''}
+                          </h4>
+                        </div>
+                        <p className="text-[10px] text-gray-500 font-sans truncate mt-1">
+                          Rede: {chain ? chain.name : 'Indefinida'}
+                        </p>
+                      </div>
+
+                      <div className="pt-2 border-t border-[#F5F5F5] flex items-center justify-between text-[9px] text-gray-400 font-sans">
+                        <span className="truncate max-w-[100px] inline-flex items-center gap-0.5" title={rec.userName}>
+                          <User className="w-2.5 h-2.5 shrink-0" /> {rec.userName}
+                        </span>
+                        <span className="flex items-center gap-0.5">
+                          <Calendar className="w-2.5 h-2.5 shrink-0" /> {formatDateBR(rec.date)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {filteredAuditRecords.length === 0 && (
+                <div className="col-span-full py-16 bg-white border border-[#E0E0E0] rounded-2xl text-center" id="empty-audits-view">
+                  <p className="text-gray-400 italic font-sans text-sm">Nenhuma foto de auditoria atende aos critérios informados.</p>
+                  <button
+                    onClick={() => { setSelectedProductId('Todos'); setSelectedChainId('Todas'); setSearchNotes(''); setFilterPeriodDays('Todas'); }}
+                    className="mt-3 text-xs text-[#D40511] font-bold hover:underline"
+                  >
+                    Resetar filtros de pesquisa
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Legacy Photo Pagination Toolbar */}
+            {filteredAuditRecords.length > 0 && (
+              <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xs">
+                <div className="flex items-center gap-3 text-xs text-slate-600 font-medium">
+                  <span>
+                    Mostrando <strong>{(auditCurrentPage - 1) * auditItemsPerPage + 1}</strong> a <strong>{Math.min(auditCurrentPage * auditItemsPerPage, filteredAuditRecords.length)}</strong> de <strong>{filteredAuditRecords.length}</strong> registros
+                  </span>
+                  <div className="flex items-center gap-1.5 ml-2 border-l border-slate-200 pl-3">
+                    <span className="text-[11px] text-slate-500">Por página:</span>
+                    <select
+                      value={auditItemsPerPage}
+                      onChange={(e) => setAuditItemsPerPage(Number(e.target.value))}
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 focus:outline-none"
                     >
-                      {pageNum}
-                    </button>
-                  );
-                })}
+                      <option value={12}>12</option>
+                      <option value={24}>24</option>
+                      <option value={48}>48</option>
+                      <option value={96}>96</option>
+                    </select>
+                  </div>
+                </div>
 
-                <button
-                  type="button"
-                  disabled={auditCurrentPage === totalAuditPages}
-                  onClick={() => setAuditCurrentPage(prev => Math.min(totalAuditPages, prev + 1))}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"
-                  title="Próxima página"
-                >
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  disabled={auditCurrentPage === totalAuditPages}
-                  onClick={() => setAuditCurrentPage(totalAuditPages)}
-                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
-                  title="Última página"
-                >
-                  &raquo;
-                </button>
+                {totalAuditPages > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={auditCurrentPage === 1}
+                      onClick={() => setAuditCurrentPage(1)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+                      title="Primeira página"
+                    >
+                      &laquo;
+                    </button>
+                    <button
+                      type="button"
+                      disabled={auditCurrentPage === 1}
+                      onClick={() => setAuditCurrentPage(prev => Math.max(1, prev - 1))}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"
+                      title="Página anterior"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+
+                    {Array.from({ length: Math.min(5, totalAuditPages) }, (_, i) => {
+                      let pageNum = i + 1;
+                      if (totalAuditPages > 5) {
+                        if (auditCurrentPage > 3) {
+                          pageNum = auditCurrentPage - 2 + i;
+                        }
+                        if (pageNum > totalAuditPages) {
+                          pageNum = totalAuditPages - (4 - i);
+                        }
+                      }
+                      return (
+                        <button
+                          key={pageNum}
+                          type="button"
+                          onClick={() => setAuditCurrentPage(pageNum)}
+                          className={`min-w-[32px] h-8 rounded-lg text-xs font-bold transition cursor-pointer ${
+                            auditCurrentPage === pageNum
+                              ? 'bg-[#D40511] text-white shadow-2xs'
+                              : 'border border-slate-200 text-slate-700 hover:bg-slate-50'
+                          }`}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      disabled={auditCurrentPage === totalAuditPages}
+                      onClick={() => setAuditCurrentPage(prev => Math.min(totalAuditPages, prev + 1))}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer inline-flex items-center gap-1"
+                      title="Próxima página"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={auditCurrentPage === totalAuditPages}
+                      onClick={() => setAuditCurrentPage(totalAuditPages)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-bold disabled:opacity-30 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+                      title="Última página"
+                    >
+                      &raquo;
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -2281,6 +2206,34 @@ export function Audit({
             </div>
           </div>
         </div>
+      )}
+
+      {/* RESEARCH SESSION DETAIL MODAL */}
+      {selectedSessionForDetail && (
+        <SessionDetailModal
+          session={selectedSessionForDetail}
+          chains={chains}
+          products={products}
+          onClose={() => setSelectedSessionForDetail(null)}
+          onPreviewImage={(rec) => {
+            setPreviewImageRecord(rec);
+            setPreviewZoom(1);
+          }}
+          onPreviewProduct={(prod) => setPreviewProduct(prod)}
+          onSelectRecord={(recId) => setSelectedRecordId(recId)}
+          onOpenOutOfStock={(session) => setSelectedSessionForOutOfStock(session)}
+        />
+      )}
+
+      {/* OUT OF STOCK ("NÃO TEM") PRODUCTS MODAL */}
+      {selectedSessionForOutOfStock && (
+        <OutOfStockModal
+          session={selectedSessionForOutOfStock}
+          products={products}
+          chains={chains}
+          onClose={() => setSelectedSessionForOutOfStock(null)}
+          onPreviewProduct={(prod) => setPreviewProduct(prod)}
+        />
       )}
     </div>
   );
