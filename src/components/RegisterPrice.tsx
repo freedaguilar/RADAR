@@ -3026,7 +3026,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
                     )}
 
-                    {/* Linha de Controles: [Pular item] [Pular Categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
+                    {/* Linha de Controles: [Pular item] [Pular categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
                     <div className="flex items-center justify-between w-full max-w-md gap-1 xs:gap-1.5 sm:gap-2.5 px-1">
                       {/* Left 1: Pular item */}
                       <button
@@ -3036,7 +3036,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-white/15 hover:bg-white/25 active:scale-95 text-white backdrop-blur-md border border-white/20 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Pular este item individual e tirar foto depois"
                       >
-                        <FastForward className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-400 group-hover:scale-110 transition shrink-0" />
+                        <ChevronRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-amber-400 group-hover:scale-110 transition shrink-0" strokeWidth={2.5} />
                         <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
                           <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-white/90 leading-[1.05] tracking-tight text-center">
                             Pular item
@@ -3044,7 +3044,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
                       </button>
 
-                      {/* Left 2: Pular Categoria */}
+                      {/* Left 2: Pular categoria */}
                       <button
                         type="button"
                         onClick={handleSkipSubcategory}
@@ -3052,10 +3052,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-indigo-500/25 hover:bg-indigo-500/35 active:scale-95 text-indigo-200 backdrop-blur-md border border-indigo-400/30 transition cursor-pointer shadow-lg disabled:opacity-30 disabled:pointer-events-none group"
                         title="Pular todos os itens desta categoria/subcategoria"
                       >
-                        <ChevronsRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-indigo-300 group-hover:scale-110 transition shrink-0" />
+                        <ChevronsRight className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-indigo-300 group-hover:scale-110 transition shrink-0" strokeWidth={2.5} />
                         <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
                           <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-indigo-100 leading-[1.05] tracking-tight text-center">
-                            Pular Categoria
+                            Pular categoria
                           </span>
                         </div>
                       </button>

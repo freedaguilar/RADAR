@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { X, Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, Trash2, Edit3, ArrowUpRight, Search, Check, Sparkles } from 'lucide-react';
+import { X, Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, Trash2, Edit3, ArrowUpRight, Search, Check, Sparkles, CheckSquare, Square } from 'lucide-react';
 import { ResearchSession, formatDateBR } from '../../lib/researchSessions';
 import { Product, PriceRecord, Chain } from '../../types';
 import { stripSessionMetaPrefix } from '../../lib/textUtils';
@@ -36,6 +36,9 @@ export function SessionDetailModal({
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [editPriceValue, setEditPriceValue] = useState<string>('');
   const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
+  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
+  const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
+  const [showDeleteSelectedModal, setShowDeleteSelectedModal] = useState(false);
 
   const productMap = useMemo(() => {
     const map = new Map<string, Product>();
@@ -83,6 +86,56 @@ export function SessionDetailModal({
       );
     });
   }, [outOfStockItems, searchTerm]);
+
+  const toggleSelectRecord = (id: string) => {
+    setSelectedRecordIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const isAllFilteredSelected =
+    filteredRecords.length > 0 &&
+    filteredRecords.every((r) => selectedRecordIds.has(r.id));
+
+  const toggleSelectAllFiltered = () => {
+    if (isAllFilteredSelected) {
+      setSelectedRecordIds((prev) => {
+        const next = new Set(prev);
+        filteredRecords.forEach((r) => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setSelectedRecordIds((prev) => {
+        const next = new Set(prev);
+        filteredRecords.forEach((r) => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const handleDeleteSelected = () => {
+    if (!onDeleteRecord) return;
+    selectedRecordIds.forEach((id) => {
+      onDeleteRecord(id);
+    });
+    setSelectedRecordIds(new Set());
+    setShowDeleteSelectedModal(false);
+  };
+
+  const handleDeleteAll = () => {
+    if (!onDeleteRecord) return;
+    session.consolidatedRecords.forEach((r) => {
+      onDeleteRecord(r.id);
+    });
+    setSelectedRecordIds(new Set());
+    setShowDeleteAllModal(false);
+  };
 
   const handleStartEditPrice = (record: PriceRecord) => {
     setEditingRecordId(record.id);
@@ -263,11 +316,92 @@ export function SessionDetailModal({
           </div>
         </div>
 
+        {/* Action / Selection Bar for Audited Records */}
+        {activeTab === 'audited' && onDeleteRecord && session.consolidatedRecords.length > 0 && (
+          <div className="px-6 py-2 bg-slate-50/90 border-y border-slate-150 flex flex-wrap items-center justify-between gap-2.5 text-xs">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={toggleSelectAllFiltered}
+                className="flex items-center gap-1.5 font-bold text-slate-700 hover:text-slate-900 transition cursor-pointer select-none"
+              >
+                {isAllFilteredSelected ? (
+                  <CheckSquare className="w-4 h-4 text-[#D40511]" />
+                ) : (
+                  <Square className="w-4 h-4 text-slate-400" />
+                )}
+                <span>
+                  {isAllFilteredSelected
+                    ? 'Desmarcar todos'
+                    : `Selecionar todos (${filteredRecords.length})`}
+                </span>
+              </button>
+
+              {selectedRecordIds.size > 0 && (
+                <span className="text-[11px] font-bold bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full border border-rose-200">
+                  {selectedRecordIds.size} {selectedRecordIds.size === 1 ? 'selecionado' : 'selecionados'}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              {selectedRecordIds.size > 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteSelectedModal(true)}
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Excluir selecionados ({selectedRecordIds.size})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRecordIds(new Set())}
+                    className="px-2.5 py-1.5 text-slate-500 hover:text-slate-800 rounded-xl font-medium text-xs transition cursor-pointer"
+                  >
+                    Limpar
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteAllModal(true)}
+                  className="px-3 py-1.5 text-slate-600 hover:text-rose-700 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition cursor-pointer"
+                  title="Excluir todos os registros desta pesquisa"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Excluir toda a pesquisa ({session.consolidatedRecords.length})</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Tab Content Body */}
         <div className="p-6 overflow-y-auto flex-1 max-h-[60vh]">
           {activeTab === 'audited' ? (
             <div>
-              {filteredRecords.length === 0 ? (
+              {session.consolidatedRecords.length === 0 ? (
+                <div className="py-14 text-center">
+                  <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto mb-3 text-slate-400 border border-slate-200">
+                    <Trash2 className="w-7 h-7 text-slate-400" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-800">
+                    Nenhum produto auditado nesta pesquisa
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+                    Os registros desta pesquisa foram excluídos ou ainda não foram catalogados.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="mt-4 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+                  >
+                    Fechar Detalhes
+                  </button>
+                </div>
+              ) : filteredRecords.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 text-xs font-medium">
                   Nenhum produto auditado encontrado com os termos de busca.
                 </div>
@@ -277,36 +411,64 @@ export function SessionDetailModal({
                     const prod = productMap.get(rec.productId);
                     const cleanNotes = stripSessionMetaPrefix(rec.notes);
                     const isEditing = editingRecordId === rec.id;
+                    const isSelected = selectedRecordIds.has(rec.id);
 
                     return (
                       <div
                         key={rec.id}
-                        className="bg-slate-50/70 border border-slate-200 rounded-2xl p-3.5 flex gap-3.5 hover:border-slate-300 transition-all group"
+                        className={`border rounded-2xl p-3.5 flex gap-3.5 transition-all group ${
+                          isSelected
+                            ? 'border-rose-300 bg-rose-50/30 ring-1 ring-rose-200'
+                            : 'bg-slate-50/70 border-slate-200 hover:border-slate-300'
+                        }`}
                       >
-                        {/* Thumbnail image with click-to-lightbox */}
-                        <div
-                          onClick={() => {
-                            onPreviewImage?.(rec);
-                            onSelectRecord?.(rec.id);
-                            onOpenRecordLightbox?.(rec.id);
-                          }}
-                          className="w-18 h-18 sm:w-20 sm:h-20 rounded-xl bg-white border border-slate-200 overflow-hidden shrink-0 cursor-pointer relative group/img hover:ring-2 hover:ring-[#D40511]/30 transition"
-                          title="Clique para ver evidência fotográfica em alta resolução"
-                        >
-                          {rec.imageUrl ? (
-                            <img
-                              src={rec.imageUrl}
-                              alt={prod?.name || 'Foto'}
-                              className="w-full h-full object-cover group-hover/img:scale-105 transition"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center text-slate-400">
-                              <ImageIcon className="w-5 h-5" />
-                            </div>
+                        {/* Thumbnail image with checkbox & click-to-lightbox */}
+                        <div className="relative shrink-0">
+                          {onDeleteRecord && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleSelectRecord(rec.id);
+                              }}
+                              className={`absolute top-1.5 left-1.5 z-10 w-5 h-5 rounded-md flex items-center justify-center transition shadow-xs cursor-pointer ${
+                                isSelected
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-white/90 text-slate-400 hover:text-slate-700 border border-slate-300'
+                              }`}
+                              title="Selecionar para exclusão"
+                            >
+                              {isSelected ? (
+                                <Check className="w-3.5 h-3.5 stroke-[3]" />
+                              ) : (
+                                <span className="w-2 h-2 rounded-xs border border-slate-400" />
+                              )}
+                            </button>
                           )}
-                          <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition flex items-center justify-center text-white">
-                            <ExternalLink className="w-4 h-4" />
+                          <div
+                            onClick={() => {
+                              onPreviewImage?.(rec);
+                              onSelectRecord?.(rec.id);
+                              onOpenRecordLightbox?.(rec.id);
+                            }}
+                            className="w-18 h-18 sm:w-20 sm:h-20 rounded-xl bg-white border border-slate-200 overflow-hidden shrink-0 cursor-pointer relative group/img hover:ring-2 hover:ring-[#D40511]/30 transition"
+                            title="Clique para ver evidência fotográfica em alta resolução"
+                          >
+                            {rec.imageUrl ? (
+                              <img
+                                src={rec.imageUrl}
+                                alt={prod?.name || 'Foto'}
+                                className="w-full h-full object-cover group-hover/img:scale-105 transition"
+                                referrerPolicy="no-referrer"
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center text-slate-400">
+                                <ImageIcon className="w-5 h-5" />
+                              </div>
+                            )}
+                            <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition flex items-center justify-center text-white">
+                              <ExternalLink className="w-4 h-4" />
+                            </div>
                           </div>
                         </div>
 
@@ -341,7 +503,7 @@ export function SessionDetailModal({
                                 <button
                                   type="button"
                                   onClick={() => handleSaveEditPrice(rec)}
-                                  className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                                  className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
                                   title="Salvar preço"
                                 >
                                   <Check className="w-3.5 h-3.5" />
@@ -349,7 +511,7 @@ export function SessionDetailModal({
                                 <button
                                   type="button"
                                   onClick={() => setEditingRecordId(null)}
-                                  className="p-1 rounded bg-slate-200 text-slate-600 hover:bg-slate-300"
+                                  className="p-1 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 cursor-pointer"
                                   title="Cancelar"
                                 >
                                   <X className="w-3.5 h-3.5" />
@@ -374,7 +536,7 @@ export function SessionDetailModal({
                                 <button
                                   type="button"
                                   onClick={() => handleStartEditPrice(rec)}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-white transition"
+                                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-white transition cursor-pointer"
                                   title="Editar Preço"
                                 >
                                   <Edit3 className="w-3.5 h-3.5" />
@@ -382,18 +544,44 @@ export function SessionDetailModal({
                               )}
 
                               {onDeleteRecord && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (confirm('Deseja realmente excluir este registro auditado?')) {
-                                      onDeleteRecord(rec.id);
-                                    }
-                                  }}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition"
-                                  title="Excluir Registro"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
+                                recordToDelete === rec.id ? (
+                                  <div className="flex items-center gap-1 bg-rose-50 border border-rose-200 px-2 py-1 rounded-xl shadow-xs">
+                                    <span className="text-[10px] font-bold text-rose-800">Excluir?</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onDeleteRecord(rec.id);
+                                        setRecordToDelete(null);
+                                        setSelectedRecordIds((prev) => {
+                                          const next = new Set(prev);
+                                          next.delete(rec.id);
+                                          return next;
+                                        });
+                                      }}
+                                      className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-black transition cursor-pointer shadow-2xs"
+                                      title="Confirmar exclusão deste registro"
+                                    >
+                                      Sim
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRecordToDelete(null)}
+                                      className="px-1.5 py-0.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded text-[10px] font-medium transition cursor-pointer"
+                                      title="Cancelar"
+                                    >
+                                      Não
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setRecordToDelete(rec.id)}
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                    title="Excluir este registro"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )
                               )}
                             </div>
                           </div>
@@ -473,6 +661,86 @@ export function SessionDetailModal({
             Fechar Detalhes
           </button>
         </div>
+
+        {/* Delete Selected Confirmation Modal */}
+        {showDeleteSelectedModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-2xs animate-fade-in">
+            <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scale-up">
+              <div className="flex items-center gap-3 text-rose-600">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 leading-tight">
+                    Excluir {selectedRecordIds.size} {selectedRecordIds.size === 1 ? 'registro selecionado' : 'registros selecionados'}?
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Esta ação não pode ser desfeita.
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-150">
+                Os registros de preço e fotos selecionados serão permanentemente removidos da auditoria desta pesquisa.
+              </p>
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteSelectedModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  Sim, Excluir ({selectedRecordIds.size})
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete All Confirmation Modal */}
+        {showDeleteAllModal && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-2xs animate-fade-in">
+            <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scale-up">
+              <div className="flex items-center gap-3 text-rose-600">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 leading-tight">
+                    Excluir todos os {session.consolidatedRecords.length} registros?
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Pesquisa em {session.chainName} ({session.state})
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-600 leading-relaxed bg-rose-50/50 p-3 rounded-xl border border-rose-200/80">
+                Todos os registros consolidados de preços e evidências fotográficas desta pesquisa serão removidos permanentemente.
+              </p>
+              <div className="flex items-center justify-end gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowDeleteAllModal(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteAll}
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition cursor-pointer shadow-xs"
+                >
+                  Sim, Excluir Todos
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

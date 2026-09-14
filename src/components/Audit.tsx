@@ -512,6 +512,19 @@ export function Audit({
     return sessions.filter((s) => s.consolidatedRecords.length > 0);
   }, [auditedRecords, chains, products, users]);
 
+  // Dynamically sync the active session with records updates so deletions immediately update the modal view
+  const activeDetailSession = useMemo(() => {
+    if (!selectedSessionForDetail) return null;
+    const found = consolidatedResearchSessions.find((s) => s.id === selectedSessionForDetail.id)
+      || pendingResearchSessions.find((s) => s.id === selectedSessionForDetail.id);
+    if (found) return found;
+    return {
+      ...selectedSessionForDetail,
+      consolidatedRecords: [],
+      pendingRecords: [],
+    };
+  }, [selectedSessionForDetail, consolidatedResearchSessions, pendingResearchSessions]);
+
   // Unique list of states for filter dropdown
   const availableStates = useMemo(() => {
     const set = new Set<string>();
@@ -855,9 +868,7 @@ export function Audit({
                     {pendingResearchSessions.length} {pendingResearchSessions.length === 1 ? 'Pesquisa' : 'Pesquisas'} &bull; {pendingRecords.length} {pendingRecords.length === 1 ? 'Foto' : 'Fotos'}
                   </span>
                 </h2>
-                <p className="text-xs text-amber-800 font-sans font-medium mt-0.5">
-                  Pesquisas de campo agrupadas com identificação de auditor, horário de realização, conferência de rupturas ("não tem") e status da fila.
-                </p>
+                
               </div>
             </div>
           </div>
@@ -899,9 +910,7 @@ export function Audit({
                 {consolidatedResearchSessions.length} {consolidatedResearchSessions.length === 1 ? 'Pesquisa' : 'Pesquisas'} &bull; {auditedRecords.length} {auditedRecords.length === 1 ? 'Preço' : 'Preços'}
               </span>
             </h2>
-            <p className="text-xs text-slate-500 font-sans font-medium">
-              Histórico consolidado organizado por pesquisas de campo. Clique na pesquisa para inspecionar todos os itens, rupturas e horários de coleta.
-            </p>
+            
           </div>
 
           {/* Toggle View Mode: Pesquisas vs Fotos Individuais */}
@@ -2213,7 +2222,7 @@ export function Audit({
       {/* RESEARCH SESSION DETAIL MODAL */}
       {selectedSessionForDetail && (
         <SessionDetailModal
-          session={selectedSessionForDetail}
+          session={activeDetailSession || selectedSessionForDetail}
           chains={chains}
           products={products}
           onClose={() => setSelectedSessionForDetail(null)}
@@ -2224,6 +2233,8 @@ export function Audit({
           onPreviewProduct={(prod) => setPreviewProduct(prod)}
           onSelectRecord={(recId) => setSelectedRecordId(recId)}
           onOpenOutOfStock={(session) => setSelectedSessionForOutOfStock(session)}
+          onDeleteRecord={(recId) => onDeleteRecord?.(recId)}
+          onUpdateRecord={(rec) => onUpdateRecord?.(rec)}
         />
       )}
 
