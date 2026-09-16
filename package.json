@@ -23,6 +23,7 @@
     "motion": "^12.23.24",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
+    "react-simple-maps": "^5.0.5",
     "vite": "^6.2.3",
     "xlsx": "^0.18.5"
   },
@@ -30,6 +31,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
+    "@types/react-simple-maps": "^3.0.6",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",

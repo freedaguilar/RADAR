@@ -2217,7 +2217,7 @@ export function Audit({
             {/* Modal Footer */}
             <div className="p-3.5 bg-white border-t border-slate-100 flex items-center justify-between gap-2">
               <span className="text-[11px] text-slate-500 font-mono">
-                {previewProduct.ean ? `EAN: ${previewProduct.ean}` : 'Catálogo de Produtos'}
+                {previewProduct.internalCode ? `Cód: ${previewProduct.internalCode}` : 'Catálogo de Produtos'}
               </span>
               <button
                 type="button"

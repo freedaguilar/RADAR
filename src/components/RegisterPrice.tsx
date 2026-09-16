@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, stripSessionMetaPrefix, getCleanObserverNotes, ResearchSessionMeta } from '../lib/textUtils';
+import StateIconMap from './StateIconMap';
 
 // Summary data for the research completion screen
 interface CompletionSummary {
@@ -2455,12 +2456,16 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   }`}
                 >
                   <div className="flex items-center gap-3.5 min-w-0">
-                    <div className={`w-10 h-10 rounded-xl font-mono font-black text-xs flex items-center justify-center shrink-0 transition-colors ${
+                    <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 transition-all p-1 ${
                       isSelected
-                        ? 'bg-[#D40511] text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 group-hover:bg-slate-200'
+                        ? 'bg-red-50 text-[#D40511] border border-red-200 shadow-2xs'
+                        : 'bg-slate-100/90 text-slate-500 border border-slate-200/60 group-hover:bg-slate-200/60 group-hover:border-slate-300'
                     }`}>
-                      {st.uf}
+                      <StateIconMap
+                        state={st.uf}
+                        color={isSelected ? '#D40511' : '#475569'}
+                        className="w-full h-full"
+                      />
                     </div>
                     <div className="min-w-0">
                       <h3 className="text-sm font-bold text-slate-800 truncate leading-snug">
