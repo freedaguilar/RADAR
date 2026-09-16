@@ -1,5 +1,5 @@
-import React from 'react';
-import { Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, ChevronRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, ChevronRight, Trash2 } from 'lucide-react';
 import { ResearchSession, formatDateBR } from '../../lib/researchSessions';
 import { Product, PriceRecord, Chain } from '../../types';
 
@@ -15,6 +15,7 @@ interface ConsolidatedSessionCardProps {
   onPreviewImage?: (record: PriceRecord) => void;
   onPreviewProduct?: (product: Product) => void;
   onSelectRecord?: (recordId: string) => void;
+  onDeleteSession?: (session: ResearchSession) => void;
   isInitiallyExpanded?: boolean;
 }
 
@@ -26,8 +27,12 @@ export function ConsolidatedSessionCard({
   onOpenOutOfStock,
   onOpenRecordLightbox,
   onPreviewImage,
+  onPreviewProduct,
   onSelectRecord,
+  onDeleteSession,
 }: ConsolidatedSessionCardProps) {
+  const [showDeleteSessionConfirm, setShowDeleteSessionConfirm] = useState(false);
+
   const handleOpenDetail = () => {
     onOpenDetails?.(session);
     onOpenDetail?.(session);
@@ -98,18 +103,31 @@ export function ConsolidatedSessionCard({
           </div>
         </div>
 
-        {/* Action arrow button */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleOpenDetail();
-          }}
-          className="shrink-0 p-2 rounded-xl bg-slate-100 group-hover:bg-[#D40511] text-slate-500 group-hover:text-white transition-all shadow-2xs cursor-pointer"
-          title="Ver detalhes da pesquisa"
-        >
-          <ChevronRight className="w-4 h-4" />
-        </button>
+        {/* Action buttons: Delete Research Session + Arrow */}
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowDeleteSessionConfirm(true);
+            }}
+            className="p-2 rounded-xl bg-slate-100 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition-all shadow-2xs cursor-pointer border border-transparent hover:border-rose-200"
+            title="Excluir esta pesquisa por completo"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenDetail();
+            }}
+            className="p-2 rounded-xl bg-slate-100 group-hover:bg-[#D40511] text-slate-500 group-hover:text-white transition-all shadow-2xs cursor-pointer"
+            title="Ver detalhes da pesquisa"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Badges strip: Queue status + Out-of-stock count + Total items */}
@@ -190,9 +208,7 @@ export function ConsolidatedSessionCard({
                   key={rec.id}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onPreviewImage?.(rec);
-                    onSelectRecord?.(rec.id);
-                    onOpenRecordLightbox?.(rec.id);
+                    handleOpenDetail();
                   }}
                   className="group/thumb relative aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer hover:border-[#D40511] hover:ring-2 hover:ring-[#D40511]/20 transition"
                   title={`${prod?.name || 'Produto'}: R$ ${rec.price.toFixed(2).replace('.', ',')}`}
@@ -244,6 +260,52 @@ export function ConsolidatedSessionCard({
           </span>
         </div>
       </div>
+
+      {/* Delete Research Session Confirmation Modal */}
+      {showDeleteSessionConfirm && (
+        <div
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-2xs animate-fade-in"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="bg-white rounded-2xl p-5 max-w-md w-full shadow-2xl border border-slate-200 space-y-4 animate-scale-up">
+            <div className="flex items-center gap-3 text-rose-600">
+              <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-rose-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-slate-900 leading-tight">
+                  Excluir pesquisa por completo?
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {session.chainName} ({session.state}) &bull; {session.userName}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-slate-600 leading-relaxed bg-rose-50/50 p-3 rounded-xl border border-rose-200/80">
+              Todos os {session.consolidatedRecords.length} registros e evidências fotográficas desta pesquisa serão permanentemente excluídos. Esta ação não pode ser desfeita.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={() => setShowDeleteSessionConfirm(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteSessionConfirm(false);
+                  onDeleteSession?.(session);
+                }}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition cursor-pointer shadow-xs"
+              >
+                Sim, Excluir Pesquisa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

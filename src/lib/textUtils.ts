@@ -303,22 +303,38 @@ export interface ParsedPriceRecordMeta {
  */
 export function stripSessionMetaPrefix(notes: string | undefined): string {
   if (!notes) return '';
-  if (notes.startsWith('__PENDING_METADATA__:')) {
-    try {
-      const jsonStr = notes.substring('__PENDING_METADATA__:'.length);
-      const meta = JSON.parse(jsonStr);
-      return (meta.originalNotes || '').trim();
-    } catch {
-      return '';
+  let str = notes.trim();
+  while (str.startsWith('__PENDING_METADATA__:') || str.startsWith('__SESSION_META__:')) {
+    if (str.startsWith('__PENDING_METADATA__:')) {
+      try {
+        const jsonStr = str.substring('__PENDING_METADATA__:'.length);
+        const meta = JSON.parse(jsonStr);
+        str = (meta.originalNotes || '').trim();
+      } catch {
+        return '';
+      }
+    } else if (str.startsWith('__SESSION_META__:')) {
+      const endIdx = str.indexOf('__', '__SESSION_META__:'.length);
+      if (endIdx !== -1) {
+        str = str.substring(endIdx + 2).trim();
+      } else {
+        break;
+      }
     }
   }
-  if (notes.startsWith('__SESSION_META__:')) {
-    const endIdx = notes.indexOf('__', '__SESSION_META__:'.length);
-    if (endIdx !== -1) {
-      return notes.substring(endIdx + 2).trim();
-    }
-  }
-  return notes.trim();
+  return str;
+}
+
+/**
+ * Removes internal metadata prefixes and any synthetic system placeholders
+ * ([Preço Mantido]..., [Preço Digitado]..., etc.) to return ONLY authentic user notes.
+ */
+export function getCleanObserverNotes(notes: string | undefined): string {
+  if (!notes) return '';
+  let clean = stripSessionMetaPrefix(notes);
+  // Remove synthetic system tags e.g. [Preço Mantido] Product Name, [Preço Digitado] Product Name, [Auditado em Lote]...
+  clean = clean.replace(/^\[(Preço Mantido|Preço Digitado|Auditado em Lote|Lote \/ IA|Registro Convidado)[^\]]*\]\s*/i, '').trim();
+  return clean;
 }
 
 /**

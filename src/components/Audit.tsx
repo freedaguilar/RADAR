@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, X, Maximize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, History, ArrowRight, Store, PackageX, Clock, Layers, CheckCheck } from 'lucide-react';
 import { PriceRecord, Product, Chain, User as AppUser } from '../types';
-import { parsePriceRecordMeta, searchAndRankProducts, serializePendingMeta } from '../lib/textUtils';
+import { parsePriceRecordMeta, searchAndRankProducts, serializePendingMeta, getCleanObserverNotes } from '../lib/textUtils';
 import { supabase, recordAiCorrection } from '../lib/supabase';
 import { groupRecordsIntoResearchSessions, ResearchSession, formatDateBR as formatSessionDateBR } from '../lib/researchSessions';
 import { PendingSessionCard } from './audit/PendingSessionCard';
@@ -79,6 +79,18 @@ export function Audit({
   // Lightbox view state for audited records
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(initialSelectedRecordId || null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  const handleDeleteSession = (session: ResearchSession) => {
+    const allRecords = session.records && session.records.length > 0
+      ? session.records
+      : [...session.consolidatedRecords, ...session.pendingRecords];
+    allRecords.forEach((r) => {
+      onDeleteRecord?.(r.id);
+    });
+    if (selectedSessionForDetail?.id === session.id) {
+      setSelectedSessionForDetail(null);
+    }
+  };
 
   // Pending confirmation dialog state
   const [pendingRecordToConfirm, setPendingRecordToConfirm] = useState<PriceRecord | null>(null);
@@ -1068,12 +1080,9 @@ export function Audit({
                       products={products}
                       onOpenDetail={(s) => setSelectedSessionForDetail(s)}
                       onOpenOutOfStock={(s) => setSelectedSessionForOutOfStock(s)}
-                      onPreviewImage={(rec) => {
-                        setPreviewImageRecord(rec);
-                        setPreviewZoom(1);
-                      }}
                       onPreviewProduct={(prod) => setPreviewProduct(prod)}
                       onSelectRecord={(recId) => setSelectedRecordId(recId)}
+                      onDeleteSession={handleDeleteSession}
                       isInitiallyExpanded={index === 0 && paginatedConsolidatedSessions.length === 1}
                     />
                   ))}
@@ -2005,14 +2014,17 @@ export function Audit({
                     </div>
                   </div>
 
-                  {activeRecordForLightbox.notes && (
-                    <div className="bg-[#F5F5F5] p-3 rounded-lg border border-[#E0E0E0]" id="lightbox-notes-box">
-                      <span className="block text-[9px] uppercase text-gray-400 font-bold mb-1">Notas do Observador</span>
-                      <p className="text-xs text-gray-700 italic font-sans leading-relaxed">
-                        "{activeRecordForLightbox.notes}"
-                      </p>
-                    </div>
-                  )}
+                  {(() => {
+                    const cleanObserverNotes = getCleanObserverNotes(activeRecordForLightbox.notes);
+                    return cleanObserverNotes ? (
+                      <div className="bg-[#F5F5F5] p-3 rounded-lg border border-[#E0E0E0]" id="lightbox-notes-box">
+                        <span className="block text-[9px] uppercase text-gray-400 font-bold mb-1">Notas do Observador</span>
+                        <p className="text-xs text-gray-700 italic font-sans leading-relaxed">
+                          "{cleanObserverNotes}"
+                        </p>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
 
                 <div className="pt-4 border-t border-[#E0E0E0] flex items-center justify-between text-[10px] text-gray-400 bg-white font-sans">
@@ -2226,14 +2238,11 @@ export function Audit({
           chains={chains}
           products={products}
           onClose={() => setSelectedSessionForDetail(null)}
-          onPreviewImage={(rec) => {
-            setPreviewImageRecord(rec);
-            setPreviewZoom(1);
-          }}
           onPreviewProduct={(prod) => setPreviewProduct(prod)}
           onSelectRecord={(recId) => setSelectedRecordId(recId)}
           onOpenOutOfStock={(session) => setSelectedSessionForOutOfStock(session)}
           onDeleteRecord={(recId) => onDeleteRecord?.(recId)}
+          onDeleteSession={handleDeleteSession}
           onUpdateRecord={(rec) => onUpdateRecord?.(rec)}
         />
       )}

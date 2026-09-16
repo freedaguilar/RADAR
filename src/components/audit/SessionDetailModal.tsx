@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { X, Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, Trash2, Edit3, ArrowUpRight, Search, Check, Sparkles, CheckSquare, Square } from 'lucide-react';
 import { ResearchSession, formatDateBR } from '../../lib/researchSessions';
 import { Product, PriceRecord, Chain } from '../../types';
-import { stripSessionMetaPrefix } from '../../lib/textUtils';
+import { stripSessionMetaPrefix, getCleanObserverNotes } from '../../lib/textUtils';
 
 interface SessionDetailModalProps {
   session: ResearchSession;
@@ -15,6 +15,7 @@ interface SessionDetailModalProps {
   onPreviewProduct?: (product: Product) => void;
   onOpenOutOfStock?: (session: ResearchSession) => void;
   onDeleteRecord?: (recordId: string) => void;
+  onDeleteSession?: (session: ResearchSession) => void;
   onUpdateRecord?: (record: PriceRecord) => void;
 }
 
@@ -29,6 +30,7 @@ export function SessionDetailModal({
   onPreviewProduct,
   onOpenOutOfStock,
   onDeleteRecord,
+  onDeleteSession,
   onUpdateRecord,
 }: SessionDetailModalProps) {
   const [activeTab, setActiveTab] = useState<'audited' | 'outofstock'>('audited');
@@ -129,12 +131,19 @@ export function SessionDetailModal({
   };
 
   const handleDeleteAll = () => {
-    if (!onDeleteRecord) return;
-    session.consolidatedRecords.forEach((r) => {
-      onDeleteRecord(r.id);
-    });
+    if (onDeleteSession) {
+      onDeleteSession(session);
+    } else if (onDeleteRecord) {
+      const allRecords = session.records && session.records.length > 0
+        ? session.records
+        : [...session.consolidatedRecords, ...session.pendingRecords];
+      allRecords.forEach((r) => {
+        onDeleteRecord(r.id);
+      });
+    }
     setSelectedRecordIds(new Set());
     setShowDeleteAllModal(false);
+    onClose();
   };
 
   const handleStartEditPrice = (record: PriceRecord) => {
@@ -409,7 +418,7 @@ export function SessionDetailModal({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                   {filteredRecords.map((rec) => {
                     const prod = productMap.get(rec.productId);
-                    const cleanNotes = stripSessionMetaPrefix(rec.notes);
+                    const cleanNotes = getCleanObserverNotes(rec.notes);
                     const isEditing = editingRecordId === rec.id;
                     const isSelected = selectedRecordIds.has(rec.id);
 
@@ -447,7 +456,6 @@ export function SessionDetailModal({
                           )}
                           <div
                             onClick={() => {
-                              onPreviewImage?.(rec);
                               onSelectRecord?.(rec.id);
                               onOpenRecordLightbox?.(rec.id);
                             }}

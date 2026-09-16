@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, UserCheck } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, UserCheck, ClipboardCheck, ListOrdered } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
-import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, ResearchSessionMeta } from '../lib/textUtils';
+import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, stripSessionMetaPrefix, getCleanObserverNotes, ResearchSessionMeta } from '../lib/textUtils';
 
 // Summary data for the research completion screen
 interface CompletionSummary {
@@ -296,6 +296,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   } | null>(null);
   const [immediatePrice, setImmediatePrice] = useState('0,00');
 
+  // Estado para correção de preço ao clicar nos minicards de fotos do lote
+  const [editingPriceBatchItem, setEditingPriceBatchItem] = useState<BatchItem | null>(null);
+  const [correctionPriceInput, setCorrectionPriceInput] = useState('0,00');
+
   // Calculator-style price formatter (digit input from right to left)
   const formatToCalculatorPrice = (inputValue: string): string => {
     const digits = inputValue.replace(/\D/g, '');
@@ -549,6 +553,15 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const [outOfStockProductIds, setOutOfStockProductIds] = useState<string[]>([]);
   const [showOutOfStockModal, setShowOutOfStockModal] = useState<boolean>(false);
   const [outOfStockFilterText, setOutOfStockFilterText] = useState<string>('');
+  const [queueModalTab, setQueueModalTab] = useState<'pending' | 'captured' | 'outofstock'>('pending');
+
+  // Garante que se a aba ativa for 'outofstock' e não houver mais produtos em ruptura, retorna para 'pending'
+  useEffect(() => {
+    if (queueModalTab === 'outofstock' && outOfStockProductIds.length === 0) {
+      setQueueModalTab('pending');
+    }
+  }, [queueModalTab, outOfStockProductIds.length]);
+
   const [capturedProductIds, setCapturedProductIds] = useState<string[]>([]);
   const [useGuidedMode, setUseGuidedMode] = useState<boolean>(true);
   const [keepCurrentPrice, setKeepCurrentPrice] = useState<boolean>(false);
@@ -728,9 +741,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       // Se for convidado, marca como pendente para auditoria de gestor!
       const isGuest = !!currentUser?.isGuest;
       const sessionMeta = getCurrentSessionMeta(false);
+      const cleanUserNotes = stripSessionMetaPrefix(notes).trim();
       const finalNotes = isGuest
-        ? serializePendingMeta(prodSearch, numericPrice, `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
-        : serializeSessionMeta(capturedTargetProduct ? `[Preço Digitado] ${capturedTargetProduct.name}` : '', sessionMeta);
+        ? serializePendingMeta(prodSearch, numericPrice, cleanUserNotes || `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
+        : serializeSessionMeta(cleanUserNotes, sessionMeta);
 
       const newRecord: PriceRecord = {
         id: recordId,
@@ -825,7 +839,59 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       .filter((p): p is Product => !!p);
   }, [outOfStockProductIds, products]);
 
-  // Filtro por texto na lista de itens sem estoque
+  // Lista completa de produtos na fila de auditoria para a rede/estado selecionados
+  const auditQueueProducts = useMemo(() => {
+    return frequentProductsList.length > 0 ? frequentProductsList : products;
+  }, [frequentProductsList, products]);
+
+  // Conjunto de IDs de produtos já registrados na sessão atual (capturados ou incluídos no lote)
+  const registeredProductIdsSet = useMemo(() => {
+    const set = new Set<string>();
+    capturedProductIds.forEach(id => set.add(id));
+    batchItems.forEach(item => {
+      if (item.selectedProductId) set.add(item.selectedProductId);
+    });
+    return set;
+  }, [capturedProductIds, batchItems]);
+
+  // Quantidade de produtos da fila que já foram registrados
+  const registeredFromQueueCount = useMemo(() => {
+    return auditQueueProducts.filter(p => registeredProductIdsSet.has(p.id)).length;
+  }, [auditQueueProducts, registeredProductIdsSet]);
+
+  const pendingQueueCount = useMemo(() => {
+    return auditQueueProducts.filter(p => !outOfStockProductIds.includes(p.id) && !registeredProductIdsSet.has(p.id)).length;
+  }, [auditQueueProducts, outOfStockProductIds, registeredProductIdsSet]);
+
+  const totalQueueCount = auditQueueProducts.length;
+
+  // Verifica se a fila foi 100% concluída sem nenhum item marcado como "Não tem na loja"
+  const isQueueFullyCompleted = useMemo(() => {
+    return totalQueueCount > 0 && registeredFromQueueCount >= totalQueueCount && outOfStockProductIds.length === 0;
+  }, [totalQueueCount, registeredFromQueueCount, outOfStockProductIds.length]);
+
+  // Filtro de produtos na fila de auditoria (por texto de busca e aba selecionada)
+  const filteredModalQueueProducts = useMemo(() => {
+    let list = auditQueueProducts;
+    if (queueModalTab === 'outofstock') {
+      list = list.filter(p => outOfStockProductIds.includes(p.id));
+    } else if (queueModalTab === 'pending') {
+      list = list.filter(p => !outOfStockProductIds.includes(p.id) && !registeredProductIdsSet.has(p.id));
+    } else if (queueModalTab === 'captured') {
+      list = list.filter(p => registeredProductIdsSet.has(p.id));
+    }
+
+    if (!outOfStockFilterText.trim()) return list;
+    const term = normalizeString(outOfStockFilterText);
+    return list.filter(p => {
+      const name = normalizeString(p.name);
+      const brand = normalizeString(p.brand || '');
+      const cat = normalizeString(p.category || '');
+      return name.includes(term) || brand.includes(term) || cat.includes(term);
+    });
+  }, [auditQueueProducts, queueModalTab, outOfStockFilterText, outOfStockProductIds, registeredProductIdsSet]);
+
+  // Filtro retrocompatível específico para itens sem estoque
   const filteredOutOfStockProducts = useMemo(() => {
     if (!outOfStockFilterText.trim()) return outOfStockProducts;
     const term = normalizeString(outOfStockFilterText);
@@ -837,17 +903,33 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     });
   }, [outOfStockProducts, outOfStockFilterText]);
 
-  // Ao clicar em um produto da lista de "não tem na loja" para registrar
-  const handleSelectOutOfStockToRegister = (prod: Product) => {
+  // Abre o modal da fila de auditoria sempre com a aba "Pendentes" selecionada por padrão
+  const handleOpenQueueModal = () => {
+    setQueueModalTab('pending');
+    setOutOfStockFilterText('');
+    setShowOutOfStockModal(true);
+  };
+
+  // Ao clicar em um produto da fila/lista de auditoria para registrar na câmera
+  const handleSelectQueueProductToRegister = (prod: Product) => {
     // 1. Remove da lista de sem estoque
     setOutOfStockProductIds(prev => prev.filter(id => id !== prod.id));
-    // 2. Garante que não está na lista de capturados
+    // 2. Remove dos capturados para permitir novo registro ou atualização
     setCapturedProductIds(prev => prev.filter(id => id !== prod.id));
-    // 3. Coloca no início da fila para auditar imediatamente na tela
-    setGuidedQueue(prev => {
-      const filtered = prev.filter(p => p.id !== prod.id);
-      return [prod, ...filtered];
-    });
+    // 3. Continua a fila a partir do item que o usuário selecionou
+    const targetIdx = auditQueueProducts.findIndex(p => p.id === prod.id);
+    if (targetIdx !== -1) {
+      const rotated = [...auditQueueProducts.slice(targetIdx), ...auditQueueProducts.slice(0, targetIdx)];
+      const activeCaptured = capturedProductIds.filter(id => id !== prod.id);
+      const activeOutOfStock = outOfStockProductIds.filter(id => id !== prod.id);
+      const newQueue = rotated.filter(p => !activeCaptured.includes(p.id) && !activeOutOfStock.includes(p.id));
+      setGuidedQueue(newQueue);
+    } else {
+      setGuidedQueue(prev => {
+        const filtered = prev.filter(p => p.id !== prod.id);
+        return [prod, ...filtered];
+      });
+    }
     // 4. Ativa o modo guiado
     setUseGuidedMode(true);
     // 5. Se estiver na etapa de confirmação (4), volta para a etapa de fotos (3) com a câmera
@@ -858,9 +940,48 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     if (!useCamera) {
       startCamera();
     }
-    // 7. Fecha o modal
+    // 7. Fecha o modal e limpa busca
     setShowOutOfStockModal(false);
     setOutOfStockFilterText('');
+  };
+
+  const handleSelectOutOfStockToRegister = handleSelectQueueProductToRegister;
+
+  // Permite ao usuário corrigir o preço ao clicar no minicard do lote
+  const handleOpenPriceCorrection = (item: BatchItem) => {
+    setEditingPriceBatchItem(item);
+    if (item.price && item.price !== '0,00') {
+      setCorrectionPriceInput(item.price);
+    } else {
+      setCorrectionPriceInput('0,00');
+    }
+  };
+
+  const handleConfirmPriceCorrection = () => {
+    if (!editingPriceBatchItem) return;
+    const newPriceFormatted = correctionPriceInput;
+    const numPrice = parseFloat(newPriceFormatted.replace(',', '.')) || 0;
+
+    // Atualiza o item no lote
+    setBatchItems(prev => prev.map(b => b.id === editingPriceBatchItem.id ? {
+      ...b,
+      price: newPriceFormatted,
+      isKeptPrice: false,
+    } : b));
+
+    // Atualiza o registro salvo caso já tenha sido persistido
+    if (editingPriceBatchItem.recordId && onUpdateRecord) {
+      const existingRec = records.find(r => r.id === editingPriceBatchItem.recordId);
+      if (existingRec) {
+        onUpdateRecord({
+          ...existingRec,
+          price: numPrice,
+        });
+      }
+    }
+
+    setEditingPriceBatchItem(null);
+    setCorrectionPriceInput('0,00');
   };
 
   const analyzeImage = async (base64Image: string) => {
@@ -1005,7 +1126,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
             const aiProductSuggested = updatedItem.productSearch || '';
             const aiPriceSuggested = priceNum;
-            const finalNotes = serializePendingMeta(aiProductSuggested, aiPriceSuggested, updatedItem.notes);
+            const cleanNotes = stripSessionMetaPrefix(updatedItem.notes);
+            const finalNotes = serializePendingMeta(aiProductSuggested, aiPriceSuggested, cleanNotes);
 
             const updatedRecord: PriceRecord = {
               id: updatedItem.recordId,
@@ -1205,9 +1327,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       selectedProductId: selectedProdId,
       productSearch: prodSearch,
       price: initialPrice,
-      notes: keepPrice
-        ? `[Preço Mantido] ${targetProduct?.name || ''}`
-        : (targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : ''),
+      notes: '',
       selectedChainId: selectedChainId,
       confidence: initialConfidence,
       isKeptPrice: keepPrice,
@@ -1241,10 +1361,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       const sessionMeta = getCurrentSessionMeta(false);
       // Se for convidado, marca como pendente para auditoria de gestor
       const finalNotes = isGuest
-        ? serializePendingMeta(prodSearch, numPrice, `[Registro Convidado - Preço Mantido: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
-        : (keepPrice
-            ? serializeSessionMeta(`[Preço Mantido] ${targetProduct?.name || ''}`, sessionMeta)
-            : serializePendingMeta(prodSearch, numPrice, targetProduct ? `[Auditado em Lote] ${targetProduct.name}` : '', sessionMeta));
+        ? serializePendingMeta(prodSearch, numPrice, `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
+        : serializeSessionMeta('', sessionMeta);
 
       const newRecord: PriceRecord = {
         id: recordId,
@@ -1455,10 +1573,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       for (const item of batchItems) {
         setBatchSaveProgress({ current: idx + 1, total: batchItems.length });
 
-        let finalNotes = item.notes.trim();
-        if (!item.isKeptPrice && item.aiAnalysisMessage) {
-          finalNotes = finalNotes ? `[Lote / IA] ${finalNotes}` : '[Lote / IA] Monitorado via Scanner Inteligente';
-        }
+        let finalNotes = stripSessionMetaPrefix(item.notes).trim();
         const serializedNotes = serializeSessionMeta(finalNotes, sessionMeta);
 
         const priceNum = parseFloat(item.price.replace(',', '.'));
@@ -2557,20 +2672,36 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                     </label>
                   </div>
 
-                  {/* Grid de miniaturas do Lote */}
-                  {outOfStockProductIds.length > 0 && (
-                    <div className="flex items-center justify-between bg-rose-50/80 border border-rose-200/80 p-3 rounded-2xl">
-                      <div className="flex items-center gap-2 text-rose-800 text-xs font-bold">
-                        <PackageX className="w-4 h-4 text-rose-600 shrink-0" />
-                        <span>{outOfStockProductIds.length} {outOfStockProductIds.length === 1 ? 'item marcado' : 'itens marcados'} como "Não tem na loja"</span>
+                  {/* Badge de Progresso da Fila de Auditoria */}
+                  {totalQueueCount > 0 && registeredFromQueueCount > 0 && (
+                    <div
+                      className={`flex items-center justify-between p-3 rounded-2xl transition-all ${
+                        isQueueFullyCompleted
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                          : 'bg-rose-50/80 border border-rose-200/80 text-rose-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 text-xs font-bold">
+                        {isQueueFullyCompleted ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : (
+                          <PackageX className="w-4 h-4 text-rose-600 shrink-0" />
+                        )}
+                        <span>
+                          {isQueueFullyCompleted
+                            ? `Você registrou ${registeredFromQueueCount} de ${totalQueueCount} produtos na fila de auditoria`
+                            : `${registeredFromQueueCount} de ${totalQueueCount} produtos registrados`}
+                        </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowOutOfStockModal(true)}
-                        className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs"
-                      >
-                        Ver e Registrar
-                      </button>
+                      {!isQueueFullyCompleted && (
+                        <button
+                          type="button"
+                          onClick={handleOpenQueueModal}
+                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs shrink-0"
+                        >
+                          Ver produtos
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -2606,7 +2737,8 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                           return (
                             <div
                               key={item.id}
-                              className="relative border border-slate-200 rounded-2xl overflow-hidden bg-white flex flex-col shadow-2xs hover:shadow-sm transition-all group"
+                              onClick={() => handleOpenPriceCorrection(item)}
+                              className="relative border border-slate-200 rounded-2xl overflow-hidden bg-white flex flex-col shadow-2xs hover:shadow-sm transition-all group cursor-pointer"
                             >
                               {/* Visual Thumbnail */}
                               <div className="relative w-full h-28 sm:h-32 bg-slate-100 flex items-center justify-center overflow-hidden border-b border-slate-100">
@@ -2622,7 +2754,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 {/* Delete single button over corner */}
                                 <button
                                   type="button"
-                                  onClick={() => removeBatchItem(item)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    removeBatchItem(item);
+                                  }}
                                   className="absolute top-2 right-2 p-1.5 bg-black/60 rounded-full text-white hover:bg-rose-600 hover:scale-110 cursor-pointer transition shadow-md shrink-0"
                                   title="Remover item"
                                 >
@@ -2632,16 +2767,32 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                               
                               {/* Card Details/Conferência */}
                               <div className="p-3 flex-1 flex flex-col justify-between gap-2">
-                                <div>
-                                  {/* Nome do Item */}
-                                  <h4 className="text-xs font-black text-slate-800 line-clamp-2 leading-snug" title={productName}>
-                                    {productName}
-                                  </h4>
-                                  {product?.weight && (
-                                    <span className="text-[10px] text-slate-400 font-medium">
-                                      {product.weight}
-                                    </span>
-                                  )}
+                                <div className="flex items-start gap-2">
+                                  {/* Ícone / Imagem oficial do catálogo do produto */}
+                                  <div className="w-8 h-8 rounded-lg border border-slate-200 bg-white p-0.5 shrink-0 overflow-hidden flex items-center justify-center shadow-2xs">
+                                    {product?.imageUrl ? (
+                                      <img
+                                        src={product.imageUrl}
+                                        alt={productName}
+                                        className="w-full h-full object-contain"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    ) : (
+                                      <Package className="w-4 h-4 text-slate-400" />
+                                    )}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    {/* Nome do Item */}
+                                    <h4 className="text-xs font-black text-slate-800 line-clamp-2 leading-snug" title={productName}>
+                                      {productName}
+                                    </h4>
+                                    {product?.weight && (
+                                      <span className="text-[10px] text-slate-400 font-medium">
+                                        {product.weight}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {/* Valor para Conferência & Status */}
@@ -2791,18 +2942,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
-                        {outOfStockProductIds.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setShowOutOfStockModal(true)}
-                            className="text-[11px] text-rose-300 bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 px-2.5 py-1 rounded-full font-bold transition cursor-pointer flex items-center gap-1 backdrop-blur-sm shadow-xs"
-                            title="Ver produtos marcados como 'Não tem na loja'"
-                          >
-                            <PackageX className="w-3.5 h-3.5 text-rose-400" />
-                            <span className="hidden xs:inline">Sem estoque</span>
-                            <span>({outOfStockProductIds.length})</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={handleOpenQueueModal}
+                          className="text-[11px] text-white/95 bg-white/15 hover:bg-white/25 active:scale-95 border border-white/20 px-2.5 py-1 rounded-full font-bold transition cursor-pointer flex items-center gap-1.5 backdrop-blur-md shadow-xs"
+                          title="Ver lista completa dos itens na fila para auditoria"
+                        >
+                          <ListOrdered className="w-3.5 h-3.5 text-amber-300" />
+                          <span>Fila ({registeredFromQueueCount}/{totalQueueCount})</span>
+                          {outOfStockProductIds.length > 0 && (
+                            <span className="bg-rose-500 text-white text-[9px] font-mono px-1.5 py-0.2 rounded-full font-black ml-0.5">
+                              {outOfStockProductIds.length} não tem
+                            </span>
+                          )}
+                        </button>
 
                         {useGuidedMode ? (
                           <button
@@ -3100,23 +3253,23 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
                       </button>
 
-                      {/* Right 2: Concluir */}
+                      {/* Right 2: Revisar */}
                       <button
                         type="button"
                         id="btn-stop-camera"
                         onClick={stopCamera}
                         className="flex flex-col items-center justify-center flex-1 min-w-0 max-w-[68px] xs:max-w-[76px] sm:max-w-[86px] h-[52px] xs:h-[56px] sm:h-[64px] px-1 py-1 rounded-xl sm:rounded-2xl bg-emerald-500/25 hover:bg-emerald-500/35 active:scale-95 text-emerald-200 backdrop-blur-md border border-emerald-400/30 transition cursor-pointer shadow-lg relative group"
-                        title="Concluir sessão de fotos e revisar lote"
+                        title="Revisar lote de fotos capturadas"
                       >
                         {batchItems.length > 0 && (
                           <span className="absolute -top-1 -right-1 sm:-top-1.5 sm:-right-1.5 bg-emerald-500 text-white font-mono text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center border-2 border-black shadow">
                             {batchItems.length}
                           </span>
                         )}
-                        <CheckCircle2 className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
+                        <ClipboardCheck className="w-4 h-4 sm:w-4.5 sm:h-4.5 text-emerald-300 group-hover:scale-110 transition shrink-0" />
                         <div className="min-h-[20px] xs:min-h-[22px] sm:min-h-[24px] flex flex-col items-center justify-center mt-0.5 sm:mt-1">
                           <span className="text-[7.5px] xs:text-[8px] sm:text-[9.5px] font-black text-emerald-100 leading-[1.05] tracking-tight text-center">
-                            Concluir
+                            Revisar
                           </span>
                         </div>
                       </button>
@@ -3202,19 +3355,35 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 </div>
               </div>
 
-              {outOfStockProductIds.length > 0 && (
-                <div className="flex items-center justify-between bg-rose-50/80 border border-rose-200/80 p-3.5 rounded-2xl">
-                  <div className="flex items-center gap-2 text-rose-800 text-xs font-bold">
-                    <PackageX className="w-4 h-4 text-rose-600 shrink-0" />
-                    <span>{outOfStockProductIds.length} {outOfStockProductIds.length === 1 ? 'item marcado' : 'itens marcados'} como "Não tem na loja"</span>
+              {totalQueueCount > 0 && registeredFromQueueCount > 0 && (
+                <div
+                  className={`flex items-center justify-between p-3.5 rounded-2xl transition-all ${
+                    isQueueFullyCompleted
+                      ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+                      : 'bg-rose-50/80 border border-rose-200/80 text-rose-800'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 text-xs font-bold">
+                    {isQueueFullyCompleted ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <PackageX className="w-4 h-4 text-rose-600 shrink-0" />
+                    )}
+                    <span>
+                      {isQueueFullyCompleted
+                        ? `Você registrou ${registeredFromQueueCount} de ${totalQueueCount} produtos na fila de auditoria`
+                        : `${registeredFromQueueCount} de ${totalQueueCount} produtos registrados`}
+                    </span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setShowOutOfStockModal(true)}
-                    className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs"
-                  >
-                    Ver e Registrar
-                  </button>
+                  {!isQueueFullyCompleted && (
+                    <button
+                      type="button"
+                      onClick={handleOpenQueueModal}
+                      className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs"
+                    >
+                      Ver produtos
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -4035,11 +4204,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         </div>
       )}
 
-      {/* Modal: Itens marcados como "Não tem na loja" para resgatar e registrar */}
+      {/* Modal: Fila Completa de Itens para Auditoria com Destaque de Itens "Não tem na loja" */}
       <AnimatePresence>
         {showOutOfStockModal && (
           <div
-            id="out-of-stock-products-modal"
+            id="audit-queue-products-modal"
             className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs animate-fade-in"
             onClick={() => {
               setShowOutOfStockModal(false);
@@ -4051,28 +4220,18 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 12 }}
               transition={{ duration: 0.18 }}
-              className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] border border-slate-200"
+              className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh] border border-slate-200"
               onClick={(e) => e.stopPropagation()}
             >
               {/* Header */}
-              <div className="p-4 sm:p-5 border-b border-slate-150 flex items-start justify-between gap-3 bg-slate-50/80">
+              <div className="p-4 sm:p-5 border-b border-slate-150 flex items-center justify-between gap-3 bg-slate-50/80">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-rose-100 text-rose-700 rounded-xl shrink-0">
-                    <PackageX className="w-5 h-5" />
+                  <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
+                    <ListOrdered className="w-5 h-5" />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h3 className="text-sm sm:text-base font-black text-slate-800">
-                        Itens "Não tem na loja"
-                      </h3>
-                      <span className="text-[11px] font-black font-mono px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-200">
-                        {outOfStockProducts.length} {outOfStockProducts.length === 1 ? 'item' : 'itens'}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-500 font-medium mt-0.5">
-                      Marcou sem querer ou encontrou agora? Clique no item para registrá-lo.
-                    </p>
-                  </div>
+                  <h3 className="text-sm sm:text-base font-black text-slate-800">
+                    Fila de Itens para Auditoria
+                  </h3>
                 </div>
                 <button
                   type="button"
@@ -4087,110 +4246,209 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 </button>
               </div>
 
-              {/* Input de busca quando há mais de 2 itens */}
-              {outOfStockProducts.length > 2 && (
-                <div className="p-3 sm:px-5 sm:pt-3 sm:pb-2 border-b border-slate-100 bg-white">
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                    <input
-                      type="text"
-                      placeholder="Buscar por produto, marca ou categoria..."
-                      value={outOfStockFilterText}
-                      onChange={(e) => setOutOfStockFilterText(e.target.value)}
-                      className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-rose-500/30 focus:border-rose-500"
-                    />
-                    {outOfStockFilterText && (
-                      <button
-                        type="button"
-                        onClick={() => setOutOfStockFilterText('')}
-                        className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Lista de Produtos */}
-              <div className="p-3 sm:p-4 overflow-y-auto flex-1 space-y-2 divide-y divide-slate-100">
-                {filteredOutOfStockProducts.length === 0 ? (
-                  <div className="py-10 text-center text-slate-400 text-xs">
-                    {outOfStockProducts.length === 0 ? (
-                      <p className="font-semibold text-slate-500">Nenhum item marcado como indisponível no momento.</p>
-                    ) : (
-                      <p className="font-semibold text-slate-500">Nenhum produto corresponde à busca "{outOfStockFilterText}".</p>
-                    )}
-                  </div>
-                ) : (
-                  filteredOutOfStockProducts.map((prod) => (
-                    <div
-                      key={prod.id}
-                      onClick={() => handleSelectOutOfStockToRegister(prod)}
-                      className="pt-2 first:pt-0 group flex items-center justify-between gap-3 p-2.5 rounded-2xl hover:bg-slate-50 border border-transparent hover:border-slate-200 transition cursor-pointer"
+              {/* Barra de Busca e Abas de Filtro */}
+              <div className="p-3 sm:px-5 sm:py-3 border-b border-slate-150 bg-white space-y-2.5">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Buscar na fila por produto, marca ou categoria..."
+                    value={outOfStockFilterText}
+                    onChange={(e) => setOutOfStockFilterText(e.target.value)}
+                    className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-500"
+                  />
+                  {outOfStockFilterText && (
+                    <button
+                      type="button"
+                      onClick={() => setOutOfStockFilterText('')}
+                      className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
                     >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
-                        {prod.imageUrl ? (
-                          <div className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 bg-white shrink-0 p-0.5">
-                            <img
-                              src={prod.imageUrl}
-                              alt={prod.name}
-                              className="w-full h-full object-contain"
-                              referrerPolicy="no-referrer"
-                            />
-                          </div>
-                        ) : (
-                          <div className="w-12 h-12 rounded-xl border border-dashed border-slate-200 bg-slate-100 flex items-center justify-center shrink-0 text-slate-400">
-                            <Package className="w-5 h-5" />
-                          </div>
-                        )}
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
 
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="text-[9px] font-black uppercase text-red-600 font-mono">
-                              {prod.brand || 'Marca'}
-                            </span>
-                            {prod.category && (
-                              <span className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">
-                                {prod.category}
-                              </span>
-                            )}
-                          </div>
-                          <h4 className="text-xs sm:text-sm font-black text-slate-800 truncate group-hover:text-red-700 transition" title={prod.name}>
-                            {prod.name}
-                          </h4>
-                          <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-0.5">
-                            {prod.weight && <span>{prod.weight}</span>}
-                            {prod.basePrice > 0 && (
-                              <span className="text-emerald-700 font-bold font-mono">
-                                Ref: R$ {prod.basePrice.toFixed(2).replace('.', ',')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs font-bold scrollbar-none">
+                  {/* Ordem das abas: Pendentes, Não tem na loja (quando houver) e Registrados */}
+                  <button
+                    type="button"
+                    onClick={() => setQueueModalTab('pending')}
+                    className={`px-3.5 py-1.5 rounded-lg transition whitespace-nowrap cursor-pointer ${
+                      queueModalTab === 'pending'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Pendentes ({pendingQueueCount})
+                  </button>
 
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectOutOfStockToRegister(prod);
-                        }}
-                        className="shrink-0 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-                        title="Colocar na câmera e registrar agora"
-                      >
-                        <Camera className="w-3.5 h-3.5" />
-                        <span className="hidden xs:inline">Registrar</span>
-                      </button>
+                  {outOfStockProductIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setQueueModalTab('outofstock')}
+                      className={`px-3.5 py-1.5 rounded-lg transition whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                        queueModalTab === 'outofstock'
+                          ? 'bg-rose-600 text-white shadow-xs'
+                          : 'bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200'
+                      }`}
+                    >
+                      <PackageX className="w-3.5 h-3.5" />
+                      <span>Não tem na loja ({outOfStockProductIds.length})</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setQueueModalTab('captured')}
+                    className={`px-3.5 py-1.5 rounded-lg transition whitespace-nowrap cursor-pointer ${
+                      queueModalTab === 'captured'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Registrados ({registeredFromQueueCount})
+                  </button>
+                </div>
+              </div>
+
+              {/* Corpo com Lista */}
+              <div className="p-3 sm:p-5 overflow-y-auto flex-1 space-y-3">
+                {/* Lista dos Itens da Fila */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between px-1 text-[11px] font-extrabold uppercase tracking-wide text-slate-500">
+                    <span>
+                      {queueModalTab === 'pending'
+                        ? `Próximos Itens na Fila (${filteredModalQueueProducts.length})`
+                        : queueModalTab === 'outofstock'
+                        ? `Produtos em Ruptura (${filteredModalQueueProducts.length})`
+                        : `Itens Registrados (${filteredModalQueueProducts.length})`}
+                    </span>
+                  </div>
+
+                  {filteredModalQueueProducts.length === 0 ? (
+                    <div className="py-12 text-center text-slate-400 text-xs bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                      <p className="font-semibold text-slate-600">Nenhum produto encontrado na fila com os filtros aplicados.</p>
+                      {outOfStockFilterText && (
+                        <button
+                          type="button"
+                          onClick={() => setOutOfStockFilterText('')}
+                          className="mt-2 text-indigo-600 hover:underline font-bold"
+                        >
+                          Limpar busca
+                        </button>
+                      )}
                     </div>
-                  ))
-                )}
+                  ) : (
+                    filteredModalQueueProducts.map((prod, index) => {
+                      const isOutOfStock = outOfStockProductIds.includes(prod.id);
+                      const isRegistered = registeredProductIdsSet.has(prod.id);
+                      const isCurrentGuided = currentGuidedProduct?.id === prod.id;
+
+                      return (
+                        <div
+                          key={`queue-row-${prod.id}`}
+                          onClick={() => handleSelectQueueProductToRegister(prod)}
+                          className={`p-3 rounded-2xl border transition flex items-center justify-between gap-3 cursor-pointer group ${
+                            isCurrentGuided
+                              ? 'border-indigo-400 bg-indigo-50/40 ring-2 ring-indigo-200'
+                              : isOutOfStock
+                              ? 'border-rose-200 bg-rose-50/20 hover:border-rose-300 hover:bg-rose-50/40'
+                              : isRegistered
+                              ? 'border-emerald-200 bg-emerald-50/15 hover:border-emerald-300'
+                              : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            {/* Thumbnail */}
+                            <div className="w-12 h-12 rounded-xl overflow-hidden border border-slate-200 bg-white shrink-0 p-0.5 flex items-center justify-center">
+                              {prod.imageUrl ? (
+                                <img
+                                  src={prod.imageUrl}
+                                  alt={prod.name}
+                                  className="w-full h-full object-contain"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <Package className="w-5 h-5 text-slate-400" />
+                              )}
+                            </div>
+
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {isOutOfStock ? (
+                                  <span className="text-[9px] font-black uppercase text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded-md font-mono border border-rose-200">
+                                    Não tem na loja
+                                  </span>
+                                ) : isRegistered ? (
+                                  <span className="text-[9px] font-black uppercase text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded-md font-mono border border-emerald-200">
+                                    Registrado no Lote
+                                  </span>
+                                ) : isCurrentGuided ? (
+                                  <span className="text-[9px] font-black uppercase text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded-md font-mono border border-indigo-200">
+                                    Atual na Câmera
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md font-mono">
+                                    Fila #{index + 1}
+                                  </span>
+                                )}
+
+                                {prod.brand && (
+                                  <span className="text-[9px] font-black uppercase text-slate-600 font-mono">
+                                    {prod.brand}
+                                  </span>
+                                )}
+                                {prod.category && (
+                                  <span className="text-[9px] font-medium text-slate-500">
+                                    • {prod.category}
+                                  </span>
+                                )}
+                              </div>
+
+                              <h4 className="text-xs sm:text-sm font-black text-slate-800 truncate group-hover:text-indigo-600 transition mt-0.5" title={prod.name}>
+                                {prod.name}
+                              </h4>
+
+                              <div className="flex items-center gap-2 text-[11px] text-slate-500 font-medium mt-0.5">
+                                {prod.weight && <span>{prod.weight}</span>}
+                                {prod.basePrice > 0 && (
+                                  <span className="text-emerald-700 font-bold font-mono">
+                                    Ref: R$ {prod.basePrice.toFixed(2).replace('.', ',')}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Action Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSelectQueueProductToRegister(prod);
+                            }}
+                            className={`shrink-0 p-2.5 rounded-xl transition flex items-center justify-center cursor-pointer shadow-2xs ${
+                              isOutOfStock
+                                ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                : isRegistered
+                                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250'
+                                : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            }`}
+                            title={isRegistered ? 'Recapturar' : 'Registrar'}
+                          >
+                            <Camera className="w-4 h-4" />
+                          </button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </div>
 
               {/* Footer */}
               <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-150 flex items-center justify-between">
                 <span className="text-[11px] text-slate-500 font-medium">
-                  {filteredOutOfStockProducts.length} {filteredOutOfStockProducts.length === 1 ? 'produto listado' : 'produtos listados'}
+                  {filteredModalQueueProducts.length} {filteredModalQueueProducts.length === 1 ? 'produto na fila' : 'produtos na fila'}
                 </span>
                 <button
                   type="button"
@@ -4202,6 +4460,120 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                 >
                   Fechar
                 </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Modal de Correção de Preço ao Clicar no Minicard de Foto do Lote */}
+        {editingPriceBatchItem && (
+          <div
+            id="modal-correct-batch-item-price"
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 animate-fade-in"
+            onClick={() => setEditingPriceBatchItem(null)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              transition={{ duration: 0.16 }}
+              className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-150 flex flex-col"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header com preview da foto capturada */}
+              <div className="relative bg-slate-900 h-44 sm:h-48 w-full overflow-hidden flex items-center justify-center">
+                <img
+                  src={editingPriceBatchItem.imagePreview}
+                  alt="Foto do produto"
+                  className="w-full h-full object-contain bg-black/40"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-xs text-white text-[10px] font-bold font-mono px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-xs">
+                  <Camera className="w-3 h-3 text-amber-400" />
+                  Corrigir Preço
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditingPriceBatchItem(null)}
+                  className="absolute top-3 right-3 p-1.5 bg-black/60 rounded-full text-white hover:bg-black/80 cursor-pointer transition"
+                  title="Fechar"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Conteúdo & Campo Numérico Estilo Calculadora */}
+              <div className="p-5 sm:p-6 flex flex-col gap-4 sm:gap-5">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
+                      Ajuste de Preço
+                    </span>
+                  </div>
+                  <h3 className="text-base font-black text-slate-900 leading-tight">
+                    {(() => {
+                      const p = products.find(prod => prod.id === editingPriceBatchItem.selectedProductId);
+                      return p?.name || editingPriceBatchItem.productSearch || 'Produto do Lote';
+                    })()}
+                  </h3>
+                  {(() => {
+                    const p = products.find(prod => prod.id === editingPriceBatchItem.selectedProductId);
+                    if (!p) return null;
+                    return (
+                      <p className="text-xs text-slate-400 font-medium mt-0.5">
+                        {p.brand ? `${p.brand} ` : ''}{p.weight ? `• ${p.weight} ` : ''}{p.category ? `• ${p.category}` : ''}
+                      </p>
+                    );
+                  })()}
+                </div>
+
+                {/* Input Numérico com shift de decimais da direita pra esquerda */}
+                <div className="bg-slate-50 border-2 border-slate-200 focus-within:border-[#D40511] focus-within:bg-white rounded-2xl p-4 transition flex flex-col items-center justify-center shadow-2xs">
+                  <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
+                    Preço de Varejo (R$)
+                  </label>
+                  <div className="flex items-baseline justify-center gap-1.5 w-full">
+                    <span className="text-2xl font-black text-slate-400 font-mono">R$</span>
+                    <input
+                      id="input-correct-batch-item-price"
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoFocus
+                      value={correctionPriceInput}
+                      onChange={(e) => setCorrectionPriceInput(formatToCalculatorPrice(e.target.value))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleConfirmPriceCorrection();
+                        }
+                      }}
+                      className="w-48 text-center text-3xl sm:text-4xl font-black font-mono text-[#D40511] bg-transparent outline-hidden border-b-2 border-slate-300 focus:border-[#D40511] tracking-tight"
+                      placeholder="0,00"
+                    />
+                  </div>
+                </div>
+
+                {/* Botões de Ação */}
+                <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setEditingPriceBatchItem(null)}
+                    className="order-2 sm:order-1 flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition duration-150 cursor-pointer text-center"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    id="btn-confirm-price-correction"
+                    onClick={handleConfirmPriceCorrection}
+                    disabled={correctionPriceInput === '0,00'}
+                    className="order-1 sm:order-2 flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-wider transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2"
+                  >
+                    <Check className="w-4 h-4 text-white shrink-0" />
+                    <span>Salvar Preço</span>
+                  </button>
+                </div>
               </div>
             </motion.div>
           </div>
@@ -4279,12 +4651,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                     type="button"
                     onClick={() => {
                       setShowFreeModeNoticeModal(false);
-                      setShowOutOfStockModal(true);
+                      handleOpenQueueModal();
                     }}
                     className="text-[11px] text-rose-600 hover:text-rose-700 font-bold flex items-center justify-center gap-1.5 pt-2 cursor-pointer transition"
                   >
-                    <PackageX className="w-3.5 h-3.5" />
-                    <span>Ver {outOfStockProductIds.length} {outOfStockProductIds.length === 1 ? 'item sem estoque' : 'itens sem estoque'}</span>
+                    <ListOrdered className="w-3.5 h-3.5" />
+                    <span>Ver fila de auditoria ({outOfStockProductIds.length} marcado(s) como não tem)</span>
                   </button>
                 )}
               </div>
