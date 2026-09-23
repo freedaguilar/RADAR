@@ -259,18 +259,28 @@ export function Products({
 
         // Brand checks
         let matchesBrandType = false;
-        if (exportBrandTypes.includes("propria-oetker") && !p.isCompetitor && p.brand === "Dr. Oetker") {
+        const isAllExportBrands = exportBrandTypes.length === 3 || exportBrandTypes.includes("Todas");
+        if (isAllExportBrands) {
           matchesBrandType = true;
-        }
-        if (
-          exportBrandTypes.includes("propria-mavalerio") &&
-          !p.isCompetitor &&
-          (p.brand?.toLowerCase().includes("mavalerio") || p.brand?.toLowerCase().includes("mavalério"))
-        ) {
-          matchesBrandType = true;
-        }
-        if (exportBrandTypes.includes("concorrentes") && p.isCompetitor) {
-          matchesBrandType = true;
+        } else {
+          const bLower = (p.brand || "").toLowerCase().trim();
+          const isOetker = bLower.includes("oetker");
+          const isMav = bLower.includes("mavalerio") || bLower.includes("mavalério");
+          const isComp = !!p.isCompetitor || (!isOetker && !isMav);
+
+          if (exportBrandTypes.includes("propria-oetker") && isOetker && !p.isCompetitor) {
+            matchesBrandType = true;
+          }
+          if (
+            exportBrandTypes.includes("propria-mavalerio") &&
+            isMav &&
+            !p.isCompetitor
+          ) {
+            matchesBrandType = true;
+          }
+          if (exportBrandTypes.includes("concorrentes") && isComp) {
+            matchesBrandType = true;
+          }
         }
 
         return matchesBrandType;
@@ -878,7 +888,7 @@ export function Products({
   // Filtered products list
   const filteredProducts = useMemo(() => {
     return products.filter((prod) => {
-      if (!prod.active) return false;
+      if (prod.active === false) return false;
 
       const searchTerms = (searchTerm || "").toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
       const matchesSearch = searchTerms.every((term) => {
@@ -899,40 +909,60 @@ export function Products({
 
       // Handle brand/competitor division
       let matchesBrand = false;
-      if (
-        selectedBrandFilters.includes("propria-oetker") &&
-        !prod.isCompetitor &&
-        prod.brand === "Dr. Oetker"
-      ) {
+      const isAllBrands =
+        selectedBrandFilters.length === 3 ||
+        selectedBrandFilters.length === 0;
+
+      if (isAllBrands) {
         matchesBrand = true;
-      }
-      if (
-        selectedBrandFilters.includes("propria-mavalerio") &&
-        !prod.isCompetitor &&
-        (prod.brand?.toLowerCase().includes("mavalerio") ||
-          prod.brand?.toLowerCase().includes("mavalério"))
-      ) {
-        matchesBrand = true;
-      }
-      if (
-        selectedBrandFilters.includes("concorrentes") &&
-        !!prod.isCompetitor
-      ) {
-        matchesBrand = true;
+      } else {
+        const brandNormalized = (prod.brand || "").toLowerCase().trim();
+        const isOetker = brandNormalized.includes("oetker");
+        const isMavalerio =
+          brandNormalized.includes("mavalerio") ||
+          brandNormalized.includes("mavalério");
+        const isCompetitor =
+          !!prod.isCompetitor || (!isOetker && !isMavalerio);
+
+        if (
+          selectedBrandFilters.includes("propria-oetker") &&
+          isOetker &&
+          !prod.isCompetitor
+        ) {
+          matchesBrand = true;
+        }
+        if (
+          selectedBrandFilters.includes("propria-mavalerio") &&
+          isMavalerio &&
+          !prod.isCompetitor
+        ) {
+          matchesBrand = true;
+        }
+        if (
+          selectedBrandFilters.includes("concorrentes") &&
+          isCompetitor
+        ) {
+          matchesBrand = true;
+        }
       }
 
       // If a chain is selected, check if this product has at least one recorded price in that chain
       let matchesChain = true;
       if (selectedChainId !== "Todas") {
-        const prices = latestPricePerChainMap[prod.id] || {};
-        matchesChain = prices[selectedChainId] !== undefined;
+        matchesChain = effectiveRecords.some(
+          (r) => r.productId === prod.id && r.chainId === selectedChainId
+        );
       }
 
       // If a specific state is selected, check if this product has at least one recorded price in that state
       let matchesState = true;
       if (selectedState !== "Todas") {
-        const prices = latestPricePerChainMap[prod.id] || {};
-        matchesState = Object.keys(prices).length > 0;
+        matchesState = effectiveRecords.some(
+          (r) =>
+            r.productId === prod.id &&
+            (r.state === selectedState ||
+              (!r.state && selectedState === "Minas Gerais"))
+        );
       }
 
       // Weight filter logic
@@ -1298,36 +1328,36 @@ export function Products({
                 id="brand-tab-todos"
                 type="button"
                 onClick={() => {
-                  if (selectedBrandFilters.length === 3) {
-                    // Toggle to none, or keep all? Usually Clicking "Todos" should select everything.
-                    // Let's toggle: if some are missing, select all. If all are selected, toggle to first one, or allow clearing.
-                    // Best behavior: make sure all are selected.
-                    setSelectedBrandFilters([
-                      "propria-oetker",
-                      "propria-mavalerio",
-                      "concorrentes",
-                    ]);
-                  } else {
-                    setSelectedBrandFilters([
-                      "propria-oetker",
-                      "propria-mavalerio",
-                      "concorrentes",
-                    ]);
-                  }
+                  setSelectedBrandFilters([
+                    "propria-oetker",
+                    "propria-mavalerio",
+                    "concorrentes",
+                  ]);
                 }}
                 className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                  selectedBrandFilters.length === 3
+                  selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0
                     ? "bg-white text-[#1A1A1A] shadow-xs border border-[#E0E0E0]/60"
                     : "text-gray-500 hover:text-[#1A1A1A]"
                 }`}
               >
-                Todos ({products.filter((p) => p.active).length})
+                Todos ({products.filter((p) => p.active !== false).length})
               </button>
               <button
                 id="brand-tab-propria"
                 type="button"
                 onClick={() => {
-                  if (selectedBrandFilters.includes("propria-oetker")) {
+                  if (selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0) {
+                    setSelectedBrandFilters(["propria-oetker"]);
+                  } else if (
+                    selectedBrandFilters.length === 1 &&
+                    selectedBrandFilters.includes("propria-oetker")
+                  ) {
+                    setSelectedBrandFilters([
+                      "propria-oetker",
+                      "propria-mavalerio",
+                      "concorrentes",
+                    ]);
+                  } else if (selectedBrandFilters.includes("propria-oetker")) {
                     setSelectedBrandFilters(
                       selectedBrandFilters.filter(
                         (f) => f !== "propria-oetker",
@@ -1341,21 +1371,22 @@ export function Products({
                   }
                 }}
                 className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedBrandFilters.includes("propria-oetker")
+                  selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3
                     ? "bg-emerald-700 text-white shadow-xs"
                     : "text-emerald-700 hover:bg-emerald-50"
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("propria-oetker") ? "bg-emerald-300" : "bg-emerald-500"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3 ? "bg-emerald-300" : "bg-emerald-500"}`}
                 />
                 <span className="truncate">
                   Dr. Oetker (
                   {
-                    products.filter(
-                      (p) =>
-                        p.active && !p.isCompetitor && p.brand === "Dr. Oetker",
-                    ).length
+                    products.filter((p) => {
+                      if (p.active === false) return false;
+                      const b = (p.brand || "").toLowerCase();
+                      return !p.isCompetitor && b.includes("oetker");
+                    }).length
                   }
                   )
                 </span>
@@ -1364,7 +1395,18 @@ export function Products({
                 id="brand-tab-propria-mavalerio"
                 type="button"
                 onClick={() => {
-                  if (selectedBrandFilters.includes("propria-mavalerio")) {
+                  if (selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0) {
+                    setSelectedBrandFilters(["propria-mavalerio"]);
+                  } else if (
+                    selectedBrandFilters.length === 1 &&
+                    selectedBrandFilters.includes("propria-mavalerio")
+                  ) {
+                    setSelectedBrandFilters([
+                      "propria-oetker",
+                      "propria-mavalerio",
+                      "concorrentes",
+                    ]);
+                  } else if (selectedBrandFilters.includes("propria-mavalerio")) {
                     setSelectedBrandFilters(
                       selectedBrandFilters.filter(
                         (f) => f !== "propria-mavalerio",
@@ -1378,24 +1420,25 @@ export function Products({
                   }
                 }}
                 className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedBrandFilters.includes("propria-mavalerio")
+                  selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3
                     ? "bg-violet-700 text-white shadow-xs"
                     : "text-violet-700 hover:bg-violet-50"
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("propria-mavalerio") ? "bg-violet-300" : "bg-violet-500"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3 ? "bg-violet-300" : "bg-violet-500"}`}
                 />
                 <span className="truncate">
                   Mavalério (
                   {
-                    products.filter(
-                      (p) =>
-                        p.active &&
+                    products.filter((p) => {
+                      if (p.active === false) return false;
+                      const b = (p.brand || "").toLowerCase();
+                      return (
                         !p.isCompetitor &&
-                        (p.brand?.toLowerCase().includes("mavalerio") ||
-                          p.brand?.toLowerCase().includes("mavalério")),
-                    ).length
+                        (b.includes("mavalerio") || b.includes("mavalério"))
+                      );
+                    }).length
                   }
                   )
                 </span>
@@ -1404,7 +1447,18 @@ export function Products({
                 id="brand-tab-concorrentes"
                 type="button"
                 onClick={() => {
-                  if (selectedBrandFilters.includes("concorrentes")) {
+                  if (selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0) {
+                    setSelectedBrandFilters(["concorrentes"]);
+                  } else if (
+                    selectedBrandFilters.length === 1 &&
+                    selectedBrandFilters.includes("concorrentes")
+                  ) {
+                    setSelectedBrandFilters([
+                      "propria-oetker",
+                      "propria-mavalerio",
+                      "concorrentes",
+                    ]);
+                  } else if (selectedBrandFilters.includes("concorrentes")) {
                     setSelectedBrandFilters(
                       selectedBrandFilters.filter((f) => f !== "concorrentes"),
                     );
@@ -1416,17 +1470,27 @@ export function Products({
                   }
                 }}
                 className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedBrandFilters.includes("concorrentes")
+                  selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3
                     ? "bg-[#1A1A1A] text-white shadow-xs"
                     : "text-[#D40511] hover:bg-rose-50"
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("concorrentes") ? "bg-rose-400" : "bg-[#D40511]"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3 ? "bg-rose-400" : "bg-[#D40511]"}`}
                 />
                 <span className="truncate">
                   Concorrentes (
-                  {products.filter((p) => p.active && p.isCompetitor).length})
+                  {
+                    products.filter((p) => {
+                      if (p.active === false) return false;
+                      const b = (p.brand || "").toLowerCase();
+                      const isOetker = b.includes("oetker");
+                      const isMav =
+                        b.includes("mavalerio") || b.includes("mavalério");
+                      return !!p.isCompetitor || (!isOetker && !isMav);
+                    }).length
+                  }
+                  )
                 </span>
               </button>
             </div>
@@ -2197,6 +2261,9 @@ export function Products({
                     <option value={25}>25</option>
                     <option value={50}>50</option>
                     <option value={100}>100</option>
+                    <option value={250}>250</option>
+                    <option value={500}>500</option>
+                    <option value={1000}>Todos</option>
                   </select>
                 </div>
                 <div className="text-gray-400 font-semibold font-sans">
