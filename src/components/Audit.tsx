@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, X, Maximize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, History, ArrowRight, Store, PackageX, Clock, Layers, CheckCheck } from 'lucide-react';
+import { Search, Filter, Calendar, MapPin, User, Tag, Sparkles, Trash2, ExternalLink, RefreshCw, AlertTriangle, Check, CheckCircle2, Image as ImageIcon, Loader2, ZoomIn, ZoomOut, RotateCcw, X, Maximize2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Eye, History, ArrowRight, Store, PackageX, Clock, Layers, CheckCheck, Edit3 } from 'lucide-react';
 import { PriceRecord, Product, Chain, User as AppUser } from '../types';
 import { parsePriceRecordMeta, searchAndRankProducts, serializePendingMeta, getCleanObserverNotes } from '../lib/textUtils';
 import { supabase, recordAiCorrection } from '../lib/supabase';
@@ -9,6 +9,7 @@ import { ConsolidatedSessionCard } from './audit/ConsolidatedSessionCard';
 import { SessionDetailModal } from './audit/SessionDetailModal';
 import { OutOfStockModal } from './audit/OutOfStockModal';
 import { SessionPagination } from './audit/SessionPagination';
+import { EditAuditRecordModal } from './audit/EditAuditRecordModal';
 
 interface AuditProps {
   records: PriceRecord[];
@@ -79,6 +80,12 @@ export function Audit({
   // Lightbox view state for audited records
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(initialSelectedRecordId || null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isEditingLightboxRecord, setIsEditingLightboxRecord] = useState(false);
+  const [lightboxEditPrice, setLightboxEditPrice] = useState('');
+  const [lightboxEditProductId, setLightboxEditProductId] = useState<string | null>(null);
+  const [lightboxProductSearchQuery, setLightboxProductSearchQuery] = useState('');
+  const [isLightboxSearchingProduct, setIsLightboxSearchingProduct] = useState(false);
+  const [recordToEditInModal, setRecordToEditInModal] = useState<PriceRecord | null>(null);
 
   const handleDeleteSession = (session: ResearchSession) => {
     const allRecords = session.records && session.records.length > 0
@@ -256,7 +263,7 @@ export function Audit({
     });
   };
 
-  // Handle ESC key to close image zoom or pending modal
+  // Handle ESC key to close image zoom or modals
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -266,12 +273,18 @@ export function Audit({
           setShowPendingDeleteConfirm(false);
         } else if (pendingRecordToConfirm) {
           setPendingRecordToConfirm(null);
+        } else if (isLightboxSearchingProduct) {
+          setIsLightboxSearchingProduct(false);
+        } else if (isEditingLightboxRecord) {
+          setIsEditingLightboxRecord(false);
+        } else if (selectedRecordId) {
+          handleCloseLightbox();
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isImageZoomed, showPendingDeleteConfirm, pendingRecordToConfirm]);
+  }, [isImageZoomed, showPendingDeleteConfirm, pendingRecordToConfirm, isLightboxSearchingProduct, isEditingLightboxRecord, selectedRecordId]);
 
   const [isAnalyzingPending, setIsAnalyzingPending] = useState(false);
   const [aiFeedbackMessage, setAiFeedbackMessage] = useState<string | null>(null);
@@ -410,6 +423,8 @@ export function Audit({
   const handleCloseLightbox = () => {
     setSelectedRecordId(null);
     setShowDeleteConfirm(false);
+    setIsEditingLightboxRecord(false);
+    setIsLightboxSearchingProduct(false);
   };
 
   const activeRecordForLightbox = useMemo(() => {
@@ -422,6 +437,46 @@ export function Audit({
       chain: chains.find((c) => c.id === rec.chainId),
     };
   }, [records, selectedRecordId, products, chains]);
+
+  // Filtered products list for editing an individual lightbox record
+  const lightboxFilteredProducts = useMemo(() => {
+    if (!lightboxProductSearchQuery.trim()) {
+      return products.slice(0, 20);
+    }
+    const q = lightboxProductSearchQuery.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return products
+      .filter((p) => {
+        const name = (p.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const brand = (p.brand || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const cat = (p.category || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const code = (p.internalCode || '').toLowerCase();
+        return name.includes(q) || brand.includes(q) || cat.includes(q) || code.includes(q);
+      })
+      .slice(0, 25);
+  }, [products, lightboxProductSearchQuery]);
+
+  const handleStartEditLightbox = (record: PriceRecord) => {
+    setIsEditingLightboxRecord(true);
+    setLightboxEditProductId(record.productId);
+    setLightboxEditPrice(record.price.toFixed(2).replace('.', ','));
+    setLightboxProductSearchQuery('');
+    setIsLightboxSearchingProduct(false);
+  };
+
+  const handleSaveEditLightbox = () => {
+    if (!activeRecordForLightbox || !onUpdateRecord) return;
+    const numPrice = parseFloat(lightboxEditPrice.replace(',', '.'));
+    if (isNaN(numPrice) || numPrice < 0) return;
+    const targetProductId = lightboxEditProductId || activeRecordForLightbox.productId;
+
+    onUpdateRecord({
+      ...activeRecordForLightbox,
+      productId: targetProductId,
+      price: numPrice,
+    });
+    setIsEditingLightboxRecord(false);
+    setIsLightboxSearchingProduct(false);
+  };
 
   // Formatted date helper (PT-BR)
   const formatDateBR = (dateStr: string) => {
@@ -1083,6 +1138,7 @@ export function Audit({
                       onPreviewProduct={(prod) => setPreviewProduct(prod)}
                       onSelectRecord={(recId) => setSelectedRecordId(recId)}
                       onDeleteSession={handleDeleteSession}
+                      onEditRecord={(rec) => setRecordToEditInModal(rec)}
                       isInitiallyExpanded={index === 0 && paginatedConsolidatedSessions.length === 1}
                     />
                   ))}
@@ -1154,9 +1210,24 @@ export function Audit({
                         <span className="bg-[#1A1A1A] text-white font-mono text-[10px] font-black px-2 py-0.5 rounded shadow">
                           R$ {rec.price.toFixed(2)}
                         </span>
-                        <span className="text-[8px] bg-red-100/90 text-[#D40511] font-bold px-1.5 py-0.5 rounded shadow">
-                          {chain?.name.split(' ')[0]}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {onUpdateRecord && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setRecordToEditInModal(rec);
+                              }}
+                              className="bg-white/95 hover:bg-white text-slate-700 hover:text-emerald-700 p-1 rounded shadow text-[10px] font-bold flex items-center gap-1 cursor-pointer transition border border-slate-200"
+                              title="Alterar produto selecionado ou preço deste registro"
+                            >
+                              <Edit3 className="w-3 h-3 text-emerald-600" />
+                            </button>
+                          )}
+                          <span className="text-[8px] bg-red-100/90 text-[#D40511] font-bold px-1.5 py-0.5 rounded shadow">
+                            {chain?.name.split(' ')[0]}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -1191,6 +1262,21 @@ export function Audit({
                           <Calendar className="w-2.5 h-2.5 shrink-0" /> {formatDateBR(rec.date)}
                         </span>
                       </div>
+
+                      {onUpdateRecord && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRecordToEditInModal(rec);
+                          }}
+                          className="w-full mt-1.5 py-1 px-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/80 rounded-xl text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer shadow-2xs font-sans"
+                          title="Alterar produto selecionado ou preço deste registro"
+                        >
+                          <Edit3 className="w-3 h-3 text-emerald-600" />
+                          <span>Alterar Produto / Preço</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -1942,126 +2028,343 @@ export function Audit({
             onClick={(e) => e.stopPropagation()}
             id="audit-lightbox-card"
           >
-            {/* Header */}
-            <div className="px-6 py-4 border-b border-[#E0E0E0] flex justify-between items-center bg-[#F5F5F5]">
-              <div>
-                <span className="text-[10px] font-bold text-[#D40511] bg-red-100 rounded px-2 py-0.5 uppercase tracking-wider font-sans">
-                  Comprovante Válido - Auditoria
-                </span>
-                <h3 
-                  onClick={() => {
-                    handleCloseLightbox();
-                    onNavigate?.('produtos', { action: 'detail', productId: activeRecordForLightbox.productId });
-                  }}
-                  className="text-xs font-bold text-[#1A1A1A] mt-1 pr-6 font-sans hover:text-[#D40511] cursor-pointer flex items-center gap-1"
-                >
-                  {activeRecordForLightbox.product?.imageUrl && (
-                    <img src={activeRecordForLightbox.product.imageUrl} alt={activeRecordForLightbox.product.name} className="w-6 h-6 rounded object-contain bg-white border border-gray-100 shrink-0" />
-                  )}
-                  {activeRecordForLightbox.product?.name}
-                  <ExternalLink className="w-3 h-3" />
-                </h3>
-              </div>
-              <button
-                id="close-lightbox-btn"
-                onClick={() => setSelectedRecordId(null)}
-                className="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 absolute top-3 right-4 cursor-pointer"
-              >
-                &times;
-              </button>
-            </div>
+            {(() => {
+              const selectedEditProd = products.find(p => p.id === (lightboxEditProductId || activeRecordForLightbox.productId));
+              const displayProduct = isEditingLightboxRecord ? (selectedEditProd || activeRecordForLightbox.product) : activeRecordForLightbox.product;
 
-            {/* Split Image and Details layout */}
-            <div className="grid grid-cols-1 md:grid-cols-2" id="lightbox-split">
-              {/* Photo View column */}
-              <div className="bg-gray-100 flex items-center justify-center p-2 min-h-[250px] max-h-[400px] overflow-hidden">
-                <img
-                  src={activeRecordForLightbox.imageUrl}
-                  alt={activeRecordForLightbox.product?.name}
-                  referrerPolicy="no-referrer"
-                  className="max-h-[350px] object-contain w-full rounded shadow-sm"
-                />
-              </div>
-
-              {/* Detailed information lists and observations column */}
-              <div className="p-6 space-y-4 flex flex-col justify-between" id="lightbox-details-col">
-                <div className="space-y-4">
-                  <div>
-                    <span className="block text-[10px] uppercase text-gray-400 font-bold tracking-wider">Valor Coletado</span>
-                    <p className="text-3xl font-black text-[#D40511] font-mono leading-tight">
-                      R$ {activeRecordForLightbox.price.toFixed(2)}
-                    </p>
+              return (
+                <>
+                  {/* Header */}
+                  <div className="px-6 py-4 border-b border-[#E0E0E0] flex justify-between items-center bg-[#F5F5F5]">
+                    <div>
+                      <span className={`text-[10px] font-bold rounded px-2 py-0.5 uppercase tracking-wider font-sans ${isEditingLightboxRecord ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-[#D40511]'}`}>
+                        {isEditingLightboxRecord ? 'Editando Registro - Auditoria' : 'Comprovante Válido - Auditoria'}
+                      </span>
+                      <h3 
+                        onClick={() => {
+                          if (isEditingLightboxRecord) return;
+                          handleCloseLightbox();
+                          onNavigate?.('produtos', { action: 'detail', productId: displayProduct?.id || activeRecordForLightbox.productId });
+                        }}
+                        className={`text-xs font-bold text-[#1A1A1A] mt-1 pr-6 font-sans flex items-center gap-1.5 ${!isEditingLightboxRecord ? 'hover:text-[#D40511] cursor-pointer' : ''}`}
+                      >
+                        {displayProduct?.imageUrl && (
+                          <img src={displayProduct.imageUrl} alt={displayProduct.name} className="w-6 h-6 rounded object-contain bg-white border border-gray-100 shrink-0" referrerPolicy="no-referrer" />
+                        )}
+                        <span>{displayProduct?.name || 'Produto não catalogado'}</span>
+                        {!isEditingLightboxRecord && <ExternalLink className="w-3 h-3" />}
+                      </h3>
+                    </div>
+                    <button
+                      id="close-lightbox-btn"
+                      onClick={handleCloseLightbox}
+                      className="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 absolute top-3 right-4 cursor-pointer"
+                    >
+                      &times;
+                    </button>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 text-xs font-sans">
-                    <div>
-                      <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Ponto de Venda</span>
-                      <span className="font-semibold text-gray-800 flex items-center gap-1 mt-0.5 font-sans truncate" title={activeRecordForLightbox.chain?.name}>
-                        <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" /> {activeRecordForLightbox.chain?.name}
-                      </span>
+                  {/* Split Image and Details layout */}
+                  <div className="grid grid-cols-1 md:grid-cols-2" id="lightbox-split">
+                    {/* Photo View column */}
+                    <div className="bg-gray-100 flex items-center justify-center p-2 min-h-[250px] max-h-[400px] overflow-hidden">
+                      <img
+                        src={activeRecordForLightbox.imageUrl}
+                        alt={displayProduct?.name}
+                        referrerPolicy="no-referrer"
+                        className="max-h-[350px] object-contain w-full rounded shadow-sm"
+                      />
                     </div>
-                    <div>
-                      <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Data & Hora</span>
-                      <span className="font-medium text-gray-500 block mt-0.5 font-mono">
-                        {formatDateBR(activeRecordForLightbox.date)}
-                      </span>
-                    </div>
-                    <div className="col-span-2">
-                      <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Auditor do Campo</span>
-                      <span className="font-medium text-gray-600 block mt-0.5 font-sans truncate">
-                        {activeRecordForLightbox.userName} ({activeRecordForLightbox.userEmail})
-                      </span>
+
+                    {/* Detailed information lists or edit form column */}
+                    <div className="p-6 space-y-4 flex flex-col justify-between" id="lightbox-details-col">
+                      {isEditingLightboxRecord ? (
+                        <div className="space-y-4 flex flex-col justify-between h-full">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between pb-2 border-b border-gray-200">
+                              <span className="text-xs font-black uppercase tracking-wider text-gray-800 flex items-center gap-1.5">
+                                <Edit3 className="w-3.5 h-3.5 text-emerald-600" /> Alterar Produto & Preço
+                              </span>
+                              <span className="text-[10px] bg-emerald-50 text-emerald-700 font-bold px-2 py-0.5 rounded-full border border-emerald-200">
+                                Edição
+                              </span>
+                            </div>
+
+                            {/* 1. Selecionar / Alterar Produto */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1.5">
+                                <label className="text-[10px] font-extrabold uppercase tracking-wider text-gray-500">
+                                  Produto Selecionado
+                                </label>
+                                {!isLightboxSearchingProduct && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIsLightboxSearchingProduct(true);
+                                      setLightboxProductSearchQuery('');
+                                    }}
+                                    className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1"
+                                  >
+                                    <Search className="w-3 h-3" />
+                                    Alterar Produto
+                                  </button>
+                                )}
+                              </div>
+
+                              {isLightboxSearchingProduct ? (
+                                <div className="space-y-2 bg-gray-50 p-2.5 rounded-xl border border-gray-200 shadow-xs">
+                                  <div className="relative">
+                                    <Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-2.5" />
+                                    <input
+                                      type="text"
+                                      placeholder="Buscar por nome, marca ou categoria..."
+                                      value={lightboxProductSearchQuery}
+                                      onChange={(e) => setLightboxProductSearchQuery(e.target.value)}
+                                      className="w-full pl-8 pr-7 py-1.5 text-xs bg-white border border-gray-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-sans"
+                                      autoFocus
+                                    />
+                                    {lightboxProductSearchQuery && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setLightboxProductSearchQuery('')}
+                                        className="absolute right-2 top-2 text-gray-400 hover:text-gray-600 cursor-pointer"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="max-h-36 overflow-y-auto space-y-1 bg-white border border-gray-200 rounded-lg p-1 shadow-inner">
+                                    {lightboxFilteredProducts.length > 0 ? (
+                                      lightboxFilteredProducts.map((p) => {
+                                        const isSelectedThis = p.id === (lightboxEditProductId || activeRecordForLightbox.productId);
+                                        return (
+                                          <button
+                                            key={p.id}
+                                            type="button"
+                                            onClick={() => {
+                                              setLightboxEditProductId(p.id);
+                                              setIsLightboxSearchingProduct(false);
+                                            }}
+                                            className={`w-full text-left p-1.5 rounded-md text-xs flex items-center gap-2 transition cursor-pointer ${
+                                              isSelectedThis
+                                                ? 'bg-emerald-50 border border-emerald-300 text-emerald-950 font-bold'
+                                                : 'hover:bg-gray-50 text-gray-700'
+                                            }`}
+                                          >
+                                            {p.imageUrl ? (
+                                              <img src={p.imageUrl} alt="" className="w-6 h-6 rounded object-contain bg-white border border-gray-200 shrink-0" referrerPolicy="no-referrer" />
+                                            ) : (
+                                              <div className="w-6 h-6 rounded bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0">
+                                                <ImageIcon className="w-3 h-3 text-gray-400" />
+                                              </div>
+                                            )}
+                                            <div className="min-w-0 flex-1">
+                                              <div className="truncate font-semibold">{p.name}</div>
+                                              <div className="text-[10px] text-gray-400 truncate">
+                                                {p.brand || 'Dr. Oetker'} {p.weight ? `• ${p.weight}` : ''}
+                                              </div>
+                                            </div>
+                                            {isSelectedThis && (
+                                              <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                            )}
+                                          </button>
+                                        );
+                                      })
+                                    ) : (
+                                      <p className="text-[10px] text-gray-400 p-2 text-center italic">
+                                        Nenhum produto cadastrado com "{lightboxProductSearchQuery}".
+                                      </p>
+                                    )}
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => setIsLightboxSearchingProduct(false)}
+                                    className="text-[10px] text-gray-500 hover:text-gray-700 font-medium cursor-pointer block"
+                                  >
+                                    Fechar busca e manter selecionado
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2.5 bg-gray-50 p-2.5 rounded-xl border border-gray-200">
+                                  {selectedEditProd?.imageUrl ? (
+                                    <img src={selectedEditProd.imageUrl} alt="" className="w-10 h-10 rounded-lg object-contain bg-white border border-gray-200 shrink-0" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <div className="w-10 h-10 rounded-lg bg-gray-100 border border-gray-200 flex items-center justify-center shrink-0">
+                                      <ImageIcon className="w-4 h-4 text-gray-400" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-black text-gray-900 leading-snug line-clamp-2">
+                                      {selectedEditProd?.name || 'Produto não catalogado'}
+                                    </p>
+                                    <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-0.5">
+                                      <span className="font-semibold text-gray-700">{selectedEditProd?.brand || 'Dr. Oetker'}</span>
+                                      {selectedEditProd?.weight && <span>• {selectedEditProd.weight}</span>}
+                                      {selectedEditProd?.category && (
+                                        <span className="bg-gray-200/80 text-gray-600 px-1 py-0.2 rounded-xs font-mono">
+                                          {selectedEditProd.category}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* 2. Alterar Preço */}
+                            <div>
+                              <label className="block text-[10px] font-extrabold uppercase tracking-wider text-gray-500 mb-1">
+                                Preço Coletado (R$)
+                              </label>
+                              <div className="relative">
+                                <span className="absolute left-3 top-2 text-xs font-bold text-gray-400">R$</span>
+                                <input
+                                  type="text"
+                                  value={lightboxEditPrice}
+                                  onChange={(e) => setLightboxEditPrice(formatToCalculatorPrice(e.target.value))}
+                                  className="w-full pl-9 pr-3 py-1.5 bg-white border border-gray-300 rounded-xl text-sm font-mono font-black text-gray-900 focus:outline-hidden focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500"
+                                  placeholder="0,00"
+                                  autoFocus
+                                />
+                              </div>
+                            </div>
+
+                            {/* Store & Date Context info */}
+                            <div className="p-2.5 bg-gray-100/70 rounded-xl text-[10px] text-gray-600 space-y-1">
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-gray-400 uppercase tracking-wider">Rede:</span>
+                                <span className="font-bold text-gray-800">{activeRecordForLightbox.chain?.name}</span>
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <span className="font-medium text-gray-400 uppercase tracking-wider">Data:</span>
+                                <span className="font-mono text-gray-700">{formatDateBR(activeRecordForLightbox.date)}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Actions save/cancel */}
+                          <div className="pt-3 border-t border-gray-200 flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditingLightboxRecord(false);
+                                setIsLightboxSearchingProduct(false);
+                              }}
+                              className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition cursor-pointer"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveEditLightbox}
+                              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              Salvar Alterações
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="space-y-4">
+                            <div>
+                              <span className="block text-[10px] uppercase text-gray-400 font-bold tracking-wider">Valor Coletado</span>
+                              <p className="text-3xl font-black text-[#D40511] font-mono leading-tight">
+                                R$ {activeRecordForLightbox.price.toFixed(2)}
+                              </p>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4 text-xs font-sans">
+                              <div>
+                                <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Ponto de Venda</span>
+                                <span className="font-semibold text-gray-800 flex items-center gap-1 mt-0.5 font-sans truncate" title={activeRecordForLightbox.chain?.name}>
+                                  <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" /> {activeRecordForLightbox.chain?.name}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Data & Hora</span>
+                                <span className="font-medium text-gray-500 block mt-0.5 font-mono">
+                                  {formatDateBR(activeRecordForLightbox.date)}
+                                </span>
+                              </div>
+                              <div className="col-span-2">
+                                <span className="block text-[9px] uppercase text-gray-400 font-bold font-sans">Auditor do Campo</span>
+                                <span className="font-medium text-gray-600 block mt-0.5 font-sans truncate">
+                                  {activeRecordForLightbox.userName} ({activeRecordForLightbox.userEmail})
+                                </span>
+                              </div>
+                            </div>
+
+                            {(() => {
+                              const cleanObserverNotes = getCleanObserverNotes(activeRecordForLightbox.notes);
+                              return cleanObserverNotes ? (
+                                <div className="bg-[#F5F5F5] p-3 rounded-lg border border-[#E0E0E0]" id="lightbox-notes-box">
+                                  <span className="block text-[9px] uppercase text-gray-400 font-bold mb-1">Notas do Observador</span>
+                                  <p className="text-xs text-gray-700 italic font-sans leading-relaxed">
+                                    "{cleanObserverNotes}"
+                                  </p>
+                                </div>
+                              ) : null;
+                            })()}
+                          </div>
+
+                          <div className="pt-4 border-t border-[#E0E0E0] flex items-center justify-between text-[10px] text-gray-400 bg-white font-sans">
+                            <button
+                              onClick={() => setShowDeleteConfirm(true)}
+                              className="flex items-center gap-1 text-[10px] text-[#D40511] font-extrabold uppercase tracking-wide cursor-pointer hover:underline"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Excluir Registro
+                            </button>
+                            <div className="flex items-center gap-2">
+                              {onUpdateRecord && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleCloseLightbox();
+                                    setRecordToEditInModal(activeRecordForLightbox);
+                                  }}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+                                  title="Alterar produto selecionado ou preço deste registro"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5" /> Alterar Produto & Preço
+                                </button>
+                              )}
+                              <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded uppercase font-sans">
+                                Comprimida OK
+                              </span>
+                            </div>
+                            {showDeleteConfirm && (
+                              <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center gap-4">
+                                <p className="text-sm font-bold text-gray-850 font-sans">Deseja realmente excluir este registro?</p>
+                                <div className="flex gap-4">
+                                  <button 
+                                    onClick={() => {
+                                        onDeleteRecord?.(activeRecordForLightbox.id);
+                                        handleCloseLightbox();
+                                    }}
+                                    className="bg-[#D40511] text-white px-4 py-2 rounded-lg font-extrabold text-xs cursor-pointer shadow-xs"
+                                  >
+                                    Sim, excluir
+                                  </button>
+                                  <button 
+                                    onClick={() => setShowDeleteConfirm(false)}
+                                    className="bg-gray-100 text-gray-800 px-4 py-2 rounded-lg font-bold text-xs cursor-pointer border border-slate-200"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
-
-                  {(() => {
-                    const cleanObserverNotes = getCleanObserverNotes(activeRecordForLightbox.notes);
-                    return cleanObserverNotes ? (
-                      <div className="bg-[#F5F5F5] p-3 rounded-lg border border-[#E0E0E0]" id="lightbox-notes-box">
-                        <span className="block text-[9px] uppercase text-gray-400 font-bold mb-1">Notas do Observador</span>
-                        <p className="text-xs text-gray-700 italic font-sans leading-relaxed">
-                          "{cleanObserverNotes}"
-                        </p>
-                      </div>
-                    ) : null;
-                  })()}
-                </div>
-
-                <div className="pt-4 border-t border-[#E0E0E0] flex items-center justify-between text-[10px] text-gray-400 bg-white font-sans">
-                  <button
-                    onClick={() => setShowDeleteConfirm(true)}
-                    className="flex items-center gap-1 text-[10px] text-[#D40511] font-extrabold uppercase tracking-wide cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" /> Excluir Registro
-                  </button>
-                  {showDeleteConfirm && (
-                    <div className="absolute inset-0 z-50 bg-white flex flex-col items-center justify-center gap-4">
-                      <p className="text-sm font-bold text-gray-850 font-sans">Deseja realmente excluir este registro?</p>
-                      <div className="flex gap-4">
-                        <button 
-                          onClick={() => {
-                              onDeleteRecord?.(activeRecordForLightbox.id);
-                              handleCloseLightbox();
-                          }}
-                          className="bg-[#D40511] text-white px-4 py-2 rounded-lg font-extrabold text-xs cursor-pointer shadow-xs"
-                        >
-                          Sim, excluir
-                        </button>
-                        <button 
-                          onClick={() => setShowDeleteConfirm(false)}
-                          className="bg-gray-100 text-gray-800 px-4 py-2 rounded-lg font-bold text-xs cursor-pointer border border-slate-200"
-                        >
-                          Cancelar
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  <span className="font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded uppercase font-sans">
-                    Comprimida OK
-                  </span>
-                </div>
-              </div>
-            </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
@@ -2240,6 +2543,7 @@ export function Audit({
           onClose={() => setSelectedSessionForDetail(null)}
           onPreviewProduct={(prod) => setPreviewProduct(prod)}
           onSelectRecord={(recId) => setSelectedRecordId(recId)}
+          onOpenRecordLightbox={(recId) => setSelectedRecordId(recId)}
           onOpenOutOfStock={(session) => setSelectedSessionForOutOfStock(session)}
           onDeleteRecord={(recId) => onDeleteRecord?.(recId)}
           onDeleteSession={handleDeleteSession}
@@ -2255,6 +2559,21 @@ export function Audit({
           chains={chains}
           onClose={() => setSelectedSessionForOutOfStock(null)}
           onPreviewProduct={(prod) => setPreviewProduct(prod)}
+        />
+      )}
+
+      {/* DEDICATED EDIT AUDIT RECORD MODAL (ALTERAR PRODUTO E PREÇO) */}
+      {recordToEditInModal && (
+        <EditAuditRecordModal
+          isOpen={Boolean(recordToEditInModal)}
+          record={recordToEditInModal}
+          products={products}
+          chains={chains}
+          onClose={() => setRecordToEditInModal(null)}
+          onSave={(updatedRecord) => {
+            onUpdateRecord?.(updatedRecord);
+            setRecordToEditInModal(null);
+          }}
         />
       )}
     </div>

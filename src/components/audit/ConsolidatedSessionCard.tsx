@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, ChevronRight, Trash2 } from 'lucide-react';
+import { Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX, ExternalLink, Image as ImageIcon, ChevronRight, Trash2, Edit3 } from 'lucide-react';
 import { ResearchSession, formatDateBR } from '../../lib/researchSessions';
 import { Product, PriceRecord, Chain } from '../../types';
 
@@ -16,6 +16,7 @@ interface ConsolidatedSessionCardProps {
   onPreviewProduct?: (product: Product) => void;
   onSelectRecord?: (recordId: string) => void;
   onDeleteSession?: (session: ResearchSession) => void;
+  onEditRecord?: (record: PriceRecord) => void;
   isInitiallyExpanded?: boolean;
 }
 
@@ -30,6 +31,7 @@ export function ConsolidatedSessionCard({
   onPreviewProduct,
   onSelectRecord,
   onDeleteSession,
+  onEditRecord,
 }: ConsolidatedSessionCardProps) {
   const [showDeleteSessionConfirm, setShowDeleteSessionConfirm] = useState(false);
 
@@ -208,10 +210,14 @@ export function ConsolidatedSessionCard({
                   key={rec.id}
                   onClick={(e) => {
                     e.stopPropagation();
-                    handleOpenDetail();
+                    if (onEditRecord) {
+                      onEditRecord(rec);
+                    } else {
+                      handleOpenDetail();
+                    }
                   }}
-                  className="group/thumb relative aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer hover:border-[#D40511] hover:ring-2 hover:ring-[#D40511]/20 transition"
-                  title={`${prod?.name || 'Produto'}: R$ ${rec.price.toFixed(2).replace('.', ',')}`}
+                  className="group/thumb relative aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden cursor-pointer hover:border-emerald-500 hover:ring-2 hover:ring-emerald-500/20 transition"
+                  title={`${prod?.name || 'Produto'}: R$ ${rec.price.toFixed(2).replace('.', ',')} (Clique para alterar produto ou preço)`}
                 >
                   {rec.imageUrl ? (
                     <img
@@ -223,6 +229,15 @@ export function ConsolidatedSessionCard({
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-slate-400">
                       <ImageIcon className="w-4 h-4" />
+                    </div>
+                  )}
+
+                  {/* Quick edit badge on hover */}
+                  {onEditRecord && (
+                    <div className="absolute top-1 right-1 opacity-0 group-hover/thumb:opacity-100 transition duration-150">
+                      <span className="p-1 bg-white/95 text-emerald-700 hover:text-emerald-900 rounded-md shadow-xs flex items-center justify-center">
+                        <Edit3 className="w-3 h-3" />
+                      </span>
                     </div>
                   )}
 

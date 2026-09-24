@@ -26,10 +26,20 @@ import {
   Pencil,
   CheckCircle2,
   Loader2,
+  ArrowUpRight,
+  SlidersHorizontal,
+  Layers,
+  Store,
+  RotateCcw,
+  Sparkles,
+  AlertTriangle,
+  Tag,
+  ChevronRight,
 } from "lucide-react";
 import { Product, Chain, PriceRecord, User, RESEARCH_STATES, getPriceRecordState, getChainStates } from "../types";
 import { normalizeString } from "../lib/textUtils";
 import { getOutdatedProducts } from "../lib/productUtils";
+import { ProductDetailPage } from "./products/ProductDetailPage";
 
 function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md" }) {
   const getInitialsAndColors = (name: string) => {
@@ -885,6 +895,40 @@ export function Products({
     return productChainPrices;
   }, [effectiveRecords, compareRecordsAsc]);
 
+  // Memoized catalog summary metrics
+  const catalogMetrics = useMemo(() => {
+    const activeProducts = products.filter((p) => p.active !== false);
+    const oetkerCount = activeProducts.filter((p) => {
+      const b = (p.brand || "").toLowerCase();
+      return !p.isCompetitor && b.includes("oetker");
+    }).length;
+    const mavalerioCount = activeProducts.filter((p) => {
+      const b = (p.brand || "").toLowerCase();
+      return (
+        !p.isCompetitor &&
+        (b.includes("mavalerio") || b.includes("mavalério"))
+      );
+    }).length;
+    const competitorCount = activeProducts.filter((p) => {
+      const b = (p.brand || "").toLowerCase();
+      const isOetker = b.includes("oetker");
+      const isMav = b.includes("mavalerio") || b.includes("mavalério");
+      return !!p.isCompetitor || (!isOetker && !isMav);
+    }).length;
+
+    const outdatedList = getOutdatedProducts(products, effectiveRecords);
+
+    return {
+      total: activeProducts.length,
+      oetker: oetkerCount,
+      mavalerio: mavalerioCount,
+      competitors: competitorCount,
+      outdatedCount: outdatedList.length,
+      outdatedIds: new Set(outdatedList.map((p) => p.id)),
+      totalRecords: effectiveRecords.length,
+    };
+  }, [products, effectiveRecords]);
+
   // Filtered products list
   const filteredProducts = useMemo(() => {
     return products.filter((prod) => {
@@ -969,8 +1013,7 @@ export function Products({
       const matchesWeight =
         selectedWeight === "Todas" || prod.weight === selectedWeight;
       
-      const outdatedProductsList = getOutdatedProducts(products, effectiveRecords);
-      const isOutdated = outdatedProductsList.some(p => p.id === prod.id);
+      const isOutdated = catalogMetrics.outdatedIds.has(prod.id);
       const matchesOutdated = isOutdatedFilter ? isOutdated : true;
 
       return (
@@ -996,6 +1039,7 @@ export function Products({
     selectedWeight,
     latestPricePerChainMap,
     isOutdatedFilter,
+    catalogMetrics,
   ]);
 
   // Sort mappings
@@ -1272,35 +1316,115 @@ export function Products({
     }
   };
 
+  const formatAuditDateRelative = (dateStr: string | undefined | null) => {
+    if (!dateStr) return "Sem auditoria";
+    try {
+      const today = new Date();
+      const auditDate = new Date(dateStr + "T00:00:00");
+      const todayZero = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const diffTime = todayZero.getTime() - auditDate.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays === 0) return "Hoje";
+      if (diffDays === 1) return "Ontem";
+      if (diffDays < 30) return `há ${diffDays}d`;
+      return formatDateBR(dateStr);
+    } catch {
+      return formatDateBR(dateStr);
+    }
+  };
+
+  const handleStartCreateProduct = () => {
+    setIsOutdatedFilter(false);
+    setNewProdName("");
+    setNewProdCategory(categories.find(c => c !== "Todas") || "Geral Retail");
+    setNewProdSubcategory("Regular");
+    setNewProdWeight("100g");
+    setNewProdImageUrl("");
+    setNewProdBasePrice("0.00");
+    setNewProdIsCompetitor(false);
+    setNewProdBrand("Dr. Oetker");
+    setNewProdInternalCode("");
+    setFormFeedback(null);
+    setActiveView("create");
+  };
+
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    if (searchTerm.trim()) count++;
+    if (selectedCategory !== "Todas") count++;
+    if (selectedSubcategory !== "Todas") count++;
+    if (selectedWeight !== "Todas") count++;
+    if (selectedChainId !== "Todas") count++;
+    if (selectedState !== "Todas") count++;
+    if (isOutdatedFilter) count++;
+    if (selectedBrandFilters.length < 3 && selectedBrandFilters.length > 0) count++;
+    return count;
+  }, [
+    searchTerm,
+    selectedCategory,
+    selectedSubcategory,
+    selectedWeight,
+    selectedChainId,
+    selectedState,
+    isOutdatedFilter,
+    selectedBrandFilters,
+  ]);
+
+  const handleResetFilters = () => {
+    setSearchTerm("");
+    setSelectedCategory("Todas");
+    setSelectedSubcategory("Todas");
+    setSelectedWeight("Todas");
+    setSelectedChainId("Todas");
+    setSelectedState("Todas");
+    setIsOutdatedFilter(false);
+    setSelectedBrandFilters(["propria-oetker", "propria-mavalerio", "concorrentes"]);
+    setCurrentPage(1);
+  };
+
   return (
     <div className="space-y-6" id="products-view">
       {activeView === "list" && (
         <>
           {/* Top Banner and Actions */}
           <div
-            className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-[#E0E0E0] pb-6"
+            className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-200 pb-5"
             id="products-header"
           >
             <div>
-              <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase font-mono">
-                Catálogo de Auditoria
-              </span>
-              <h1 className="text-3xl font-black text-[#1A1A1A] font-sans">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[11px] font-bold tracking-widest text-[#D40511] uppercase font-mono">
+                  Portfólio & Gôndola
+                </span>
+                <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+                <span className="text-[11px] font-semibold text-slate-500 font-mono">
+                  {catalogMetrics.total} SKUs Monitorados
+                </span>
+              </div>
+              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight font-sans">
                 Produtos Cadastrados
               </h1>
-              <p className="text-sm text-gray-500 mt-1">
-                Acompanhe o portfólio monitorado nas principais redes e pontos
-                de venda.
+              <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
+                Acompanhe o portfólio de produtos próprios e concorrentes, histórico de auditoria de campo e dispersão de preços no varejo.
               </p>
             </div>
 
-            {/* Export Action Button */}
-            <div className="flex items-center gap-3 self-start md:self-center">
+            {/* Actions: + Novo Produto and Exportar Excel */}
+            <div className="flex items-center gap-2.5 self-start lg:self-center shrink-0">
+              <button
+                id="create-product-btn"
+                type="button"
+                onClick={handleStartCreateProduct}
+                className="flex items-center gap-2 bg-[#D40511] hover:bg-[#b0040e] text-white px-4 py-2.5 rounded-xl font-bold shadow-xs hover:shadow-md transition-all text-xs sm:text-sm cursor-pointer select-none font-sans"
+              >
+                <Plus className="w-4 h-4 text-white" />
+                <span>Novo Produto</span>
+              </button>
+
               <button
                 id="export-excel-btn"
                 type="button"
                 onClick={() => {
-                  // Reset checkboxes on open to prefill nicely
                   setExportChainIds(["Todas"]);
                   setExportCategories(["Todas"]);
                   setExportBrandTypes(["propria-oetker", "propria-mavalerio", "concorrentes"]);
@@ -1315,13 +1439,117 @@ export function Products({
             </div>
           </div>
 
+          {/* Quick Metrics Ribbon */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5" id="products-kpi-ribbon">
+            {/* KPI 1: Total */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block font-mono">
+                  Portfólio Total
+                </span>
+                <span className="text-2xl font-black text-slate-900 font-mono tracking-tight tabular-nums">
+                  {catalogMetrics.total}
+                </span>
+                <span className="text-xs text-slate-500 block mt-0.5 font-sans">
+                  Itens cadastrados
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
+                <Package className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* KPI 2: Own Brands */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block font-mono">
+                  Marcas Próprias
+                </span>
+                <span className="text-2xl font-black text-emerald-800 font-mono tracking-tight tabular-nums">
+                  {catalogMetrics.oetker + catalogMetrics.mavalerio}
+                </span>
+                <span className="text-xs text-slate-500 block mt-0.5 truncate font-sans">
+                  {catalogMetrics.oetker} Dr. Oetker · {catalogMetrics.mavalerio} Mavalério
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center text-emerald-700 shrink-0">
+                <Store className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* KPI 3: Competitors */}
+            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs flex items-center justify-between">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-mono">
+                  Concorrência
+                </span>
+                <span className="text-2xl font-black text-slate-800 font-mono tracking-tight tabular-nums">
+                  {catalogMetrics.competitors}
+                </span>
+                <span className="text-xs text-slate-500 block mt-0.5 font-sans">
+                  SKUs rivais monitorados
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200/60 flex items-center justify-center text-blue-700 shrink-0">
+                <Layers className="w-5 h-5" />
+              </div>
+            </div>
+
+            {/* KPI 4: Audit Status */}
+            <div className={`rounded-2xl border p-4 shadow-2xs flex items-center justify-between transition-colors ${
+              catalogMetrics.outdatedCount > 0 
+                ? "bg-amber-50/50 border-amber-200" 
+                : "bg-white border-slate-200/90"
+            }`}>
+              <div className="min-w-0 pr-2">
+                <span className={`text-[10px] font-bold uppercase tracking-wider block font-mono ${
+                  catalogMetrics.outdatedCount > 0 ? "text-amber-800" : "text-emerald-700"
+                }`}>
+                  Auditorias ({catalogMetrics.totalRecords})
+                </span>
+                <div className="flex items-center gap-2 mt-0.5">
+                  <span className={`text-xl sm:text-2xl font-black font-mono tracking-tight tabular-nums ${
+                    catalogMetrics.outdatedCount > 0 ? "text-amber-900" : "text-emerald-800"
+                  }`}>
+                    {catalogMetrics.outdatedCount > 0 ? `${catalogMetrics.outdatedCount} pendentes` : "100% em dia"}
+                  </span>
+                </div>
+                {catalogMetrics.outdatedCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsOutdatedFilter(!isOutdatedFilter)}
+                    className="text-[11px] font-bold text-amber-800 hover:text-amber-950 underline cursor-pointer mt-0.5 block"
+                  >
+                    {isOutdatedFilter ? "Mostrar todos" : "Filtrar pendentes (>15d)"}
+                  </button>
+                ) : (
+                  <span className="text-xs text-slate-500 block mt-0.5 font-sans">
+                    Preços recentes no radar
+                  </span>
+                )}
+              </div>
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                catalogMetrics.outdatedCount > 0 
+                  ? "bg-amber-100 text-amber-800" 
+                  : "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
+              }`}>
+                {catalogMetrics.outdatedCount > 0 ? (
+                  <AlertTriangle className="w-5 h-5" />
+                ) : (
+                  <CheckCircle2 className="w-5 h-5" />
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Brand Tabs container + View Mode Toggle container */}
           <div
-            className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mt-2 mb-4 w-full"
+            className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 mt-1 mb-2 w-full"
             id="brand-filters-and-modes-container"
           >
+            {/* Brand Segmented Controls */}
             <div
-              className="flex flex-wrap bg-[#F5F5F5] p-1.5 rounded-2xl border border-[#E0E0E0] gap-1 w-full lg:w-auto shadow-2xs"
+              className="flex flex-wrap bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 gap-1 w-full lg:w-auto shadow-2xs"
               id="brand-tabs-container"
             >
               <button
@@ -1336,11 +1564,11 @@ export function Products({
                 }}
                 className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
                   selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0
-                    ? "bg-white text-[#1A1A1A] shadow-xs border border-[#E0E0E0]/60"
-                    : "text-gray-500 hover:text-[#1A1A1A]"
+                    ? "bg-white text-slate-900 shadow-xs border border-slate-200"
+                    : "text-slate-600 hover:text-slate-900"
                 }`}
               >
-                Todos ({products.filter((p) => p.active !== false).length})
+                Todos ({catalogMetrics.total})
               </button>
               <button
                 id="brand-tab-propria"
@@ -1370,25 +1598,21 @@ export function Products({
                     ]);
                   }
                 }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
                   selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3
                     ? "bg-emerald-700 text-white shadow-xs"
-                    : "text-emerald-700 hover:bg-emerald-50"
+                    : "text-emerald-800 hover:bg-emerald-50"
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3 ? "bg-emerald-300" : "bg-emerald-500"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3 
+                      ? "bg-emerald-300" 
+                      : "bg-emerald-500"
+                  }`}
                 />
                 <span className="truncate">
-                  Dr. Oetker (
-                  {
-                    products.filter((p) => {
-                      if (p.active === false) return false;
-                      const b = (p.brand || "").toLowerCase();
-                      return !p.isCompetitor && b.includes("oetker");
-                    }).length
-                  }
-                  )
+                  Dr. Oetker ({catalogMetrics.oetker})
                 </span>
               </button>
               <button
@@ -1419,28 +1643,21 @@ export function Products({
                     ]);
                   }
                 }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
                   selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3
                     ? "bg-violet-700 text-white shadow-xs"
-                    : "text-violet-700 hover:bg-violet-50"
+                    : "text-violet-800 hover:bg-violet-50"
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3 ? "bg-violet-300" : "bg-violet-500"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3 
+                      ? "bg-violet-300" 
+                      : "bg-violet-500"
+                  }`}
                 />
                 <span className="truncate">
-                  Mavalério (
-                  {
-                    products.filter((p) => {
-                      if (p.active === false) return false;
-                      const b = (p.brand || "").toLowerCase();
-                      return (
-                        !p.isCompetitor &&
-                        (b.includes("mavalerio") || b.includes("mavalério"))
-                      );
-                    }).length
-                  }
-                  )
+                  Mavalério ({catalogMetrics.mavalerio})
                 </span>
               </button>
               <button
@@ -1469,48 +1686,58 @@ export function Products({
                     ]);
                   }
                 }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-extrabold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
+                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
                   selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3
-                    ? "bg-[#1A1A1A] text-white shadow-xs"
-                    : "text-[#D40511] hover:bg-rose-50"
+                    ? "bg-slate-900 text-white shadow-xs"
+                    : "text-slate-700 hover:bg-slate-200/60"
                 }`}
               >
                 <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3 ? "bg-rose-400" : "bg-[#D40511]"}`}
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3 
+                      ? "bg-blue-400" 
+                      : "bg-slate-500"
+                  }`}
                 />
                 <span className="truncate">
-                  Concorrentes (
-                  {
-                    products.filter((p) => {
-                      if (p.active === false) return false;
-                      const b = (p.brand || "").toLowerCase();
-                      const isOetker = b.includes("oetker");
-                      const isMav =
-                        b.includes("mavalerio") || b.includes("mavalério");
-                      return !!p.isCompetitor || (!isOetker && !isMav);
-                    }).length
-                  }
-                  )
+                  Concorrentes ({catalogMetrics.competitors})
                 </span>
               </button>
             </div>
 
-            {/* View Mode Switcher + Sorter */}
-            <div className="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto animate-fade-in" id="sorting-and-view-toggles">
+            {/* View Mode Switcher + Outdated Quick Toggle + Sorter */}
+            <div className="flex flex-wrap items-center gap-2.5" id="sorting-and-view-toggles">
+              {/* Outdated Quick Pill */}
+              {catalogMetrics.outdatedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setIsOutdatedFilter(!isOutdatedFilter)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none shadow-2xs ${
+                    isOutdatedFilter
+                      ? "bg-amber-500 text-white border-amber-600 shadow-xs"
+                      : "bg-white text-amber-800 border-amber-300 hover:bg-amber-50"
+                  }`}
+                >
+                  <Clock className="w-3.5 h-3.5 shrink-0" />
+                  <span>Pendentes ({catalogMetrics.outdatedCount})</span>
+                </button>
+              )}
+
               {/* View Mode Switcher: Grid vs List */}
               <div
-                className="flex bg-[#F5F5F5] p-1 rounded-xl border border-[#E0E0E0] gap-1 shrink-0 w-full sm:w-auto select-none shadow-2xs"
+                className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/80 gap-1 shrink-0 select-none shadow-2xs"
                 id="view-mode-toggle"
               >
                 <button
                   id="toggle-grid-mode"
                   type="button"
                   onClick={() => setDisplayMode("grid")}
-                  className={`flex-1 sm:flex-none justify-center px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
                     displayMode === "grid"
-                      ? "bg-white text-[#D40511] shadow-xs border border-[#E0E0E0]/50"
-                      : "text-gray-500 hover:text-[#1A1A1A]"
+                      ? "bg-white text-[#D40511] shadow-xs border border-slate-200/60"
+                      : "text-slate-600 hover:text-slate-900"
                   }`}
+                  title="Visualização em Grade"
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />
                   <span>Grade</span>
@@ -1519,11 +1746,12 @@ export function Products({
                   id="toggle-list-mode"
                   type="button"
                   onClick={() => setDisplayMode("list")}
-                  className={`flex-1 sm:flex-none justify-center px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
+                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
                     displayMode === "list"
-                      ? "bg-white text-[#D40511] shadow-xs border border-[#E0E0E0]/50"
-                      : "text-gray-500 hover:text-[#1A1A1A]"
+                      ? "bg-white text-[#D40511] shadow-xs border border-slate-200/60"
+                      : "text-slate-600 hover:text-slate-900"
                   }`}
+                  title="Visualização em Tabela / Lista"
                 >
                   <List className="w-3.5 h-3.5" />
                   <span>Lista</span>
@@ -1531,18 +1759,19 @@ export function Products({
               </div>
 
               {/* Sorting Select Filter */}
-              <div className="flex items-center gap-2 bg-[#F5F5F5] px-3 py-1.5 rounded-xl border border-[#E0E0E0] shadow-2xs select-none w-full sm:w-auto" id="sorting-filter-wrapper">
-                <span className="text-[10px] text-gray-400 uppercase font-black whitespace-nowrap tracking-wide">
-                  Ordenar por:
+              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs select-none" id="sorting-filter-wrapper">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <span className="text-[10px] text-slate-400 uppercase font-bold whitespace-nowrap tracking-wide">
+                  Ordenar:
                 </span>
                 <select
                   id="product-sort-select"
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-transparent border-0 text-xs font-black text-[#1A1A1A] focus:outline-none cursor-pointer p-0 pr-1 w-full sm:w-auto"
+                  className="bg-transparent border-0 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer p-0 pr-1"
                 >
                   {sortingOptions.map((opt) => (
-                    <option key={opt.id} value={opt.id} className="font-semibold text-gray-800 bg-white">
+                    <option key={opt.id} value={opt.id} className="font-medium text-slate-800 bg-white">
                       {opt.label}
                     </option>
                   ))}
@@ -1551,345 +1780,445 @@ export function Products({
             </div>
           </div>
 
-          {/* Filtering Widgets */}
+          {/* Filtering Widgets Card */}
           <div
-            className="bg-white p-5 rounded-2xl border border-[#E0E0E0]/80 shadow-xs grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-4"
+            className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3"
             id="filters-container"
           >
-            {/* Search Input */}
-            <div
-              className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-3"
-              id="search-input-wrapper"
-            >
-              <input
-                id="product-search-input"
-                type="text"
-                placeholder="Pesquisar por nome ou categoria..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg text-sm placeholder-gray-400 focus:outline-none focus:border-[#D40511] font-sans"
-              />
-              <Search className="absolute left-3 top-2.5 text-gray-400 w-4 h-4" />
+            {/* Top row of filters */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-3">
+              {/* Search Input with Clear Button */}
+              <div
+                className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-3"
+                id="search-input-wrapper"
+              >
+                <input
+                  id="product-search-input"
+                  type="text"
+                  placeholder="Pesquisar por nome, marca ou código..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#D40511]/20 focus:border-[#D40511] font-sans transition-all"
+                />
+                <Search className="absolute left-3 top-2.5 text-slate-400 w-4 h-4" />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm("")}
+                    className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    title="Limpar pesquisa"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Category Select Filter */}
+              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="category-filter-wrapper">
+                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                  Categoria:
+                </span>
+                <select
+                  id="product-category-filter-select"
+                  value={selectedCategory}
+                  onChange={(e) => {
+                    setSelectedCategory(e.target.value);
+                    setSelectedSubcategory("Todas");
+                    setSelectedWeight("Todas");
+                  }}
+                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                >
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Subcategory Select Filter */}
+              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="subcategory-filter-wrapper">
+                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                  Subcat:
+                </span>
+                <select
+                  id="product-subcategory-filter-select"
+                  value={selectedSubcategory}
+                  onChange={(e) => {
+                    setSelectedSubcategory(e.target.value);
+                    setSelectedWeight("Todas");
+                  }}
+                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                >
+                  {subcategories.map((sub) => (
+                    <option key={sub} value={sub}>
+                      {sub}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Weight Select Filter */}
+              <div className="flex items-center gap-2 xl:col-span-1 min-w-0" id="weight-filter-wrapper">
+                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                  Peso:
+                </span>
+                <select
+                  id="product-weight-filter-select"
+                  value={selectedWeight}
+                  onChange={(e) => setSelectedWeight(e.target.value)}
+                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                >
+                  {weights.map((w) => (
+                    <option key={w} value={w}>
+                      {w === "Todas" ? "Todas" : w}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Retail Chain Filter */}
+              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="chain-filter-wrapper">
+                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                  Rede:
+                </span>
+                <select
+                  id="product-chain-filter-select"
+                  value={selectedChainId}
+                  onChange={(e) => setSelectedChainId(e.target.value)}
+                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                >
+                  <option value="Todas">Todas as Redes</option>
+                  {chains.map((chain) => (
+                    <option key={chain.id} value={chain.id}>
+                      {chain.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Regional State Filter */}
+              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="state-filter-wrapper">
+                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                  Estado:
+                </span>
+                <select
+                  id="product-state-filter-select"
+                  value={selectedState}
+                  onChange={(e) => setSelectedState(e.target.value)}
+                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                >
+                  <option value="Todas">Todos Estados</option>
+                  {RESEARCH_STATES.map((st) => (
+                    <option key={st.name} value={st.name}>
+                      {st.uf} - {st.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            {/* Category Select Filter */}
-            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="category-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[65px]">
-                Categoria:
-              </span>
-              <select
-                id="product-category-filter-select"
-                value={selectedCategory}
-                onChange={(e) => {
-                  setSelectedCategory(e.target.value);
-                  setSelectedSubcategory("Todas"); // Reset subcategory when changing category
-                  setSelectedWeight("Todas"); // Reset weight when changing category
-                }}
-                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
-              >
-                {categories.map((cat) => (
-                  <option key={cat} value={cat}>
-                    {cat}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Active Filters Row */}
+            {activeFiltersCount > 0 && (
+              <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-slate-400 font-bold uppercase text-[10px] tracking-wider mr-1">
+                    Filtros ativos ({activeFiltersCount}):
+                  </span>
 
-            {/* Subcategory Select Filter */}
-            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="subcategory-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[45px]">
-                Subcat:
-              </span>
-              <select
-                id="product-subcategory-filter-select"
-                value={selectedSubcategory}
-                onChange={(e) => {
-                  setSelectedSubcategory(e.target.value);
-                  setSelectedWeight("Todas"); // Reset weight when changing subcategory
-                }}
-                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
-              >
-                {subcategories.map((sub) => (
-                  <option key={sub} value={sub}>
-                    {sub}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  {searchTerm.trim() && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Busca: "{searchTerm}"
+                      <button type="button" onClick={() => setSearchTerm("")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
 
-            {/* Weight Select Filter */}
-            <div className="flex items-center gap-2 xl:col-span-1 min-w-0" id="weight-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[40px]">
-                Gram:
-              </span>
-              <select
-                id="product-weight-filter-select"
-                value={selectedWeight}
-                onChange={(e) => setSelectedWeight(e.target.value)}
-                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
-              >
-                {weights.map((w) => (
-                  <option key={w} value={w}>
-                    {w === "Todas" ? "Todas" : w}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  {selectedCategory !== "Todas" && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Cat: {selectedCategory}
+                      <button type="button" onClick={() => setSelectedCategory("Todas")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
 
-            {/* Retail Chain Filter */}
-            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="chain-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[55px]">
-                Rede:
-              </span>
-              <select
-                id="product-chain-filter-select"
-                value={selectedChainId}
-                onChange={(e) => setSelectedChainId(e.target.value)}
-                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
-              >
-                <option value="Todas">Todas as Redes</option>
-                {chains.map((chain) => (
-                  <option key={chain.id} value={chain.id}>
-                    {chain.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  {selectedSubcategory !== "Todas" && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Subcat: {selectedSubcategory}
+                      <button type="button" onClick={() => setSelectedSubcategory("Todas")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
 
-            {/* Regional State Filter */}
-            <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="state-filter-wrapper">
-              <span className="text-xs text-gray-400 uppercase font-bold whitespace-nowrap shrink-0 lg:min-w-[50px]">
-                Estado:
-              </span>
-              <select
-                id="product-state-filter-select"
-                value={selectedState}
-                onChange={(e) => setSelectedState(e.target.value)}
-                className="w-full flex-1 bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2.5 py-1.5 text-xs text-[#1A1A1A] font-semibold focus:outline-none focus:border-[#D40511]"
-              >
-                <option value="Todas">Todos Estados</option>
-                {RESEARCH_STATES.map((st) => (
-                  <option key={st.name} value={st.name}>
-                    {st.uf} - {st.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+                  {selectedWeight !== "Todas" && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Peso: {selectedWeight}
+                      <button type="button" onClick={() => setSelectedWeight("Todas")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+
+                  {selectedChainId !== "Todas" && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Rede: {chains.find(c => c.id === selectedChainId)?.name || selectedChainId}
+                      <button type="button" onClick={() => setSelectedChainId("Todas")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+
+                  {selectedState !== "Todas" && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      UF: {selectedState}
+                      <button type="button" onClick={() => setSelectedState("Todas")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+
+                  {isOutdatedFilter && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold border border-amber-300">
+                      Apenas Pendentes (&gt;15d)
+                      <button type="button" onClick={() => setIsOutdatedFilter(false)} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+
+                  {selectedBrandFilters.length < 3 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Marcas Filtradas ({selectedBrandFilters.length})
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBrandFilters(["propria-oetker", "propria-mavalerio", "concorrentes"])}
+                        className="hover:text-red-600 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-[#D40511] hover:underline cursor-pointer ml-1"
+                  >
+                    <RotateCcw className="w-3 h-3" /> Limpar todos
+                  </button>
+                </div>
+
+                <div className="text-slate-400 font-medium text-[11px]">
+                  Mostrando <span className="font-bold text-slate-700">{sortedAndFilteredProducts.length}</span> produtos
+                </div>
+              </div>
+            )}
           </div>
 
+          {/* Catalog View: Grid or List */}
           {displayMode === "grid" ? (
             <div
               className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4"
               id="products-grid"
             >
               {paginatedProducts.map((prod) => {
-                // Extract prices across chains for this item
-                const pricesMap = (latestPricePerChainMap[prod.id] ||
-                  {}) as Record<string, number>;
+                const pricesMap = (latestPricePerChainMap[prod.id] || {}) as Record<string, number>;
                 const pricesCount = Object.keys(pricesMap).length;
-
-                // Find lowest and highest prices
                 const priceValues = Object.values(pricesMap) as number[];
-                const minPrice =
-                  priceValues.length > 0 ? Math.min(...priceValues) : null;
-                const maxPrice =
-                  priceValues.length > 0 ? Math.max(...priceValues) : null;
+                const minPrice = priceValues.length > 0 ? Math.min(...priceValues) : null;
+                const maxPrice = priceValues.length > 0 ? Math.max(...priceValues) : null;
+                const averagePrice = priceValues.length > 0
+                  ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
+                  : prod.basePrice;
 
-                // Find overall average price
-                const averagePrice =
-                  priceValues.length > 0
-                    ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
-                    : prod.basePrice;
-
-                // Find the latest price record for this product based on selectedChainId
                 const productRecords = records.filter(
                   (r) =>
                     r.productId === prod.id &&
-                    (selectedChainId === "Todas" ||
-                      r.chainId === selectedChainId),
+                    (selectedChainId === "Todas" || r.chainId === selectedChainId),
                 );
-                const latestRecord =
-                  productRecords.length > 0
-                    ? [...productRecords].sort(compareRecordsDesc)[0]
-                    : null;
-                const currentPrice = latestRecord
-                  ? latestRecord.price
-                  : prod.basePrice;
+                const latestRecord = productRecords.length > 0
+                  ? [...productRecords].sort(compareRecordsDesc)[0]
+                  : null;
+                const currentPrice = latestRecord ? latestRecord.price : prod.basePrice;
+                const isOutdated = catalogMetrics.outdatedIds.has(prod.id);
 
                 return (
                   <div
                     id={`product-card-${prod.id}`}
                     key={prod.id}
                     onClick={() => handleProductClick(prod.id)}
-                    className="bg-white rounded-xl border border-gray-200 hover:border-[#D40511] hover:shadow-md transition-all duration-200 cursor-pointer overflow-hidden flex flex-col justify-between group h-full relative"
+                    className="bg-white rounded-2xl border border-slate-200/85 hover:border-red-400 hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden flex flex-col justify-between group h-full relative p-4"
                   >
-                    {/* Card Content */}
-                    <div className="p-3.5 flex-1 flex flex-col justify-between space-y-3">
-                      {/* Top Part: Image, Badges & Brand */}
-                      <div>
-                        <div className="flex items-start gap-2.5">
-                          <div className="w-12 h-12 rounded-lg flex-shrink-0 overflow-hidden bg-gray-50/50 flex items-center justify-center p-1.5 relative shadow-2xs">
-                            <img
-                              src={prod.imageUrl}
-                              alt=""
-                              referrerPolicy="no-referrer"
-                              className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
-                            />
-                          </div>
-                          
-                          <div className="flex-1 min-w-0">
-                            {/* Brand & Indicators */}
-                            <div className="flex flex-wrap items-center gap-1 mb-1 bg-opacity-0">
-                              <span
-                                className={`inline-block text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                                  prod.isCompetitor
-                                    ? "text-slate-600 bg-slate-50 border-slate-200"
-                                    : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
-                                      ? "text-violet-750 bg-violet-50 border-violet-150"
-                                      : "text-emerald-850 bg-emerald-50 border-emerald-150"
-                                }`}
-                              >
-                                {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
-                              </span>
-                              {prod.internalCode && (
-                                <span className="text-[9px] font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 rounded px-1 py-0.5 select-none shrink-0" title="Código Interno">
-                                  {prod.internalCode}
-                                </span>
-                              )}
-                              <span className="text-[9px] font-mono text-gray-400 bg-gray-50 border border-gray-150/50 rounded px-1 py-0.5 select-none shrink-0" title="Gramatura">
-                                {prod.weight || "N/A"}
-                              </span>
-                            </div>
+                    {/* Top Content: Image & Badges */}
+                    <div>
+                      {/* Product Image Section */}
+                      <div className="w-full h-40 bg-slate-50/80 rounded-xl overflow-hidden flex items-center justify-center p-3 relative mb-3 border border-slate-100 group-hover:bg-slate-50 transition-colors">
+                        <img
+                          src={prod.imageUrl}
+                          alt={prod.name}
+                          referrerPolicy="no-referrer"
+                          className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105 drop-shadow-xs"
+                          onError={(e) => {
+                            // Fallback on broken image
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
 
-                            <h3 className="text-xs font-bold text-[#1A1A1A] line-clamp-2 leading-tight group-hover:text-[#D40511] transition-colors font-sans" title={prod.name}>
-                              {prod.name}
-                            </h3>
-                          </div>
-                        </div>
-
-                        {/* Category/Subcategory Small Badges Row */}
-                        <div className="flex flex-wrap gap-1 mt-2">
-                          <span className="inline-block text-[8px] font-bold text-gray-400 bg-gray-50 border border-gray-100 rounded px-1.5 py-0.2 uppercase tracking-wide">
-                            {prod.category}
+                        {/* Brand Badge Top Left */}
+                        <div className="absolute top-2.5 left-2.5 flex items-center gap-1">
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded-md border shadow-2xs backdrop-blur-xs ${
+                              prod.isCompetitor
+                                ? "text-slate-700 bg-white/95 border-slate-200"
+                                : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
+                                  ? "text-violet-800 bg-violet-50/95 border-violet-200"
+                                  : "text-emerald-800 bg-emerald-50/95 border-emerald-200"
+                            }`}
+                          >
+                            {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
                           </span>
-                          {prod.subcategory && (
-                            <span className="inline-block text-[8px] font-bold text-slate-500 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.2 uppercase tracking-wide">
-                              {prod.subcategory}
-                            </span>
-                          )}
-                        </div>
-                                   {/* Center Part: Price & last audit */}
-                      <div className="border-t border-gray-100 pt-2.5 flex flex-col justify-between">
-                        <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block font-sans select-none mb-1">
-                          {selectedChainId === "Todas" ? "ÚLTIMO PREÇO REGISTRADO" : "PREÇO ATUAL"}
-                        </span>
-                        
-                        <div className="flex items-center justify-between gap-2.5">
-                          {/* Left Logo + Price */}
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {(() => {
-                              const recordChain = latestRecord 
-                                ? chains.find((c) => c.id === latestRecord.chainId) 
-                                : selectedChainId !== "Todas" 
-                                  ? chains.find((c) => c.id === selectedChainId)
-                                  : null;
-                              return recordChain ? (
-                                <div className="shrink-0" title={recordChain.name}>
-                                  <RetailerLogo chain={recordChain} size="sm" />
-                                </div>
-                              ) : null;
-                            })()}
-                            
-                            <span className="text-xl font-extrabold text-[#1A1A1A] font-mono tracking-tight group-hover:text-[#D40511] transition-colors whitespace-nowrap leading-none">
-                              R$ {currentPrice.toFixed(2)}
-                            </span>
-                          </div>
-
-                          {/* Right: Deviation Badges */}
-                          <div className="shrink-0">
-                            {(() => {
-                              if (priceValues.length === 0) return <span className="text-[8px] font-bold text-gray-400 bg-gray-50 border border-gray-100 rounded px-1">Sem dados</span>;
-                              const deviationStatus = currentPrice > averagePrice + 0.01 
-                                ? "above" 
-                                : currentPrice < averagePrice - 0.01 
-                                  ? "below" 
-                                  : "average";
-
-                              if (deviationStatus === "below") {
-                                return (
-                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-extrabold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-100 shrink-0 select-none" title="Abaixo da Média">
-                                    <TrendingDown className="w-2.5 h-2.5" />
-                                    Média
-                                  </span>
-                                );
-                              } else if (deviationStatus === "above") {
-                                return (
-                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-extrabold text-red-700 bg-red-50 px-1 rounded border border-red-100 shrink-0 select-none" title="Acima da Média">
-                                    <TrendingUp className="w-2.5 h-2.5" />
-                                    Média
-                                  </span>
-                                );
-                              } else {
-                                return (
-                                  <span className="inline-flex items-center gap-0.5 text-[8px] font-extrabold text-slate-650 bg-slate-50 px-1 rounded border border-slate-150 shrink-0 select-none" title="Na Média">
-                                    Na média
-                                  </span>
-                                );
-                              }
-                            })()}
-                          </div>
                         </div>
 
-                        {/* Audit Details */}
-                        <div className="text-[10px] mt-1 flex items-center justify-between font-sans">
-                          {latestRecord ? (
-                            <span className={`truncate block max-w-[140px] ${getAuditDateColorClass(latestRecord.date)}`} title={formatDateBR(latestRecord.date)}>
-                              Auditado: {formatDateBR(latestRecord.date)}
+                        {/* Top Right Badges: Outdated Pill + Code */}
+                        <div className="absolute top-2.5 right-2.5 flex flex-col items-end gap-1">
+                          {isOutdated && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-amber-100/95 text-amber-900 border border-amber-200 shadow-2xs">
+                              <Clock className="w-2.5 h-2.5" /> Pendente
                             </span>
-                          ) : (
-                            <span className="text-gray-400">Base (sem audit.)</span>
                           )}
-                          {latestRecord && selectedChainId === "Todas" && (
-                            <span className="text-[9px] text-gray-450 font-semibold uppercase font-sans">
-                              {chains.find(c => c.id === latestRecord.chainId)?.name.split(" ")[0]}
+                          {prod.internalCode && (
+                            <span className="text-[9px] font-mono font-bold text-slate-600 bg-white/90 border border-slate-200 rounded px-1.5 py-0.2 shadow-2xs">
+                              #{prod.internalCode}
                             </span>
                           )}
                         </div>
                       </div>
 
-                      {/* Bottom: Retailers Competitor Pricing Horizontal view */}
-                      <div className="border-t border-gray-100 pt-2.5">
-                        <div className="flex items-center justify-between text-[9px] text-gray-400 uppercase tracking-wider font-semibold mb-1.5 select-none">
-                          <span>Monitor das Redes ({pricesCount})</span>
+                      {/* Title & Metadata */}
+                      <div className="space-y-1">
+                        <h3
+                          className="text-sm font-bold text-slate-900 line-clamp-2 leading-snug group-hover:text-[#D40511] transition-colors font-sans min-h-[2.5rem]"
+                          title={prod.name}
+                        >
+                          {prod.name}
+                        </h3>
+
+                        <div className="flex items-center gap-1.5 text-xs text-slate-500 font-sans">
+                          <span className="font-medium truncate">{prod.category}</span>
+                          {prod.subcategory && (
+                            <>
+                              <span className="text-slate-300">·</span>
+                              <span className="truncate">{prod.subcategory}</span>
+                            </>
+                          )}
+                          {prod.weight && (
+                            <>
+                              <span className="text-slate-300">·</span>
+                              <span className="font-mono text-slate-600 shrink-0">{prod.weight}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Price Hero Section */}
+                      <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3 my-3">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
+                          <span>
+                            {selectedChainId === "Todas" ? "Último Preço Auditado" : "Preço Nesta Rede"}
+                          </span>
+                          {(() => {
+                            const recordChain = latestRecord
+                              ? chains.find((c) => c.id === latestRecord.chainId)
+                              : selectedChainId !== "Todas"
+                                ? chains.find((c) => c.id === selectedChainId)
+                                : null;
+                            return recordChain ? (
+                              <div className="flex items-center gap-1 text-slate-600 font-sans font-semibold">
+                                <RetailerLogo chain={recordChain} size="sm" />
+                                <span className="truncate max-w-[90px]">{recordChain.name.split(" ")[0]}</span>
+                              </div>
+                            ) : null;
+                          })()}
+                        </div>
+
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-2xl font-black text-slate-900 font-mono tracking-tight group-hover:text-[#D40511] transition-colors tabular-nums">
+                            R$ {currentPrice.toFixed(2).replace('.', ',')}
+                          </span>
+
+                          {/* Deviation Badge */}
+                          {priceValues.length > 0 && (() => {
+                            const deviationStatus = currentPrice > averagePrice + 0.01 
+                              ? "above" 
+                              : currentPrice < averagePrice - 0.01 
+                                ? "below" 
+                                : "average";
+
+                            if (deviationStatus === "below") {
+                              return (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                                  <TrendingDown className="w-3 h-3 text-emerald-600" />
+                                  Abaixo méd.
+                                </span>
+                              );
+                            } else if (deviationStatus === "above") {
+                              return (
+                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
+                                  <TrendingUp className="w-3 h-3 text-rose-600" />
+                                  Acima méd.
+                                </span>
+                              );
+                            } else {
+                              return (
+                                <span className="inline-flex items-center text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                  Na média
+                                </span>
+                              );
+                            }
+                          })()}
+                        </div>
+
+                        {/* Audit Date */}
+                        <div className="text-[11px] mt-2 flex items-center justify-between font-sans text-slate-500 pt-1.5 border-t border-slate-200/60">
+                          {latestRecord ? (
+                            <span className={getAuditDateColorClass(latestRecord.date)}>
+                              Auditado {formatAuditDateRelative(latestRecord.date)} ({formatDateBR(latestRecord.date)})
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">Preço base inicial</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Network Comparison Spread */}
+                      <div className="pt-1">
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-1.5">
+                          <span>Monitor Redes ({pricesCount})</span>
                           {priceValues.length > 0 && (
-                            <span className="font-mono lowercase font-normal">
-                              méd: R$ {averagePrice.toFixed(2)}
+                            <span className="font-mono text-slate-600 font-semibold lowercase">
+                              méd: R$ {averagePrice.toFixed(2).replace('.', ',')}
                             </span>
                           )}
                         </div>
-                        
+
                         {pricesCount > 0 ? (
                           <div className="flex flex-wrap gap-1.5">
                             {(() => {
-                              // Find min price chain and max price chain
                               let minChainId: string | null = null;
                               let maxChainId: string | null = null;
 
                               Object.entries(pricesMap).forEach(([chainId, price]) => {
-                                if (price === minPrice && !minChainId) {
-                                  minChainId = chainId;
-                                }
+                                if (price === minPrice && !minChainId) minChainId = chainId;
                               });
                               Object.entries(pricesMap).forEach(([chainId, price]) => {
-                                if (price === maxPrice && !maxChainId && chainId !== minChainId) {
-                                  maxChainId = chainId;
-                                }
+                                if (price === maxPrice && !maxChainId && chainId !== minChainId) maxChainId = chainId;
                               });
                               if (!maxChainId && pricesCount > 1) {
                                 Object.entries(pricesMap).forEach(([chainId, price]) => {
-                                  if (price === maxPrice && !maxChainId) {
-                                    maxChainId = chainId;
-                                  }
+                                  if (price === maxPrice && !maxChainId) maxChainId = chainId;
                                 });
                               }
 
@@ -1899,24 +2228,26 @@ export function Products({
                                 if (price === undefined) return null;
                                 const isMin = chain.id === minChainId;
                                 const isMax = chain.id === maxChainId;
-                                const badgeLabel = isMin && isMax ? "único" : isMin ? "min" : "max";
+                                const badgeLabel = isMin && isMax ? "único" : isMin ? "mín" : "máx";
 
                                 return (
                                   <div 
                                     key={chain.id}
-                                    className={`inline-flex items-center gap-1 bg-gray-50/70 border hover:border-gray-300 transition-colors rounded-md p-1 pl-1 pr-1.5 select-none ${
+                                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 border text-xs select-none transition-all ${
                                       isMin && isMax 
-                                        ? "border-gray-150" 
+                                        ? "border-slate-200 bg-slate-50 text-slate-700" 
                                         : isMin 
-                                          ? "border-emerald-250 bg-emerald-50/20" 
-                                          : "border-red-250 bg-red-50/20"
+                                          ? "border-emerald-200 bg-emerald-50/70 text-emerald-800" 
+                                          : "border-rose-200 bg-rose-50/70 text-rose-800"
                                     }`}
                                     title={`${chain.name}: R$ ${price.toFixed(2)} (${badgeLabel})`}
                                   >
                                     <RetailerLogo chain={chain} size="sm" />
-                                    <span className={`font-mono text-[10px] font-bold ${isMin && isMax ? "text-gray-700" : isMin ? "text-emerald-700" : "text-red-750"}`}>
-                                      R${price.toFixed(2)}
-                                      <span className="text-[8px] font-sans font-medium text-gray-400 ml-0.5">({badgeLabel})</span>
+                                    <span className="font-mono font-bold tabular-nums">
+                                      R$ {price.toFixed(2).replace('.', ',')}
+                                    </span>
+                                    <span className="text-[9px] font-sans font-medium text-slate-400 uppercase">
+                                      {badgeLabel}
                                     </span>
                                   </div>
                                 );
@@ -1924,10 +2255,17 @@ export function Products({
                             })()}
                           </div>
                         ) : (
-                          <div className="text-[10px] text-gray-350 italic py-1">Sem comparação ativa</div>
+                          <div className="text-[11px] text-slate-400 italic">
+                            Sem outras redes registradas
+                          </div>
                         )}
                       </div>
-                      </div>
+                    </div>
+
+                    {/* Card Footer: Ver detalhes affordance */}
+                    <div className="pt-3 mt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-600 group-hover:text-[#D40511] transition-colors">
+                      <span>Ver histórico completo</span>
+                      <ArrowUpRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
                     </div>
                   </div>
                 );
@@ -1935,284 +2273,207 @@ export function Products({
 
               {sortedAndFilteredProducts.length === 0 && (
                 <div
-                  className="col-span-full bg-white p-12 text-center border border-[#E0E0E0] rounded-2xl"
+                  className="col-span-full bg-white p-12 text-center border border-slate-200 rounded-2xl shadow-xs"
                   id="empty-products-view"
                 >
-                  <p className="text-gray-400 italic">
-                    Nenhum produto cadastrado corresponde aos filtros.
+                  <div className="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mx-auto mb-3">
+                    <Package className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-base font-bold text-slate-800 mb-1">
+                    Nenhum produto encontrado
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Nenhum item do catálogo corresponde aos filtros selecionados. Tente ajustar os termos de pesquisa ou remover restrições.
                   </p>
                   <button
-                    onClick={() => {
-                      setSelectedCategory("Todas");
-                      setSelectedChainId("Todas");
-                      setSearchTerm("");
-                    }}
-                    className="mt-3 text-xs font-bold text-[#D40511] hover:underline"
+                    onClick={handleResetFilters}
+                    className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
                   >
-                    Limpar filtros de busca
+                    <RotateCcw className="w-3.5 h-3.5" /> Limpar todos os filtros
                   </button>
                 </div>
               )}
             </div>
           ) : (
-            <div className="flex flex-col gap-3" id="products-list-layout">
+            /* LIST / TABLE VIEW */
+            <div className="flex flex-col gap-2.5" id="products-list-layout">
+              {/* Table Column Headers */}
+              <div className="hidden md:grid md:grid-cols-12 md:items-center gap-4 px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+                <div className="md:col-span-4">Produto & Especificações</div>
+                <div className="md:col-span-2">Marca & Tipo</div>
+                <div className="md:col-span-3">Último Preço Auditado</div>
+                <div className="md:col-span-2">Comparativo Redes</div>
+                <div className="md:col-span-1 text-right">Ação</div>
+              </div>
+
               {paginatedProducts.map((prod) => {
-                // Extract prices across chains for this item
-                const pricesMap = (latestPricePerChainMap[prod.id] ||
-                  {}) as Record<string, number>;
+                const pricesMap = (latestPricePerChainMap[prod.id] || {}) as Record<string, number>;
                 const pricesCount = Object.keys(pricesMap).length;
-
-                // Find lowest and highest prices
                 const priceValues = Object.values(pricesMap) as number[];
-                const minPrice =
-                  priceValues.length > 0 ? Math.min(...priceValues) : null;
-                const maxPrice =
-                  priceValues.length > 0 ? Math.max(...priceValues) : null;
+                const minPrice = priceValues.length > 0 ? Math.min(...priceValues) : null;
+                const maxPrice = priceValues.length > 0 ? Math.max(...priceValues) : null;
+                const averagePrice = priceValues.length > 0
+                  ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
+                  : prod.basePrice;
 
-                // Find overall average price
-                const averagePrice =
-                  priceValues.length > 0
-                    ? priceValues.reduce((a, b) => a + b, 0) / priceValues.length
-                    : prod.basePrice;
-
-                // Find the latest price record for this product based on selectedChainId
                 const productRecords = records.filter(
                   (r) =>
                     r.productId === prod.id &&
-                    (selectedChainId === "Todas" ||
-                      r.chainId === selectedChainId),
+                    (selectedChainId === "Todas" || r.chainId === selectedChainId),
                 );
-                const latestRecord =
-                  productRecords.length > 0
-                    ? [...productRecords].sort(compareRecordsDesc)[0]
-                    : null;
-                const currentPrice = latestRecord
-                  ? latestRecord.price
-                  : prod.basePrice;
+                const latestRecord = productRecords.length > 0
+                  ? [...productRecords].sort(compareRecordsDesc)[0]
+                  : null;
+                const currentPrice = latestRecord ? latestRecord.price : prod.basePrice;
+                const isOutdated = catalogMetrics.outdatedIds.has(prod.id);
 
                 return (
                   <div
                     id={`product-list-row-${prod.id}`}
                     key={prod.id}
                     onClick={() => handleProductClick(prod.id)}
-                    className="bg-white rounded-xl border border-gray-200 hover:border-[#D40511] hover:shadow-sm transition-all duration-200 cursor-pointer p-3 flex flex-col md:grid md:grid-cols-12 md:items-center gap-4 group h-full relative"
+                    className="bg-white rounded-xl border border-slate-200/85 hover:border-red-400 hover:shadow-sm transition-all duration-200 cursor-pointer p-3.5 flex flex-col md:grid md:grid-cols-12 md:items-center gap-4 group relative"
                   >
-                    {/* Column 1: Image, Brand badge, Product info (span 4) */}
-                    <div className="flex items-center gap-3 min-w-0 md:col-span-4">
-                      {/* Product Image */}
-                      <div className="w-11 h-11 rounded-lg flex-shrink-0 bg-gray-50/50 flex items-center justify-center p-1 shadow-2xs relative">
+                    {/* Col 1: Product Thumbnail & Title (span 4) */}
+                    <div className="flex items-center gap-3.5 min-w-0 md:col-span-4">
+                      <div className="w-12 h-12 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center p-1.5 shrink-0 overflow-hidden shadow-2xs">
                         <img
                           src={prod.imageUrl}
                           alt=""
                           referrerPolicy="no-referrer"
-                          className="w-full h-full object-contain transition-transform duration-300 group-hover:scale-105"
+                          className="max-h-full max-w-full object-contain transition-transform duration-300 group-hover:scale-105"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
                         />
                       </div>
 
-                      {/* Basic details */}
                       <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5 mb-1 bg-opacity-0">
-                          <span
-                            className={`inline-block text-[9px] font-bold px-1.5 py-0.2 rounded border ${
-                              prod.isCompetitor
-                                ? "text-slate-600 bg-slate-50 border-slate-200"
-                                : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
-                                  ? "text-violet-750 bg-violet-50 border-violet-150"
-                                  : "text-emerald-800 bg-emerald-50 border-emerald-150"
-                            }`}
-                          >
-                            {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
-                          </span>
+                        <div className="flex items-center gap-2 mb-0.5">
                           {prod.internalCode && (
-                            <span className="text-[9px] font-mono font-bold text-slate-700 bg-slate-100 border border-slate-200 rounded px-1 select-none" title="Código Interno">
-                              {prod.internalCode}
+                            <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">
+                              #{prod.internalCode}
+                            </span>
+                          )}
+                          {isOutdated && (
+                            <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded">
+                              Pendente
                             </span>
                           )}
                           {prod.weight && (
-                            <span className="text-[9px] font-mono text-gray-500 bg-gray-50 border border-gray-150/55 rounded px-1 select-none">
+                            <span className="text-[10px] font-mono text-slate-500">
                               {prod.weight}
                             </span>
                           )}
-                          <span className="text-[8px] font-bold text-gray-400 bg-gray-50/50 rounded px-1.5 border border-transparent">
-                            {prod.category}
-                          </span>
                         </div>
 
-                        <h3 className="text-xs font-bold text-[#1A1A1A] group-hover:text-[#D40511] transition-colors truncate font-sans" title={prod.name}>
+                        <h3 className="text-xs sm:text-sm font-bold text-slate-900 group-hover:text-[#D40511] transition-colors truncate font-sans" title={prod.name}>
                           {prod.name}
                         </h3>
+
+                        <p className="text-[11px] text-slate-400 truncate">
+                          {prod.category} {prod.subcategory ? `· ${prod.subcategory}` : ''}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Column 2: Market Comparatives (mín, máx, méd) (span 2) */}
-                    <div className="md:col-span-2 text-left font-sans">
-                      <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block">
-                        Comparativo Mercado
-                      </span>
-                      {pricesCount > 0 ? (
-                        <div className="space-y-0.5 mt-0.5">
-                          <div className="flex items-center gap-2 max-w-[150px] text-[10.5px]">
-                            <span className="text-gray-400 min-w-[24px]">Min:</span> 
-                            <span className="font-mono font-bold text-emerald-700">R$ {minPrice?.toFixed(2)}</span>
-                          </div>
-                          <div className="flex items-center gap-2 max-w-[150px] text-[10.5px]">
-                            <span className="text-gray-400 min-w-[24px]">Méd:</span> 
-                            <span className="font-mono font-bold text-slate-700">R$ {averagePrice.toFixed(2)}</span>
-                          </div>
-                          <div className="flex items-center gap-2 max-w-[150px] text-[10.5px]">
-                            <span className="text-gray-400 min-w-[24px]">Max:</span> 
-                            <span className="font-mono font-bold text-red-700">R$ {maxPrice?.toFixed(2)}</span>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] text-gray-300 italic">Sem dados ativos</span>
-                      )}
-                    </div>
-
-                    {/* Column 3: Last Audited Price Highlight (span 3) */}
-                    <div className="md:col-span-3 flex flex-col justify-center">
-                      <div>
-                        <span className="text-[9.5px] text-gray-400 font-bold uppercase tracking-wider select-none">
-                          {selectedChainId === "Todas" ? "ÚLTIMO PREÇO REGISTRADO" : "PREÇO ATUAL"}
-                        </span>
-                        <div className="flex items-center gap-1.5 mt-1 bg-opacity-0">
-                          {(() => {
-                            const recordChain = latestRecord 
-                              ? chains.find((c) => c.id === latestRecord.chainId) 
-                              : selectedChainId !== "Todas" 
-                                ? chains.find((c) => c.id === selectedChainId)
-                                : null;
-                            return recordChain ? (
-                              <div className="shrink-0" title={recordChain.name}>
-                                <RetailerLogo chain={recordChain} size="sm" />
-                              </div>
-                            ) : null;
-                          })()}
-                          <span
-                            className={`text-base font-black font-mono leading-none ${
-                              prod.isCompetitor
-                                ? "text-blue-700"
-                                : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
-                                  ? "text-violet-750"
-                                  : "text-[#D40511]"
-                            }`}
-                          >
-                            R$ {currentPrice.toFixed(2)}
-                          </span>
-                          
-                          {(() => {
-                            if (priceValues.length === 0) return null;
-                            const status = currentPrice > averagePrice + 0.01 
-                              ? "above" 
-                              : currentPrice < averagePrice - 0.01 
-                                ? "below" 
-                                : "average";
-
-                            if (status === "below") {
-                              return (
-                                <span className="inline-flex items-center text-[8px] font-extrabold text-emerald-700 bg-emerald-50 px-1 rounded border border-emerald-100 shrink-0 select-none" title="Abaixo da Média">
-                                  <TrendingDown className="w-2.5 h-2.5 shrink-0" />
-                                </span>
-                              );
-                            } else if (status === "above") {
-                              return (
-                                <span className="inline-flex items-center text-[8px] font-extrabold text-red-700 bg-red-50 px-1 rounded border border-red-150 shrink-0 select-none" title="Acima da Média">
-                                  <TrendingUp className="w-2.5 h-2.5 shrink-0" />
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                        </div>
-                        <div className="text-[9.5px] whitespace-nowrap overflow-hidden text-ellipsis mt-0.5">
-                          {latestRecord ? (
-                            <span className={getAuditDateColorClass(latestRecord.date)} title={formatDateBR(latestRecord.date)}>
-                              Auditado em: {formatDateBR(latestRecord.date)} {selectedChainId === "Todas" && `(${chains.find(c => c.id === latestRecord.chainId)?.name.split(" ")[0]})`}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400">Base (sem audit.)</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Column 4: Competitors logos & prices (span 2) */}
+                    {/* Col 2: Brand & Type (span 2) */}
                     <div className="md:col-span-2">
-                      <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider block mb-1">
-                        Monitor Redes
+                      <span
+                        className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded-md border ${
+                          prod.isCompetitor
+                            ? "text-slate-700 bg-slate-100 border-slate-200"
+                            : prod.brand?.toLowerCase().includes("mavalerio") || prod.brand?.toLowerCase().includes("mavalério")
+                              ? "text-violet-800 bg-violet-50 border-violet-200"
+                              : "text-emerald-800 bg-emerald-50 border-emerald-200"
+                        }`}
+                      >
+                        {prod.brand || (prod.isCompetitor ? "Competidor" : "Dr. Oetker")}
                       </span>
+                    </div>
+
+                    {/* Col 3: Last Audited Price (span 3) */}
+                    <div className="md:col-span-3 flex flex-col justify-center">
+                      <div className="flex items-baseline gap-2">
+                        {(() => {
+                          const recordChain = latestRecord
+                            ? chains.find((c) => c.id === latestRecord.chainId)
+                            : selectedChainId !== "Todas"
+                              ? chains.find((c) => c.id === selectedChainId)
+                              : null;
+                          return recordChain ? (
+                            <div className="shrink-0" title={recordChain.name}>
+                              <RetailerLogo chain={recordChain} size="sm" />
+                            </div>
+                          ) : null;
+                        })()}
+
+                        <span className="text-base font-black font-mono tracking-tight text-slate-900 group-hover:text-[#D40511] transition-colors tabular-nums">
+                          R$ {currentPrice.toFixed(2).replace('.', ',')}
+                        </span>
+
+                        {priceValues.length > 0 && (() => {
+                          const status = currentPrice > averagePrice + 0.01 
+                            ? "above" 
+                            : currentPrice < averagePrice - 0.01 
+                              ? "below" 
+                              : "average";
+
+                          if (status === "below") {
+                            return (
+                              <span className="inline-flex items-center text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200" title="Abaixo da média">
+                                <TrendingDown className="w-3 h-3 text-emerald-600 mr-0.5" /> Abaixo
+                              </span>
+                            );
+                          } else if (status === "above") {
+                            return (
+                              <span className="inline-flex items-center text-[10px] font-bold text-rose-800 bg-rose-50 px-1.5 py-0.2 rounded border border-rose-200" title="Acima da média">
+                                <TrendingUp className="w-3 h-3 text-rose-600 mr-0.5" /> Acima
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+
+                      <div className="text-[10px] mt-0.5 truncate font-sans text-slate-500">
+                        {latestRecord ? (
+                          <span className={getAuditDateColorClass(latestRecord.date)}>
+                            Auditado {formatAuditDateRelative(latestRecord.date)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Base sem auditoria</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Col 4: Market Benchmarks (span 2) */}
+                    <div className="md:col-span-2">
                       {pricesCount > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {(() => {
-                            // Find the chain(s) for min and max prices
-                            let minChainId: string | null = null;
-                            let maxChainId: string | null = null;
-
-                            // Find min price chain id
-                            Object.entries(pricesMap).forEach(([chainId, price]) => {
-                              if (price === minPrice && !minChainId) {
-                                minChainId = chainId;
-                              }
-                            });
-
-                            // Find max price chain id (ensure it is different from minChainId if there's more than 1 option)
-                            Object.entries(pricesMap).forEach(([chainId, price]) => {
-                              if (price === maxPrice && !maxChainId && chainId !== minChainId) {
-                                maxChainId = chainId;
-                              }
-                            });
-
-                            // If we couldn't find a different maxChainId, but maxPrice exists and pricesCount > 1, allow same or any other matching
-                            if (!maxChainId && pricesCount > 1) {
-                              Object.entries(pricesMap).forEach(([chainId, price]) => {
-                                if (price === maxPrice && !maxChainId) {
-                                  maxChainId = chainId;
-                                }
-                              });
-                            }
-
-                            return chains.map((chain) => {
-                              if (chain.id !== minChainId && chain.id !== maxChainId) return null;
-                              const price = pricesMap[chain.id];
-                              if (price === undefined) return null;
-                              const isMin = chain.id === minChainId;
-                              const isMax = chain.id === maxChainId;
-                              const badgeLabel = isMin && isMax ? "único" : isMin ? "min" : "max";
-
-                              return (
-                                <div 
-                                  key={chain.id}
-                                  className={`inline-flex items-center gap-0.5 bg-gray-50/70 border rounded-md p-1 px-1.5 hover:border-gray-300 transition-colors select-none ${
-                                    isMin && isMax 
-                                      ? "border-gray-150" 
-                                      : isMin 
-                                        ? "border-emerald-250 bg-emerald-50/15" 
-                                        : "border-red-250 bg-red-50/15"
-                                  }`}
-                                  title={`${chain.name}: R$ ${price.toFixed(2)} (${badgeLabel})`}
-                                >
-                                  <RetailerLogo chain={chain} size="sm" />
-                                  <span className={`font-mono text-[9px] font-bold ${isMin && isMax ? "text-gray-650" : isMin ? "text-emerald-700" : "text-red-700"}`}>
-                                    R${price.toFixed(2)}
-                                  </span>
-                                </div>
-                              );
-                            });
-                          })()}
+                        <div className="text-xs space-y-0.5">
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                            <span className="text-slate-400 w-8">Mín:</span>
+                            <span className="font-bold text-emerald-700">R$ {minPrice?.toFixed(2).replace('.', ',')}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                            <span className="text-slate-400 w-8">Méd:</span>
+                            <span className="font-bold text-slate-700">R$ {averagePrice.toFixed(2).replace('.', ',')}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[11px] font-mono">
+                            <span className="text-slate-400 w-8">Máx:</span>
+                            <span className="font-bold text-rose-700">R$ {maxPrice?.toFixed(2).replace('.', ',')}</span>
+                          </div>
                         </div>
                       ) : (
-                        <div className="text-[10px] text-gray-350 italic">Sem amostras</div>
+                        <span className="text-xs text-slate-400 italic">Sem benchmark</span>
                       )}
                     </div>
 
-                    {/* Column 5: Expand Details Chevron icon (span 1) */}
+                    {/* Col 5: Detail Action Chevron (span 1) */}
                     <div className="md:col-span-1 flex items-center md:justify-end">
-                      <button
-                        type="button"
-                        className="w-7 h-7 rounded-lg bg-gray-50/55 hover:bg-red-50 hover:text-[#D40511] border border-gray-200 hover:border-red-150 flex items-center justify-center text-gray-400 transition-all select-none group-hover:scale-105 active:scale-95"
-                      >
-                        <ChevronLeft className="w-4 h-4 rotate-180" />
-                      </button>
+                      <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-200 flex items-center justify-center text-slate-400 group-hover:text-[#D40511] group-hover:border-red-200 transition-all">
+                        <ChevronRight className="w-4 h-4" />
+                      </div>
                     </div>
                   </div>
                 );
@@ -2220,19 +2481,15 @@ export function Products({
 
               {sortedAndFilteredProducts.length === 0 && (
                 <div
-                  className="bg-white p-12 text-center border border-[#E0E0E0]/80 rounded-2xl w-full"
+                  className="bg-white p-12 text-center border border-slate-200 rounded-2xl shadow-xs"
                   id="empty-products-view-list"
                 >
-                  <p className="text-gray-400 italic">
+                  <p className="text-slate-500 font-medium text-sm">
                     Nenhum produto cadastrado corresponde aos filtros.
                   </p>
                   <button
-                    onClick={() => {
-                      setSelectedCategory("Todas");
-                      setSelectedChainId("Todas");
-                      setSearchTerm("");
-                    }}
-                    className="mt-3 text-xs font-bold text-[#D40511] hover:underline"
+                    onClick={handleResetFilters}
+                    className="mt-3 text-xs font-bold text-[#D40511] hover:underline cursor-pointer"
                   >
                     Limpar filtros de busca
                   </button>
@@ -2241,1614 +2498,156 @@ export function Products({
             </div>
           )}
 
-          {/* Pagination Controls bar */}
+          {/* Modern Pagination Bar */}
           {sortedAndFilteredProducts.length > 0 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 px-6 bg-white border border-[#E0E0E0] rounded-2xl shadow-xs mt-6 font-sans" id="products-pagination-bar">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4 py-4 px-6 bg-white border border-slate-200 rounded-2xl shadow-2xs mt-4 font-sans" id="products-pagination-bar">
               {/* Items Per Page Selector & Textual Info */}
-              <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-gray-500">
+              <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-slate-500">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-gray-400 uppercase tracking-wider text-[10px] font-sans">Itens por página:</span>
+                  <span className="font-bold text-slate-400 uppercase tracking-wider text-[10px] font-sans">
+                    Itens por página:
+                  </span>
                   <select
                     id="pagination-items-per-page"
                     value={itemsPerPage}
                     onChange={(e) => {
                       setItemsPerPage(Number(e.target.value));
-                      setCurrentPage(1); // Go back to first page when changing size
+                      setCurrentPage(1);
                     }}
-                    className="bg-[#F5F5F5] border border-[#E0E0E0]/80 rounded-lg px-2 py-1 text-xs text-[#1A1A1A] font-bold focus:outline-none focus:border-[#D40511] cursor-pointer"
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs text-slate-800 font-bold focus:outline-none focus:border-[#D40511] cursor-pointer"
                   >
-                    <option value={10}>10</option>
-                    <option value={25}>25</option>
-                    <option value={50}>50</option>
-                    <option value={100}>100</option>
-                    <option value={250}>250</option>
-                    <option value={500}>500</option>
-                    <option value={1000}>Todos</option>
+                    <option value={12}>12</option>
+                    <option value={24}>24</option>
+                    <option value={48}>48</option>
+                    <option value={96}>96</option>
+                    <option value={500}>Todos</option>
                   </select>
                 </div>
-                <div className="text-gray-400 font-semibold font-sans">
-                  Exibindo <span className="text-[#1A1A1A] font-extrabold">{Math.min(sortedAndFilteredProducts.length, (currentPage - 1) * itemsPerPage + 1)}–{Math.min(currentPage * itemsPerPage, sortedAndFilteredProducts.length)}</span> de <span className="text-[#1A1A1A] font-extrabold">{sortedAndFilteredProducts.length}</span> produtos
+                <div className="text-slate-500 font-sans">
+                  Exibindo <span className="text-slate-900 font-bold font-mono">{Math.min(sortedAndFilteredProducts.length, (currentPage - 1) * itemsPerPage + 1)}–{Math.min(currentPage * itemsPerPage, sortedAndFilteredProducts.length)}</span> de <span className="text-slate-900 font-bold font-mono">{sortedAndFilteredProducts.length}</span> produtos
                 </div>
               </div>
 
-              {/* Navigation Button Controls */}
+              {/* Navigation Controls */}
               <div className="flex items-center gap-1.5">
-                {/* First Page button */}
                 <button
                   type="button"
                   id="pagination-first-page-btn"
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage(1)}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all text-xs font-bold cursor-pointer select-none ${
                     currentPage === 1 
-                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
-                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                      ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                      : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200 hover:text-[#D40511]"
                   }`}
                   title="Primeira página"
                 >
-                  ⏮
+                  <ChevronLeft className="w-3.5 h-3.5 -mr-1.5" />
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
 
-                {/* Previous Page button */}
                 <button
                   type="button"
                   id="pagination-prev-page-btn"
                   disabled={currentPage === 1}
                   onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all text-xs font-bold cursor-pointer select-none ${
                     currentPage === 1 
-                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
-                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                      ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                      : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200 hover:text-[#D40511]"
                   }`}
                   title="Página anterior"
                 >
-                  ◀
+                  <ChevronLeft className="w-3.5 h-3.5" />
                 </button>
 
-                {/* Page numbers pages array */}
                 {pageNumbers.map((p) => (
                   <button
                     key={p}
                     type="button"
                     onClick={() => setCurrentPage(p)}
-                    className={`w-8 h-8 rounded-lg flex items-center justify-center border font-mono text-xs font-extrabold transition-all cursor-pointer select-none ${
+                    className={`w-8 h-8 rounded-lg flex items-center justify-center border font-mono text-xs font-bold transition-all cursor-pointer select-none ${
                       currentPage === p 
                         ? "bg-[#D40511] border-[#D40511] text-white shadow-xs" 
-                        : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50 hover:border-gray-300 active:scale-95"
+                        : "bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300"
                     }`}
                   >
                     {p}
                   </button>
                 ))}
 
-                {/* Next Page button */}
                 <button
                   type="button"
                   id="pagination-next-page-btn"
                   disabled={currentPage === totalPages}
                   onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all text-xs font-bold cursor-pointer select-none ${
                     currentPage === totalPages 
-                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
-                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                      ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                      : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200 hover:text-[#D40511]"
                   }`}
                   title="Próxima página"
                 >
-                  ▶
+                  <ChevronRight className="w-3.5 h-3.5" />
                 </button>
 
-                {/* Last Page button */}
                 <button
                   type="button"
                   id="pagination-last-page-btn"
                   disabled={currentPage === totalPages}
                   onClick={() => setCurrentPage(totalPages)}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center border border-gray-200 transition-all text-xs font-bold cursor-pointer select-none ${
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center border transition-all text-xs font-bold cursor-pointer select-none ${
                     currentPage === totalPages 
-                      ? "bg-gray-50 text-gray-300 border-gray-150 cursor-not-allowed" 
-                      : "bg-white text-gray-600 hover:bg-gray-50 hover:text-[#D40511] active:scale-95"
+                      ? "bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed" 
+                      : "bg-white text-slate-700 hover:bg-slate-50 border-slate-200 hover:text-[#D40511]"
                   }`}
                   title="Última página"
                 >
-                  ⏭
+                  <ChevronRight className="w-3.5 h-3.5" />
+                  <ChevronRight className="w-3.5 h-3.5 -ml-1.5" />
                 </button>
               </div>
             </div>
           )}
         </>
       )}
-      {activeView === "detail" && (
-        /* DETAIL VIEW: Detail page for a selected product */
-        <div
-          className="bg-white rounded-2xl border border-[#E0E0E0] shadow-sm overflow-hidden"
-          id="product-detail-view bg"
-        >
-          {/* Header */}
-          <div
-            className="bg-[#F5F5F5] border-b border-[#E0E0E0] p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
-            id="detail-header-panel"
-          >
-            <button
-              id="back-to-products-list-btn"
-              onClick={() => {
-                setActiveView("list");
-                setSelectedProductId(null);
-              }}
-              className="inline-flex items-center gap-1 text-xs font-bold text-gray-600 hover:text-[#1A1A1A] cursor-pointer"
-            >
-              <ChevronLeft className="w-4 h-4" /> Voltar ao catálogo
-            </button>
-          </div>
-
-          <div className="p-6 space-y-8" id="detail-content-area">
-            {selectedProduct && (
-              <div
-                className="grid grid-cols-1 md:grid-cols-4 gap-6"
-                id="detail-product-meta-row"
-              >
-                {/* Main Product Column (Image, Metadata) */}
-                <div
-                  className="md:col-span-1 flex flex-col items-center text-center p-4 border border-[#E0E0E0] rounded-xl self-start bg-white"
-                  id="detail-product-sidebar"
-                >
-                  <div
-                    onClick={() => setProductPhotoModal({ url: selectedProduct.imageUrl, name: selectedProduct.name })}
-                    className="w-24 h-24 rounded-2xl overflow-hidden bg-gray-50 flex items-center justify-center p-1.5 shadow-2xs cursor-pointer group hover:ring-2 hover:ring-[#D40511] transition-all relative"
-                    title="Clique para ver foto em tela cheia"
-                  >
-                    <img
-                      src={selectedProduct.imageUrl}
-                      alt={selectedProduct.name}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-contain"
-                    />
-                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-all">
-                      <Search className="w-5 h-5 text-white" />
-                    </div>
-                  </div>
-                  <h2 className="text-base font-bold text-[#1A1A1A] mt-4 font-sans leading-tight">
-                    {selectedProduct.name}
-                  </h2>
-                  <div className="flex flex-col gap-1.5 mt-2 items-center">
-                    <span className="inline-block text-[10px] bg-gray-100 text-gray-700 font-bold rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider">
-                      {selectedProduct.category}
-                    </span>
-                    {selectedProduct.subcategory && (
-                      <span className="inline-block text-[10px] bg-slate-100 text-slate-700 border border-slate-200 font-bold rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider">
-                        {selectedProduct.subcategory}
-                      </span>
-                    )}
-                    {selectedProduct.weight && (
-                      <span className="inline-block text-[10px] bg-amber-50 text-amber-700 border border-amber-200 font-bold rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider">
-                        Gramatura: {selectedProduct.weight}
-                      </span>
-                    )}
-                    {selectedProduct.isCompetitor ? (
-                      <span className="inline-block text-[10px] bg-blue-50 text-slate-700 border border-slate-200 font-extrabold rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider">
-                        {selectedProduct.brand}
-                      </span>
-                    ) : (
-                      <span
-                        className={`inline-block text-[10px] font-extrabold border rounded-lg px-2.5 py-0.5 uppercase font-mono tracking-wider ${
-                          selectedProduct.brand
-                            ?.toLowerCase()
-                            .includes("mavalerio") ||
-                          selectedProduct.brand
-                            ?.toLowerCase()
-                            .includes("mavalério")
-                            ? "bg-violet-50 text-violet-805 text-violet-750 border-violet-200"
-                            : "bg-emerald-50 text-emerald-800 border-emerald-200"
-                        }`}
-                      >
-                        {selectedProduct.brand || "Dr. Oetker"}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="w-full border-t border-[#F5F5F5] pt-4 mt-4 space-y-2 text-left text-xs text-gray-500">
-                    {selectedProduct.internalCode && (
-                      <div className="flex justify-between items-center">
-                        <span>Cód. Interno:</span>
-                        <span className="text-[#1A1A1A] font-bold font-mono bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
-                          {selectedProduct.internalCode}
-                        </span>
-                      </div>
-                    )}
-                    {selectedProduct.weight && (
-                      <div className="flex justify-between">
-                        <span>Gramatura:</span>
-                        <span className="text-[#1A1A1A] font-bold font-mono">
-                          {selectedProduct.weight}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span>Amostras:</span>
-                      <span className="text-[#1A1A1A] font-bold font-mono">
-                        {selectedProductHistory.length} registros
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="w-full pt-4 mt-2 border-t border-[#F5F5F5]">
-                    <button
-                      id="detail-register-price-btn"
-                      onClick={() => setShowRegisterPriceModal(true)}
-                      className="w-full bg-[#D40511] hover:bg-[#b0040e] text-white py-2.5 px-4 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider font-sans"
-                    >
-                      <Camera className="w-4 h-4 shrink-0" />
-                      Registrar Preço
-                    </button>
-                  </div>
-                </div>
-
-                {/* Evolution Chart Column */}
-                <div
-                  className="md:col-span-3 border border-[#E0E0E0] rounded-xl p-5"
-                  id="detail-chart-panel"
-                >
-                  <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">
-                    Histórico & Evolução de Gôndola (R$)
-                  </h3>
-
-                  {chartData && chartData.uniqueDates.length > 0 ? (
-                    <div className="space-y-4">
-                      {/* Compact Collapsible Network Selector */}
-                      <div className="flex items-center justify-between gap-3 p-1 bg-gray-50/10" id="network-selectors-compact-container">
-                        <div className="relative inline-block text-left" id="chain-filter-dropdown-container">
-                          <button
-                            type="button"
-                            onClick={() => setShowChartChainSelector(!showChartChainSelector)}
-                            className="flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-gray-55 border border-gray-200 hover:border-gray-300 rounded-xl text-xs font-semibold text-gray-800 shadow-xs transition duration-150 cursor-pointer"
-                          >
-                            <Filter className="w-3.5 h-3.5 text-gray-550" />
-                            <span>Filtrar Redes ({selectedChartChains.length} selecionadas)</span>
-                            {showChartChainSelector ? <ChevronUp className="w-3.5 h-3.5 text-gray-450" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-455" />}
-                          </button>
-
-                          {showChartChainSelector && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-40"
-                                onClick={() => setShowChartChainSelector(false)}
-                              />
-                              <div className="absolute left-0 mt-2 w-80 bg-white border border-gray-200 rounded-xl shadow-xl z-55 p-4 space-y-3" id="chain-filter-panel">
-                                <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                                  <span className="text-xs font-bold text-gray-700 uppercase tracking-wider font-sans">
-                                    Configurar Visualização
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setShowChartChainSelector(false)}
-                                    className="text-[10px] bg-gray-150 hover:bg-gray-200 text-gray-700 font-bold px-2 py-1 rounded cursor-pointer"
-                                  >
-                                    Confirmar
-                                  </button>
-                                </div>
-
-                                <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedChartChains(chains.map((c) => c.id))}
-                                    className="flex-1 text-[10px] font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 py-1.5 rounded-lg transition text-center cursor-pointer"
-                                  >
-                                    Selecionar todas
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedChartChains([])}
-                                    className="flex-1 text-[10px] font-bold text-gray-700 bg-gray-50 border border-gray-200 hover:bg-red-50 hover:text-[#D40511] hover:border-red-200 py-1.5 rounded-lg transition text-center cursor-pointer"
-                                  >
-                                    Limpar seleção
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-1 gap-1 max-h-56 overflow-y-auto pr-1">
-                                  {chains.map((chain, chainIdx) => {
-                                    const isActive = selectedChartChains.includes(chain.id);
-                                    const recordCount = selectedProductHistory.filter((r) => r.chainId === chain.id).length;
-                                    const strokeColor = getChainColor(chain.id);
-
-                                    return (
-                                      <button
-                                        key={chain.id}
-                                        type="button"
-                                        onClick={() => {
-                                          if (isActive) {
-                                            setSelectedChartChains(selectedChartChains.filter((id) => id !== chain.id));
-                                          } else {
-                                            setSelectedChartChains([...selectedChartChains, chain.id]);
-                                          }
-                                        }}
-                                        className={`flex items-center justify-between px-3 py-1.5 rounded-lg border text-xs font-semibold transition select-none cursor-pointer ${
-                                          isActive
-                                            ? "border-amber-250 bg-amber-50/20 text-amber-900"
-                                            : "border-gray-100 bg-white hover:bg-gray-55 text-gray-400 hover:text-gray-700"
-                                        }`}
-                                      >
-                                        <div className="flex items-center gap-2 min-w-0">
-                                          <span
-                                            className="w-2 h-2 rounded-full shrink-0"
-                                            style={{ backgroundColor: isActive ? strokeColor : "#cbd5e1" }}
-                                          />
-                                          <span className="truncate">{chain.name}</span>
-                                        </div>
-                                        <span className="text-[9px] px-1.5 py-0.5 rounded-md font-mono bg-black/5 text-gray-500 font-bold shrink-0">
-                                          {recordCount} pts
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Line Chart Workspace */}
-                      <div className="relative border border-gray-100 rounded-xl p-3 bg-[#FCFCFC]" id="line-chart-container">
-                        {/* Interactive Custom SVG Line Chart */}
-                        <svg
-                          viewBox="0 0 500 240"
-                          className="w-full h-60"
-                          fill="none"
-                          id="line-chart-svg"
-                        >
-                          {/* Grid lines */}
-                          {[0, 0.25, 0.5, 0.75, 1].map((ratio, i) => {
-                            const y = 30 + ratio * 160;
-                            const priceVal =
-                              chartData.maxPrice -
-                              ratio * (chartData.maxPrice - chartData.minPrice);
-                            return (
-                              <g key={i}>
-                                <line
-                                  x1="40"
-                                  y1={y}
-                                  x2="480"
-                                  y2={y}
-                                  stroke="#F2F2F2"
-                                  strokeWidth="1"
-                                />
-                                <text
-                                  x="35"
-                                  y={y + 3}
-                                  fill="#9ca3af"
-                                  fontSize="8"
-                                  fontFamily="monospace"
-                                  textAnchor="end"
-                                >
-                                  {priceVal.toFixed(2)}
-                                </text>
-                              </g>
-                            );
-                          })}
-
-                          {/* Date x-axis ticks */}
-                          {chartData.uniqueDates.map((date, idx, arr) => {
-                            const spacing =
-                              arr.length > 1 ? 440 / (arr.length - 1) : 440;
-                            const x = 40 + idx * spacing;
-                            return (
-                              <g key={idx}>
-                                <line
-                                  x1={x}
-                                  y1="30"
-                                  x2={x}
-                                  y2="195"
-                                  stroke="#FDFDFD"
-                                  strokeWidth="1"
-                                />
-                                <text
-                                  x={x}
-                                  y="212"
-                                  fill="#9ca3af"
-                                  fontSize="7.5"
-                                  fontFamily="sans-serif"
-                                  textAnchor="middle"
-                                >
-                                  {formatDateBR(date).substring(0, 5)}
-                                </text>
-                              </g>
-                            );
-                          })}
-
-                          {/* Draw Line for each selected chain */}
-                          {chains.map((chain, chainIdx) => {
-                            // Filter out unselected chains
-                            if (!selectedChartChains.includes(chain.id)) return null;
-
-                            const series = chartData.chainSeries[chain.id] || [];
-                            if (series.length === 0) return null;
-
-                            // Map dates to points
-                            const points = series.map((pt) => {
-                              const dateIdx = chartData.uniqueDates.indexOf(pt.date);
-                              const spacing =
-                                chartData.uniqueDates.length > 1
-                                  ? 440 / (chartData.uniqueDates.length - 1)
-                                  : 440;
-                              const x = 40 + dateIdx * spacing;
-
-                              // Map price value to grid coordinate [30, 190]
-                              const priceRatio =
-                                (pt.price - chartData.minPrice) /
-                                (chartData.maxPrice - chartData.minPrice || 1);
-                              const y = 190 - priceRatio * 160;
-
-                              return { x, y, price: pt.price, date: pt.date };
-                            });
-
-                            // Generate SVG path description
-                            const pathD = points.reduce((acc, pt, idx) => {
-                              return acc + `${idx === 0 ? "M" : "L"} ${pt.x} ${pt.y} `;
-                            }, "");
-
-                            const strokeColor = getChainColor(chain.id);
-
-                            return (
-                              <g key={chain.id}>
-                                {/* Sleeker line layout */}
-                                <path
-                                  d={pathD}
-                                  stroke={strokeColor}
-                                  strokeWidth="3.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  opacity="0.95"
-                                />
-
-                                {/* Interactive dots */}
-                                {points.map((pt, pIdx) => (
-                                  <g key={pIdx}>
-                                    <circle
-                                      cx={pt.x}
-                                      cy={pt.y}
-                                      r="2.2"
-                                      fill="#ffffff"
-                                      stroke={strokeColor}
-                                      strokeWidth="2"
-                                    />
-                                    {/* Large invisible interactive hover overlay zone */}
-                                    <circle
-                                      cx={pt.x}
-                                      cy={pt.y}
-                                      r="14"
-                                      fill="transparent"
-                                      className="cursor-pointer"
-                                      onMouseEnter={() => {
-                                        setHoveredPoint({
-                                          chainId: chain.id,
-                                          chainName: chain.name,
-                                          date: pt.date,
-                                          price: pt.price,
-                                          x: pt.x,
-                                          y: pt.y,
-                                        });
-                                      }}
-                                      onMouseLeave={() => {
-                                        setHoveredPoint(null);
-                                      }}
-                                      onClick={() => {
-                                        setHoveredPoint({
-                                          chainId: chain.id,
-                                          chainName: chain.name,
-                                          date: pt.date,
-                                          price: pt.price,
-                                          x: pt.x,
-                                          y: pt.y,
-                                        });
-                                      }}
-                                    />
-                                  </g>
-                                ))}
-                              </g>
-                            );
-                          })}
-                        </svg>
-
-                        {/* Interactive Tooltip Overlay */}
-                        {hoveredPoint && (
-                          <div
-                            className="absolute z-10 bg-white/95 backdrop-blur-xs border border-gray-150 rounded-lg p-2.5 shadow-md pointer-events-none transform -translate-x-1/2 -translate-y-[105%] transition-all duration-75 ease-out min-w-[130px] text-left"
-                            style={{
-                              left: `${(hoveredPoint.x / 500) * 100}%`,
-                              top: `${(hoveredPoint.y / 240) * 100}%`,
-                            }}
-                          >
-                            <div className="flex items-center gap-1.5 leading-none">
-                              <span
-                                className="w-2 rounded-full h-2 shrink-0 animate-pulse"
-                                style={{ backgroundColor: getChainColor(hoveredPoint.chainId) }}
-                              />
-                              <span className="text-[10px] font-black text-gray-800 font-sans truncate">
-                                {hoveredPoint.chainName}
-                              </span>
-                            </div>
-                            <div className="mt-1.5 text-xs font-black font-mono text-gray-900">
-                              R$ {hoveredPoint.price.toFixed(2)}
-                            </div>
-                            <div className="text-[9px] text-gray-400 font-mono mt-0.5 leading-none">
-                              {formatDateBR(hoveredPoint.date)}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Clickable colored sub-legend */}
-                        <div className="flex flex-wrap items-center justify-center gap-2 mt-3 pt-3 border-t border-gray-100" id="chart-active-legend">
-                          {chains.filter(c => selectedChartChains.includes(c.id)).map((chain) => {
-                            const strokeColor = getChainColor(chain.id);
-                            return (
-                              <button
-                                key={chain.id}
-                                type="button"
-                                onClick={() => setSelectedChartChains(selectedChartChains.filter((id) => id !== chain.id))}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-gray-200 bg-white hover:border-gray-300 text-[10px] font-semibold text-gray-700 transition cursor-pointer hover:bg-gray-50"
-                                title="Clique para remover do gráfico"
-                              >
-                                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: strokeColor }} />
-                                <span className="truncate max-w-[100px]">{chain.name}</span>
-                                <span className="text-[8px] text-gray-400 font-bold">&times;</span>
-                              </button>
-                            );
-                          })}
-                          {selectedChartChains.length === 0 && (
-                            <span className="text-[10px] text-gray-400 italic">Nenhuma rede selecionada. Ative no botão de filtro.</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="h-44 bg-[#F5F5F5] rounded-xl flex flex-col items-center justify-center text-center p-6 text-[#1A1A1A]/50">
-                      <FileText className="w-8 h-8 mb-2" />
-                      <p className="text-xs font-sans">
-                        Histórico de preços insuficiente para plotagem.
-                      </p>
-                      <p className="text-[10px] text-gray-400 font-sans mt-0.5">
-                        Registre preços usando a câmera ou selecione da galeria.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Pricing Comparisons Box (Visão Geral de Pontos de Venda separada por Estado) */}
-            {(() => {
-              // Get all distinct states present in records for this product
-              const recordedStatesSet = new Set<string>();
-              selectedProductHistory.forEach((r) => {
-                const st = r.state || "Minas Gerais";
-                if (st && typeof st === "string" && st.trim()) {
-                  recordedStatesSet.add(st.trim());
-                }
-              });
-
-              // Also include states from chains that have active retail presence
-              chains.forEach((ch) => {
-                getChainStates(ch).forEach((st) => {
-                  if (st && typeof st === "string" && st.trim()) {
-                    recordedStatesSet.add(st.trim());
-                  }
-                });
-              });
-
-              const allInvolvedStates = Array.from(recordedStatesSet).sort((a, b) => {
-                const aCount = selectedProductHistory.filter((r) => (r.state || "Minas Gerais") === a).length;
-                const bCount = selectedProductHistory.filter((r) => (r.state || "Minas Gerais") === b).length;
-                if (aCount !== bCount) return bCount - aCount;
-                return (a || "").localeCompare(b || "");
-              });
-
-              // Breakdown per state
-              const stateBreakdowns = allInvolvedStates.map((stateName) => {
-                const stateInfo = RESEARCH_STATES.find((s) => s.name === stateName);
-                const uf = stateInfo?.uf || (typeof stateName === "string" && stateName.length >= 2 ? stateName.substring(0, 2).toUpperCase() : "UF");
-
-                // Records for this state
-                const stateRecords = selectedProductHistory.filter(
-                  (r) => (r.state || "Minas Gerais") === stateName
-                );
-
-                // Chains in this state
-                const stateChains = chains.filter(
-                  (ch) => getChainStates(ch).includes(stateName) || stateRecords.some((r) => r.chainId === ch.id)
-                );
-
-                // Latest record per chain in this state, sorted from cheapest to most expensive
-                const chainPricedList = stateChains
-                  .map((chain) => {
-                    const recordsForChainInState = stateRecords.filter((r) => r.chainId === chain.id);
-                    const latestRecord = recordsForChainInState[recordsForChainInState.length - 1];
-                    return { chain, latestRecord };
-                  })
-                  .sort((a, b) => {
-                    // Both have prices: sort ascending from cheapest to most expensive
-                    if (a.latestRecord && b.latestRecord) {
-                      return a.latestRecord.price - b.latestRecord.price;
-                    }
-                    // Chains with prices come before unpriced chains
-                    if (a.latestRecord && !b.latestRecord) return -1;
-                    if (!a.latestRecord && b.latestRecord) return 1;
-                    // If neither has price, sort by chain name
-                    return a.chain.name.localeCompare(b.chain.name);
-                  });
-
-                const pricedRecordsInState = chainPricedList
-                  .filter((item) => item.latestRecord !== undefined)
-                  .sort((a, b) => a.latestRecord!.price - b.latestRecord!.price);
-
-                let avgPrice = 0;
-                let minItem: typeof pricedRecordsInState[number] | null = null;
-                let maxItem: typeof pricedRecordsInState[number] | null = null;
-
-                if (pricedRecordsInState.length > 0) {
-                  const sum = pricedRecordsInState.reduce((acc, r) => acc + r.latestRecord!.price, 0);
-                  avgPrice = sum / pricedRecordsInState.length;
-                  minItem = pricedRecordsInState[0];
-                  maxItem = pricedRecordsInState[pricedRecordsInState.length - 1];
-                }
-
-                return {
-                  stateName,
-                  uf,
-                  totalChains: stateChains.length,
-                  pricedCount: pricedRecordsInState.length,
-                  avgPrice,
-                  minItem,
-                  maxItem,
-                  chainPricedList,
-                  pricedRecordsInState,
-                  hasRecords: pricedRecordsInState.length > 0,
-                };
-              });
-
-              // Overall National Metrics across all priced records
-              const allPricedLatestAcrossStates = stateBreakdowns.flatMap((st) =>
-                st.pricedRecordsInState.map((item) => ({ ...item, stateName: st.stateName, uf: st.uf }))
-              );
-
-              let nationalAvg = 0;
-              let nationalMinItem: typeof allPricedLatestAcrossStates[0] | null = null;
-              let nationalMaxItem: typeof allPricedLatestAcrossStates[0] | null = null;
-
-              if (allPricedLatestAcrossStates.length > 0) {
-                const sum = allPricedLatestAcrossStates.reduce((acc, r) => acc + r.latestRecord!.price, 0);
-                nationalAvg = sum / allPricedLatestAcrossStates.length;
-                const sorted = [...allPricedLatestAcrossStates].sort(
-                  (a, b) => a.latestRecord!.price - b.latestRecord!.price
-                );
-                nationalMinItem = sorted[0];
-                nationalMaxItem = sorted[sorted.length - 1];
-              }
-
-              // Selected state stats (if specific state filter is active)
-              const selectedStateData =
-                detailStateFilter !== "Todas"
-                  ? stateBreakdowns.find((s) => s.stateName === detailStateFilter) || null
-                  : null;
-
-              // States with actual records
-              const statesWithRecords = stateBreakdowns.filter((st) => st.hasRecords);
-
-              // Helper renderer for a single chain price card
-              const renderChainCard = (
-                chain: Chain,
-                latestRecord: PriceRecord | undefined,
-                stateAvgPrice: number,
-                stateUF: string,
-                stateName: string
-              ) => {
-                const calculatedPercent =
-                  latestRecord && selectedProduct
-                    ? ((latestRecord.price - selectedProduct.basePrice) / selectedProduct.basePrice) * 100
-                    : null;
-
-                let borderStyle = "border-l-4 border-l-gray-300";
-                let bgStyle = "bg-white border-y border-r border-[#E0E0E0] text-gray-700 hover:border-gray-300";
-                let indicatorText = "Na Média";
-                let indicatorColorClass = "text-blue-600 bg-blue-50 border-blue-150";
-
-                if (latestRecord && stateAvgPrice > 0) {
-                  const diff = latestRecord.price - stateAvgPrice;
-                  if (diff < -0.01) {
-                    borderStyle = "border-l-4 border-l-emerald-500";
-                    bgStyle =
-                      "bg-gradient-to-r from-emerald-50/10 to-white/90 border-y border-r border-emerald-200/70 text-emerald-950 hover:bg-emerald-50/20 hover:border-emerald-300/80";
-                    indicatorText = "- Média";
-                    indicatorColorClass = "text-emerald-700 bg-emerald-50 border-emerald-150";
-                  } else if (diff > 0.01) {
-                    borderStyle = "border-l-4 border-l-red-500";
-                    bgStyle =
-                      "bg-gradient-to-r from-red-50/10 to-white/90 border-y border-r border-red-150/70 text-red-950 hover:bg-red-50/20 hover:border-red-250/80";
-                    indicatorText = "+ Média";
-                    indicatorColorClass = "text-red-700 bg-red-50 border-red-150";
-                  } else {
-                    borderStyle = "border-l-4 border-l-gray-350";
-                    bgStyle =
-                      "bg-gradient-to-r from-gray-50/10 to-white/90 border-y border-r border-gray-200 text-gray-800 hover:bg-gray-50/20 hover:border-gray-350";
-                    indicatorText = "No Preço";
-                    indicatorColorClass = "text-gray-650 bg-gray-50 border-gray-200";
-                  }
-                }
-
-                const tooltipText = latestRecord
-                  ? `Estado: ${stateName} (${stateUF}) • Registrado por: ${latestRecord.userName || "N/A"} • Preço Base: R$ ${selectedProduct.basePrice.toFixed(2)} (${calculatedPercent !== null ? `${calculatedPercent > 0 ? "+" : ""}${calculatedPercent.toFixed(1)}%` : "0%"})`
-                  : `Sem preço coletado em ${stateName}`;
-
-                return (
-                  <div
-                    key={`${chain.id}_${stateName}`}
-                    title={tooltipText}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (latestRecord?.imageUrl) {
-                        setSelectedRecord(latestRecord);
-                      } else {
-                        handleOpenEditPriceModal(chain, latestRecord, stateName);
-                      }
-                    }}
-                    className={`rounded-lg p-3 transition-all duration-150 flex flex-col justify-between shadow-xs min-h-[115px] group ${borderStyle} ${bgStyle} cursor-pointer hover:scale-[1.02]`}
-                    id={`current-price-card-${chain.id}-${(stateUF || "").toLowerCase()}`}
-                  >
-                    {/* Top Row: Logo & Chain Name & State Badge & Quick Edit Button */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
-                        className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-white text-[10px] shrink-0 overflow-hidden border border-gray-100 shadow-xs relative ${
-                          chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
-                        }`}
-                      >
-                        {chain.logoUrl ? (
-                          <img
-                            src={chain.logoUrl}
-                            alt={chain.name}
-                            className="w-full h-full object-contain p-0.5 bg-white"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <span>{chain.name.substring(0, 2).toUpperCase()}</span>
-                        )}
-                      </span>
-                      <div className="flex-1 min-w-0">
-                        <span className="text-[9px] font-black text-gray-800 uppercase tracking-tight truncate block leading-tight">
-                          {chain.name}
-                        </span>
-                        <span className="text-[8px] font-bold text-gray-400 uppercase tracking-wider block leading-none mt-0.5">
-                          {stateUF}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Price in prominence - Click to edit */}
-                    <div className="my-2 text-left">
-                      {latestRecord ? (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEditPriceModal(chain, latestRecord, stateName);
-                          }}
-                          className="group/price flex items-baseline gap-1.5 text-left rounded-md px-1.5 py-1 -mx-1.5 hover:bg-black/5 hover:ring-1 hover:ring-[#D40511]/40 transition-all cursor-pointer w-fit"
-                          title="Clique para alterar este preço"
-                        >
-                          <div className="text-base font-black font-mono tracking-tight text-[#1A1A1A] leading-tight flex items-baseline group-hover/price:text-[#D40511]">
-                            <span className="text-[10px] font-normal text-gray-400 mr-0.5">R$</span>
-                            {latestRecord.price.toFixed(2)}
-                          </div>
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleOpenEditPriceModal(chain, undefined, stateName);
-                          }}
-                          className="group/price flex items-center gap-1 text-left rounded-md px-1 py-0.5 -mx-1 hover:bg-black/5 hover:ring-1 hover:ring-[#D40511]/40 transition-all cursor-pointer"
-                          title="Clique para cadastrar preço nesta rede"
-                        >
-                          <span className="text-[10px] font-bold text-gray-400 italic group-hover/price:text-[#D40511]">
-                            + Inserir preço
-                          </span>
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Footer Row: Date & Status */}
-                    <div className="flex items-center justify-between gap-1 mt-0.5 border-t border-black/5 pt-1.5 min-w-0">
-                      <span className="text-[8px] font-mono flex items-center gap-0.5 min-w-0">
-                        {latestRecord ? (
-                          <>
-                            <Clock className="w-2 h-2 text-gray-300 shrink-0" />
-                            <span className={`truncate ${getAuditDateColorClass(latestRecord.date)}`}>
-                              {formatDateBR(latestRecord.date).substring(0, 5)}
-                            </span>
-                          </>
-                        ) : (
-                          <span className="text-gray-400">-</span>
-                        )}
-                      </span>
-
-                      <span
-                        className={`text-[8px] font-bold uppercase px-1 py-0.2 rounded border tracking-tight truncate shrink-0 ${indicatorColorClass}`}
-                      >
-                        {indicatorText}
-                      </span>
-                    </div>
-                  </div>
-                );
-              };
-
-              return (
-                <div
-                  className="border border-[#E0E0E0] rounded-xl p-5 bg-white space-y-4"
-                  id="detail-comparison-block"
-                >
-                  {/* Header with State Selector Tabs */}
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 border-b border-[#F5F5F5] pb-3">
-                    <div>
-                      <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest block font-sans">
-                        Visão Geral de Pontos de Venda
-                      </span>
-                      <h3 className="text-sm font-black text-[#1A1A1A] font-sans mt-0.5 flex items-center gap-1.5">
-                        <span>Comparativo de Preços por Estado</span>
-                        {statesWithRecords.length > 1 && (
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
-                            {statesWithRecords.length} estados pesquisados
-                          </span>
-                        )}
-                      </h3>
-                    </div>
-
-                    {/* State Selector Tabs / Filter */}
-                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none" id="detail-state-selector-tabs">
-                      <button
-                        type="button"
-                        onClick={() => setDetailStateFilter("Todas")}
-                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                          detailStateFilter === "Todas"
-                            ? "bg-[#D40511] text-white shadow-xs"
-                            : "bg-[#F5F5F5] text-gray-600 hover:bg-gray-200 border border-transparent"
-                        }`}
-                      >
-                        <Globe className="w-3 h-3" />
-                        <span>Todos Estados ({allPricedLatestAcrossStates.length})</span>
-                      </button>
-
-                      {stateBreakdowns.map((st) => (
-                        <button
-                          key={st.stateName}
-                          type="button"
-                          onClick={() => setDetailStateFilter(st.stateName)}
-                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                            detailStateFilter === st.stateName
-                              ? "bg-[#1A1A1A] text-white shadow-xs"
-                              : st.hasRecords
-                              ? "bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200/60"
-                              : "bg-gray-50 text-gray-400 hover:bg-gray-100 border border-transparent"
-                          }`}
-                        >
-                          <MapPin className="w-3 h-3 text-red-500" />
-                          <span>
-                            {st.uf} {st.hasRecords ? `(${st.pricedCount})` : "(0)"}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Highlights Summary KPI */}
-                  {detailStateFilter === "Todas" ? (
-                    <>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" id="current-prices-highlights-national">
-                        {/* Média Geral Nacional */}
-                        <div
-                          className="bg-gray-50/50 border border-gray-200 rounded-xl p-3 flex items-center justify-between"
-                          id="highlight-avg-price-national"
-                        >
-                          <div className="min-w-0">
-                            <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider font-sans">
-                              📊 Média Nacional
-                            </span>
-                            <div className="text-base font-black font-mono text-gray-900 mt-0.5">
-                              {allPricedLatestAcrossStates.length > 0 ? `R$ ${nationalAvg.toFixed(2)}` : "Sem dados"}
-                            </div>
-                            <p className="text-[10px] text-gray-400 font-sans truncate mt-0.5">
-                              {allPricedLatestAcrossStates.length > 0
-                                ? `${allPricedLatestAcrossStates.length} preços em ${statesWithRecords.length} estados`
-                                : "Nenhum preço coletado"}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Menor Preço Nacional */}
-                        <div
-                          className="bg-emerald-50/30 border border-emerald-250/60 rounded-xl p-3 flex items-center justify-between"
-                          id="highlight-min-price-national"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
-                              <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
-                                Menor Preço Nacional
-                              </span>
-                            </div>
-                            <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
-                              {nationalMinItem ? `R$ ${nationalMinItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
-                            </div>
-                            <p className="text-[10px] text-emerald-700 font-medium truncate mt-0.5 font-sans">
-                              {nationalMinItem
-                                ? `${nationalMinItem.chain.name} (${nationalMinItem.uf})`
-                                : "Nenhum canal ativo"}
-                            </p>
-                          </div>
-                          <div className="p-2 bg-emerald-100/50 rounded-lg text-emerald-700 shrink-0">
-                            <TrendingDown className="w-4 h-4" />
-                          </div>
-                        </div>
-
-                        {/* Maior Preço Nacional */}
-                        <div
-                          className="bg-red-50/30 border border-red-200/60 rounded-xl p-3 flex items-center justify-between"
-                          id="highlight-max-price-national"
-                        >
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
-                              <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
-                                Maior Preço Nacional
-                              </span>
-                            </div>
-                            <div className="text-base font-black font-mono text-red-950 mt-0.5">
-                              {nationalMaxItem ? `R$ ${nationalMaxItem.latestRecord!.price.toFixed(2)}` : "Sem dados"}
-                            </div>
-                            <p className="text-[10px] text-red-700 font-medium truncate mt-0.5 font-sans">
-                              {nationalMaxItem
-                                ? `${nationalMaxItem.chain.name} (${nationalMaxItem.uf})`
-                                : "Nenhum canal ativo"}
-                            </p>
-                          </div>
-                          <div className="p-2 bg-red-100/50 rounded-lg text-red-700 shrink-0">
-                            <TrendingUp className="w-4 h-4" />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Interstate Regional Overview Chips (quando houver múltiplos estados) */}
-                      {statesWithRecords.length > 1 && (
-                        <div className="bg-gray-50/70 border border-gray-200/80 rounded-xl p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-[9px] font-black text-gray-500 uppercase tracking-wider font-sans flex items-center gap-1">
-                              <MapPin className="w-3 h-3 text-red-500" />
-                              Comparativo Médio por Estado
-                            </span>
-                            <span className="text-[9px] text-gray-400 font-sans">
-                              Clique no estado para filtrar
-                            </span>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                            {statesWithRecords.map((st) => {
-                              const diffPercent =
-                                nationalAvg > 0
-                                  ? ((st.avgPrice - nationalAvg) / nationalAvg) * 100
-                                  : 0;
-                              return (
-                                <button
-                                  key={st.stateName}
-                                  type="button"
-                                  onClick={() => setDetailStateFilter(st.stateName)}
-                                  className="text-left bg-white border border-gray-200 rounded-lg p-2 hover:border-[#D40511] hover:shadow-xs transition"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-black text-gray-800">
-                                      {st.uf} - {st.stateName}
-                                    </span>
-                                    <span className="text-[9px] font-mono text-gray-400">
-                                      {st.pricedCount} PDVs
-                                    </span>
-                                  </div>
-                                  <div className="flex items-baseline justify-between mt-1">
-                                    <span className="text-xs font-black font-mono text-[#1A1A1A]">
-                                      R$ {st.avgPrice.toFixed(2)}
-                                    </span>
-                                    <span
-                                      className={`text-[8px] font-bold font-mono ${
-                                        diffPercent < -0.5
-                                          ? "text-emerald-600"
-                                          : diffPercent > 0.5
-                                          ? "text-red-600"
-                                          : "text-gray-500"
-                                      }`}
-                                    >
-                                      {diffPercent > 0 ? "+" : ""}
-                                      {diffPercent.toFixed(1)}% vs Nac.
-                                    </span>
-                                  </div>
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    /* Specific State KPI */
-                    selectedStateData && (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" id="current-prices-highlights-state">
-                        <div className="bg-gray-50/50 border border-gray-200 rounded-xl p-3 flex items-center justify-between">
-                          <div className="min-w-0">
-                            <span className="text-[9px] font-bold text-gray-500 uppercase tracking-wider font-sans">
-                              📊 Média em {selectedStateData.stateName} ({selectedStateData.uf})
-                            </span>
-                            <div className="text-base font-black font-mono text-gray-900 mt-0.5">
-                              {selectedStateData.pricedCount > 0
-                                ? `R$ ${selectedStateData.avgPrice.toFixed(2)}`
-                                : "Sem dados"}
-                            </div>
-                            <p className="text-[10px] text-gray-400 font-sans truncate mt-0.5">
-                              {selectedStateData.pricedCount > 0
-                                ? `${selectedStateData.pricedCount} de ${selectedStateData.totalChains} redes pesquisadas`
-                                : "Nenhum preço coletado neste estado"}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="bg-emerald-50/30 border border-emerald-250/60 rounded-xl p-3 flex items-center justify-between">
-                          <div className="min-w-0">
-                            <span className="text-[9px] font-bold text-emerald-800 uppercase tracking-wider font-sans">
-                              Menor Preço ({selectedStateData.uf})
-                            </span>
-                            <div className="text-base font-black font-mono text-emerald-950 mt-0.5">
-                              {selectedStateData.minItem
-                                ? `R$ ${selectedStateData.minItem.latestRecord!.price.toFixed(2)}`
-                                : "Sem dados"}
-                            </div>
-                            <p className="text-[10px] text-emerald-700 font-medium truncate mt-0.5 font-sans">
-                              {selectedStateData.minItem
-                                ? selectedStateData.minItem.chain.name
-                                : "Nenhum canal ativo"}
-                            </p>
-                          </div>
-                          <div className="p-2 bg-emerald-100/50 rounded-lg text-emerald-700 shrink-0">
-                            <TrendingDown className="w-4 h-4" />
-                          </div>
-                        </div>
-
-                        <div className="bg-red-50/30 border border-red-200/60 rounded-xl p-3 flex items-center justify-between">
-                          <div className="min-w-0">
-                            <span className="text-[9px] font-bold text-red-800 uppercase tracking-wider font-sans">
-                              Maior Preço ({selectedStateData.uf})
-                            </span>
-                            <div className="text-base font-black font-mono text-red-950 mt-0.5">
-                              {selectedStateData.maxItem
-                                ? `R$ ${selectedStateData.maxItem.latestRecord!.price.toFixed(2)}`
-                                : "Sem dados"}
-                            </div>
-                            <p className="text-[10px] text-red-700 font-medium truncate mt-0.5 font-sans">
-                              {selectedStateData.maxItem
-                                ? selectedStateData.maxItem.chain.name
-                                : "Nenhum canal ativo"}
-                            </p>
-                          </div>
-                          <div className="p-2 bg-red-100/50 rounded-lg text-red-700 shrink-0">
-                            <TrendingUp className="w-4 h-4" />
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  )}
-
-                  {/* Cards Display Section (Grouped by State or Filtered by State) */}
-                  <div className="space-y-6 pt-1" id="state-cards-wrapper">
-                    {detailStateFilter === "Todas" ? (
-                      /* When "Todas" is selected: Render distinct section for each state */
-                      statesWithRecords.length > 0 ? (
-                        stateBreakdowns
-                          .filter((st) => st.hasRecords)
-                          .map((st) => (
-                            <div
-                              key={st.stateName}
-                              className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 space-y-3"
-                              id={`state-group-${(st.uf || "").toLowerCase()}`}
-                            >
-                              {/* State Sub-header */}
-                              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 border-b border-gray-200/80 pb-2.5">
-                                <div className="flex items-center gap-2">
-                                  <span className="w-6 h-6 rounded-md bg-[#1A1A1A] text-white font-black text-[10px] flex items-center justify-center">
-                                    {st.uf}
-                                  </span>
-                                  <span className="text-xs font-black text-[#1A1A1A] font-sans">
-                                    {st.stateName}
-                                  </span>
-                                  <span className="text-[10px] font-bold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">
-                                    {st.pricedCount} de {st.totalChains} redes com preço
-                                  </span>
-                                </div>
-                                <div className="text-[11px] font-mono text-gray-600 flex items-center gap-3">
-                                  <span>
-                                    Média: <strong className="text-gray-900">R$ {st.avgPrice.toFixed(2)}</strong>
-                                  </span>
-                                  {st.minItem && (
-                                    <span className="text-emerald-700 font-medium">
-                                      Menor: R$ {st.minItem.latestRecord!.price.toFixed(2)}
-                                    </span>
-                                  )}
-                                  {st.maxItem && (
-                                    <span className="text-red-700 font-medium">
-                                      Maior: R$ {st.maxItem.latestRecord!.price.toFixed(2)}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* State Chain Cards Grid */}
-                              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                                {st.chainPricedList.map(({ chain, latestRecord }) =>
-                                  renderChainCard(chain, latestRecord, st.avgPrice, st.uf, st.stateName)
-                                )}
-                              </div>
-                            </div>
-                          ))
-                      ) : (
-                        <div
-                          className="py-8 text-center text-xs font-medium text-slate-400 bg-slate-50/50 rounded-xl border border-dashed border-slate-200 font-sans italic"
-                          id="no-current-prices-alert"
-                        >
-                          Nenhum preço coletado atualmente para este produto.
-                        </div>
-                      )
-                    ) : (
-                      /* When a specific state is selected */
-                      selectedStateData && (
-                        <div
-                          className="border border-gray-200 rounded-xl p-4 bg-gray-50/30 space-y-3"
-                          id={`state-single-group-${(selectedStateData.uf || "").toLowerCase()}`}
-                        >
-                          <div className="flex items-center justify-between border-b border-gray-200/80 pb-2.5">
-                            <div className="flex items-center gap-2">
-                              <span className="w-6 h-6 rounded-md bg-[#1A1A1A] text-white font-black text-[10px] flex items-center justify-center">
-                                {selectedStateData.uf}
-                              </span>
-                              <span className="text-xs font-black text-[#1A1A1A] font-sans">
-                                Redes em {selectedStateData.stateName}
-                              </span>
-                            </div>
-                            <span className="text-[10px] font-bold text-gray-500 bg-white border border-gray-200 px-2 py-0.5 rounded-full">
-                              {selectedStateData.pricedCount} com preços registrados
-                            </span>
-                          </div>
-
-                          {selectedStateData.chainPricedList.length > 0 ? (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                              {selectedStateData.chainPricedList.map(({ chain, latestRecord }) =>
-                                renderChainCard(
-                                  chain,
-                                  latestRecord,
-                                  selectedStateData.avgPrice,
-                                  selectedStateData.uf,
-                                  selectedStateData.stateName
-                                )
-                              )}
-                            </div>
-                          ) : (
-                            <div className="py-6 text-center text-xs text-gray-400 font-sans italic">
-                              Nenhuma rede associada a este estado.
-                            </div>
-                          )}
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Comparar com Concorrentes */}
-            {selectedProduct && (
-              <div
-                className="border border-[#E0E0E0] rounded-xl p-5 bg-white space-y-5"
-                id="detail-competitor-comparison-segment"
-              >
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-[#F5F5F5] pb-4">
-                  <div>
-                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest block font-sans">
-                      Posicionamento de Mercado
-                    </span>
-                    <h2 className="text-base font-black text-[#1A1A1A] font-sans mt-0.5">
-                      Comparar com Concorrentes
-                    </h2>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    {/* Filter Toggles Side-by-Side */}
-                    <div className="flex flex-wrap items-center gap-1.5 bg-gray-50 p-1 border border-gray-200 rounded-xl" id="comparer-toggles-box">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const activeCount = (compareByCategory ? 1 : 0) + (compareBySubcategory ? 1 : 0) + (compareByWeight ? 1 : 0);
-                          if (compareByCategory && activeCount === 1) {
-                            setCompareBySubcategory(true);
-                            setCompareByCategory(false);
-                          } else {
-                            setCompareByCategory(!compareByCategory);
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
-                          compareByCategory
-                            ? "bg-white text-gray-800 shadow-xs border border-gray-200"
-                            : "text-gray-400 hover:text-gray-600 border border-transparent"
-                        }`}
-                      >
-                        Categoria: {selectedProduct.category || "Indefinida"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const activeCount = (compareByCategory ? 1 : 0) + (compareBySubcategory ? 1 : 0) + (compareByWeight ? 1 : 0);
-                          if (compareBySubcategory && activeCount === 1) {
-                            setCompareByCategory(true);
-                            setCompareBySubcategory(false);
-                          } else {
-                            setCompareBySubcategory(!compareBySubcategory);
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
-                          compareBySubcategory
-                            ? "bg-white text-gray-800 shadow-xs border border-gray-200"
-                            : "text-gray-400 hover:text-gray-600 border border-transparent"
-                        }`}
-                      >
-                        Subcategoria: {selectedProduct.subcategory || "Indefinida"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const activeCount = (compareByCategory ? 1 : 0) + (compareBySubcategory ? 1 : 0) + (compareByWeight ? 1 : 0);
-                          if (compareByWeight && activeCount === 1) {
-                            setCompareByCategory(true);
-                            setCompareByWeight(false);
-                          } else {
-                            setCompareByWeight(!compareByWeight);
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition duration-150 cursor-pointer ${
-                          compareByWeight
-                            ? "bg-white text-gray-800 shadow-xs border border-gray-200"
-                            : "text-gray-400 hover:text-gray-600 border border-transparent"
-                        }`}
-                      >
-                        Gramatura: {selectedProduct.weight || "Indefinida"}
-                      </button>
-                    </div>
-
-                    {/* Selector de Redes para comparar */}
-                    <div className="flex items-center gap-1.5">
-                      <label
-                        htmlFor="competitor-compare-chain"
-                        className="text-xs text-gray-500 font-sans font-semibold shrink-0"
-                      >
-                        Rede:
-                      </label>
-                      <select
-                        id="competitor-compare-chain"
-                        value={competitorCompareChainId}
-                        onChange={(e) => setCompetitorCompareChainId(e.target.value)}
-                        className="bg-white border border-gray-250 hover:border-gray-350 rounded-xl px-3 py-1.5 text-xs text-gray-800 font-bold focus:outline-none focus:border-[#D40511] cursor-pointer shadow-xs transition duration-150"
-                      >
-                        <option value="Todas">Todas as Redes</option>
-                        {chains.map((chain) => (
-                          <option key={chain.id} value={chain.id}>
-                            {chain.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-
-                {(() => {
-                  // Find peer products matching comparison toggles
-                  const peers = products.filter((p) => {
-                    if (!p.active) return false;
-                    // Maintain selected product as reference anchor, but show only actual competitors for all other peers if selectedProduct is not a competitor
-                    if (p.id !== selectedProduct.id && !selectedProduct.isCompetitor && !p.isCompetitor) return false;
-                    
-                    if (compareByCategory && p.category !== selectedProduct.category) return false;
-                    if (compareBySubcategory && p.subcategory !== selectedProduct.subcategory) return false;
-                    if (compareByWeight && p.weight !== selectedProduct.weight) return false;
-                    return true;
-                  });
-
-                  if (peers.length === 0) {
-                    return (
-                      <div className="p-6 bg-gray-50 rounded-xl text-center text-gray-400 text-xs italic">
-                        Nenhum produto correspondente aos filtros selecionados para comparação.
-                      </div>
-                    );
-                  }
-
-                  // Retrieve latest price for peers across all retail chains and calculate averages & minimum prices
-                  const peerCalculatedData = peers
-                    .map((p) => {
-                      const productRecords = records.filter((r) => {
-                        if (r.productId !== p.id) return false;
-                        if (competitorCompareChainId !== "Todas" && r.chainId !== competitorCompareChainId) return false;
-                        return true;
-                      });
-                      
-                      const latestByChain: Record<string, PriceRecord> = {};
-                      productRecords.forEach((r) => {
-                        const current = latestByChain[r.chainId];
-                        if (!current) {
-                          latestByChain[r.chainId] = r;
-                        } else {
-                          const dateCompare = r.date.localeCompare(current.date);
-                          if (dateCompare > 0 || (dateCompare === 0 && r.id.localeCompare(current.id) > 0)) {
-                            latestByChain[r.chainId] = r;
-                          }
-                        }
-                      });
-                      
-                      const latestRecordsList = Object.values(latestByChain).filter((r) => r.price > 0);
-                      
-                      if (latestRecordsList.length === 0) {
-                        return null; // Exclude products with no registered price or zero price
-                      }
-                      
-                      const sum = latestRecordsList.reduce((acc, r) => acc + r.price, 0);
-                      const averagePrice = sum / latestRecordsList.length;
-                      
-                      let minRec = latestRecordsList[0];
-                      latestRecordsList.forEach((r) => {
-                        if (r.price < minRec.price) {
-                          minRec = r;
-                        }
-                      });
-                      const minPrice = minRec.price;
-                      const minPriceChainId = minRec.chainId;
-                      
-                      const minChain = chains.find((c) => c.id === minPriceChainId);
-                      const minChainName = minChain
-                        ? minChain.name
-                        : competitorCompareChainId !== "Todas"
-                          ? `${chains.find((c) => c.id === competitorCompareChainId)?.name || ""}`
-                          : "Preço de tabela";
-                      
-                      return {
-                        product: p,
-                        averagePrice,
-                        minPrice,
-                        minChainName,
-                        isSelf: p.id === selectedProduct.id,
-                      };
-                    })
-                    .filter(Boolean) as {
-                      product: Product;
-                      averagePrice: number;
-                      minPrice: number;
-                      minChainName: string;
-                      isSelf: boolean;
-                    }[];
-
-                  // Sort from lowest average price to highest
-                  const sortedPeers = [...peerCalculatedData].sort((a, b) => a.averagePrice - b.averagePrice);
-
-                  if (sortedPeers.length === 0) {
-                    return (
-                      <div className="p-6 bg-gray-50 rounded-xl text-center text-gray-400 text-xs italic">
-                        Nenhum produto concorrente com preço válido registrado para comparação.
-                      </div>
-                    );
-                  }
-
-                  const maxAveragePrice = Math.max(...sortedPeers.map(p => p.averagePrice), 10);
-
-                  return (
-                    <div className="space-y-4">
-                      <div className="text-xs text-gray-500 font-sans">
-                        Mostrando {sortedPeers.length} produtos correspondentes ordenados pelo menor {competitorCompareChainId !== "Todas" ? "preço atual" : "preço médio"} mais recente:
-                      </div>
-
-                      <div className="space-y-3" id="comparer-peers-list font-sans">
-                        {sortedPeers.map((item) => {
-                          const barWidth = Math.max(10, (item.averagePrice / maxAveragePrice) * 100);
-                          const isSelf = item.isSelf;
-                          
-                          return (
-                            <div
-                              key={item.product.id}
-                              onClick={() => {
-                                handleProductClick(item.product.id);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                              className={`p-3.5 rounded-xl border transition-all duration-150 cursor-pointer ${
-                                isSelf
-                                  ? "bg-amber-50/20 border-amber-300 shadow-xs ring-2 ring-amber-500/20"
-                                  : "bg-white border-gray-150 hover:border-gray-250 hover:bg-gray-100/45 hover:shadow-2xs"
-                              }`}
-                              id={`peer-row-${item.product.id}`}
-                            >
-                              <div className="flex items-start sm:items-center gap-3">
-                                {/* Product Image Thumbnail */}
-                                <div className="w-12 h-12 rounded-lg border border-gray-200 overflow-hidden shrink-0 bg-white flex items-center justify-center relative p-1">
-                                  {item.product.imageUrl ? (
-                                    <img
-                                      src={item.product.imageUrl}
-                                      alt={item.product.name}
-                                      className="w-full h-full object-contain"
-                                      referrerPolicy="no-referrer"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full bg-gray-50 flex flex-col items-center justify-center p-1">
-                                      <Package className="w-4 h-4 text-gray-300" />
-                                      <span className="text-[7px] text-gray-400 font-mono scale-90">Sem Foto</span>
-                                    </div>
-                                  )}
-                                </div>
-
-                                <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                                  <div className="min-w-0 flex-1">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span
-                                        className={`font-sans text-sm ${
-                                          isSelf ? "text-amber-950 font-black" : "text-gray-900 font-bold"
-                                        }`}
-                                      >
-                                        {item.product.name}
-                                      </span>
-                                      <span
-                                        className={`text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                                          isSelf
-                                            ? "bg-amber-100 text-amber-900 border border-amber-200"
-                                            : item.product.isCompetitor
-                                              ? "bg-blue-50 text-blue-800 border border-blue-100"
-                                              : "bg-emerald-50 text-emerald-800 border border-emerald-100"
-                                        }`}
-                                      >
-                                        {item.product.brand || "Dr. Oetker"}
-                                      </span>
-                                      {isSelf && (
-                                        <span className="bg-[#D40511] text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">
-                                          Este Produto
-                                        </span>
-                                      )}
-                                    </div>
-                                    
-                                    <div className="flex items-center gap-1.5 text-[11px] text-gray-500 font-sans mt-1 flex-wrap">
-  {competitorCompareChainId !== "Todas" ? (() => {
-    // Calcula variação vs média geral de todas as redes
-    const allRecordsForProduct = records.filter(r => r.productId === item.product.id && r.price > 0);
-    const latestByAllChains: Record<string, number> = {};
-    allRecordsForProduct.forEach(r => {
-      const existing = latestByAllChains[r.chainId];
-      if (!existing) latestByAllChains[r.chainId] = r.price;
-      else {
-        const cur = allRecordsForProduct.filter(x => x.chainId === r.chainId).sort((a,b) => b.date.localeCompare(a.date))[0];
-        if (cur) latestByAllChains[r.chainId] = cur.price;
-      }
-    });
-    const allPrices = Object.values(latestByAllChains);
-    if (allPrices.length < 2) return (
-      <span className="text-gray-400 italic">Sem dados suficientes para comparar</span>
-    );
-    const globalAvg = allPrices.reduce((a, b) => a + b, 0) / allPrices.length;
-    const diff = ((item.averagePrice - globalAvg) / globalAvg) * 100;
-    const isAbove = diff > 1;
-    const isBelow = diff < -1;
-    return (
-      <span className={`font-extrabold px-1.5 py-0.5 rounded text-[10px] ${
-        isAbove 
-          ? "text-red-700 bg-red-50" 
-          : isBelow 
-            ? "text-emerald-700 bg-emerald-50" 
-            : "text-gray-600 bg-gray-100"
-      }`}>
-        {isAbove ? `▲ ${diff.toFixed(1)}% acima da média geral` 
-          : isBelow ? `▼ ${Math.abs(diff).toFixed(1)}% abaixo da média geral` 
-          : "Na média geral"}
-      </span>
-    );
-  })() : (
-    <>
-      <span className="font-medium text-gray-400">Menor oferta em:</span>
-      <span className="font-extrabold text-gray-700">{item.minChainName}</span>
-      <span className="text-gray-200 font-normal">|</span>
-      <span className="font-medium text-gray-400">Menor preço:</span>
-      <span className="font-mono font-black text-emerald-650 bg-emerald-50 px-1 py-0.2 rounded">
-        R$ {item.minPrice.toFixed(2)}
-      </span>
-    </>
-  )}
-</div>
-                                  </div>
-                                  
-                                  <div className="text-left sm:text-right shrink-0 mt-1 sm:mt-0">
-                                    <span className="block text-[9px] uppercase font-bold text-gray-400 font-sans tracking-wider">
-                                      {competitorCompareChainId !== "Todas" ? "Preço Atual" : "Preço Médio"}
-                                    </span>
-                                    <span className={`text-sm font-black font-mono leading-none ${isSelf ? "text-amber-900 animate-none" : "text-gray-900"}`}>
-                                      R$ {item.averagePrice.toFixed(2)}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-                              
-                              {/* Sleek Horizontal Bar graph indicator */}
-                              <div className="mt-2.5 w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-150 relative">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-300 ${
-                                    isSelf
-                                      ? "bg-gradient-to-r from-amber-500 to-amber-350 shadow-xs"
-                                      : item.product.isCompetitor
-                                        ? "bg-gradient-to-r from-blue-500 to-blue-350"
-                                        : "bg-gradient-to-r from-emerald-500 to-emerald-350"
-                                  }`}
-                                  style={{ width: `${barWidth}%` }}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* Product Specific Audit Gallery Stream */}
-            <div
-              className="border border-[#E0E0E0] rounded-xl p-5"
-              id="detail-audits-grid-block"
-            >
-              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">
-                Histórico de Fotos de Auditoria (Gôndola)
-              </h3>
-
-              <div
-                className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4"
-                id="detail-audit-photos-grid"
-              >
-                {selectedProductHistory
-                  .filter((r) => r.imageUrl)
-                  .map((rec) => (
-                    <div
-                      key={rec.id}
-                      onClick={() => setSelectedRecord(rec)}
-                      className="group pointer-events-auto cursor-pointer border border-[#E0E0E0] rounded-lg overflow-hidden hover:border-[#D40511] transition-all bg-[#F5F5F5]"
-                    >
-                      <div className="aspect-video w-full overflow-hidden bg-gray-200 relative">
-                        <img
-                          src={rec.imageUrl}
-                          alt=""
-                          referrerPolicy="no-referrer"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform"
-                        />
-                        <div className="absolute inset-0 bg-[#D40511]/10 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                      </div>
-                      <div className="p-2 text-[10px]">
-                        <p className="font-bold text-[#1A1A1A] truncate">
-                          {chains.find((c) => c.id === rec.chainId)?.name}
-                        </p>
-                        <div className="flex justify-between text-gray-400 mt-1 font-mono">
-                          <span>R$ {rec.price.toFixed(2)}</span>
-                          <span>{formatDateBR(rec.date).substring(0, 5)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                {selectedProductHistory.filter((r) => r.imageUrl).length ===
-                  0 && (
-                  <p className="text-xs text-gray-400 italic col-span-full">
-                    Nenhuma imagem registrada para este produto.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+      {activeView === "detail" && selectedProduct && (
+        <ProductDetailPage
+          product={selectedProduct}
+          allProducts={products}
+          chains={chains}
+          records={records}
+          currentUser={currentUser}
+          onBack={() => {
+            setActiveView("list");
+            setSelectedProductId(null);
+          }}
+          onRegisterPrice={() => {
+            setShowRegisterPriceModal(true);
+          }}
+          onEditProduct={(prod) => {
+            setSelectedProductId(prod.id);
+            setActiveView("edit");
+            setNewProdName(prod.name);
+            setNewProdCategory(prod.category);
+            setNewProdSubcategory(prod.subcategory || "Regular");
+            setNewProdWeight(prod.weight || "100g");
+            setNewProdImageUrl(prod.imageUrl);
+            setNewProdBasePrice(prod.basePrice.toString());
+            setNewProdIsCompetitor(prod.isCompetitor || false);
+            setNewProdBrand(prod.brand || "Dr. Oetker");
+            setNewProdInternalCode(prod.internalCode || "");
+          }}
+          onOpenEditPriceModal={(chain, record, stateName) => {
+            handleOpenEditPriceModal(chain, record, stateName);
+          }}
+          onSelectRecord={(record) => {
+            setSelectedRecord(record);
+          }}
+          onSelectPeerProduct={(peerId) => {
+            handleProductClick(peerId);
+          }}
+        />
       )}
 
       {(activeView === "create" || activeView === "edit") && (

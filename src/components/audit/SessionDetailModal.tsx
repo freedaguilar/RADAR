@@ -3,6 +3,7 @@ import { X, Store, User, Clock, Calendar, AlertTriangle, CheckCircle2, PackageX,
 import { ResearchSession, formatDateBR } from '../../lib/researchSessions';
 import { Product, PriceRecord, Chain } from '../../types';
 import { stripSessionMetaPrefix, getCleanObserverNotes } from '../../lib/textUtils';
+import { EditAuditRecordModal } from './EditAuditRecordModal';
 
 interface SessionDetailModalProps {
   session: ResearchSession;
@@ -37,7 +38,11 @@ export function SessionDetailModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [editPriceValue, setEditPriceValue] = useState<string>('');
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [productSearchQuery, setProductSearchQuery] = useState<string>('');
+  const [isSearchingProduct, setIsSearchingProduct] = useState(false);
   const [recordToDelete, setRecordToDelete] = useState<string | null>(null);
+  const [recordToEditInModal, setRecordToEditInModal] = useState<PriceRecord | null>(null);
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
   const [showDeleteAllModal, setShowDeleteAllModal] = useState(false);
   const [showDeleteSelectedModal, setShowDeleteSelectedModal] = useState(false);
@@ -88,6 +93,23 @@ export function SessionDetailModal({
       );
     });
   }, [outOfStockItems, searchTerm]);
+
+  // Filtered products list for editing a record
+  const editFilteredProducts = useMemo(() => {
+    if (!productSearchQuery.trim()) {
+      return products.slice(0, 20);
+    }
+    const q = productSearchQuery.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return products
+      .filter((p) => {
+        const name = (p.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const brand = (p.brand || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const cat = (p.category || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+        const code = (p.internalCode || '').toLowerCase();
+        return name.includes(q) || brand.includes(q) || cat.includes(q) || code.includes(q);
+      })
+      .slice(0, 25);
+  }, [products, productSearchQuery]);
 
   const toggleSelectRecord = (id: string) => {
     setSelectedRecordIds((prev) => {
@@ -146,21 +168,28 @@ export function SessionDetailModal({
     onClose();
   };
 
-  const handleStartEditPrice = (record: PriceRecord) => {
+  const handleStartEditRecord = (record: PriceRecord) => {
     setEditingRecordId(record.id);
+    setEditingProductId(record.productId);
     setEditPriceValue(record.price.toFixed(2).replace('.', ','));
+    setProductSearchQuery('');
+    setIsSearchingProduct(false);
   };
 
-  const handleSaveEditPrice = (record: PriceRecord) => {
+  const handleSaveEditRecord = (record: PriceRecord) => {
     if (!onUpdateRecord) return;
     const numPrice = parseFloat(editPriceValue.replace(',', '.'));
     if (isNaN(numPrice) || numPrice < 0) return;
+    const finalProductId = editingProductId || record.productId;
 
     onUpdateRecord({
       ...record,
+      productId: finalProductId,
       price: numPrice,
     });
     setEditingRecordId(null);
+    setEditingProductId(null);
+    setIsSearchingProduct(false);
   };
 
   return (
@@ -482,74 +511,207 @@ export function SessionDetailModal({
 
                         {/* Product details and price */}
                         <div className="flex-1 min-w-0 flex flex-col justify-between">
-                          <div>
-                            <p className="text-xs font-black text-slate-900 leading-snug line-clamp-2">
-                              {prod?.name || 'Produto não identificado'}
-                            </p>
-                            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1">
-                              {prod?.brand && <span className="font-semibold text-slate-600">{prod.brand}</span>}
-                              {prod?.weight && <span>• {prod.weight}</span>}
-                              {prod?.category && (
-                                <span className="text-[10px] bg-slate-200/80 text-slate-600 px-1.5 py-0.2 rounded-sm">
-                                  {prod.category}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="mt-2 pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2">
-                            {isEditing ? (
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-bold text-slate-500">R$</span>
-                                <input
-                                  type="text"
-                                  value={editPriceValue}
-                                  onChange={(e) => setEditPriceValue(e.target.value)}
-                                  className="w-20 px-1.5 py-0.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
-                                  autoFocus
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => handleSaveEditPrice(rec)}
-                                  className="p-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer"
-                                  title="Salvar preço"
-                                >
-                                  <Check className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingRecordId(null)}
-                                  className="p-1 rounded bg-slate-200 text-slate-600 hover:bg-slate-300 cursor-pointer"
-                                  title="Cancelar"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="text-sm font-black text-slate-950 font-mono">
-                                  R$ {rec.price.toFixed(2).replace('.', ',')}
-                                </span>
-                                {prod?.basePrice && prod.basePrice > 0 && (
-                                  <span className="text-[10px] text-slate-400 font-mono line-through">
-                                    R$ {prod.basePrice.toFixed(2).replace('.', ',')}
+                          {isEditing ? (
+                            <div className="space-y-2.5">
+                              {/* Product selection block */}
+                              <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                                <div className="flex items-center justify-between gap-2 mb-1.5">
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                    Produto Selecionado
                                   </span>
+                                  {!isSearchingProduct && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setIsSearchingProduct(true);
+                                        setProductSearchQuery('');
+                                      }}
+                                      className="text-[10px] font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1"
+                                    >
+                                      <Search className="w-3 h-3" />
+                                      Alterar Produto
+                                    </button>
+                                  )}
+                                </div>
+
+                                {isSearchingProduct ? (
+                                  <div className="space-y-1.5">
+                                    <div className="relative">
+                                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                                      <input
+                                        type="text"
+                                        placeholder="Buscar por nome, marca ou categoria..."
+                                        value={productSearchQuery}
+                                        onChange={(e) => setProductSearchQuery(e.target.value)}
+                                        className="w-full pl-8 pr-7 py-1 text-xs bg-white border border-slate-300 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-emerald-500 font-sans"
+                                        autoFocus
+                                      />
+                                      {productSearchQuery && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setProductSearchQuery('')}
+                                          className="absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    <div className="max-h-40 overflow-y-auto space-y-1 bg-white border border-slate-200 rounded-lg p-1 shadow-inner">
+                                      {editFilteredProducts.length > 0 ? (
+                                        editFilteredProducts.map((p) => {
+                                          const isSelectedThis = p.id === (editingProductId || rec.productId);
+                                          return (
+                                            <button
+                                              key={p.id}
+                                              type="button"
+                                              onClick={() => {
+                                                setEditingProductId(p.id);
+                                                setIsSearchingProduct(false);
+                                              }}
+                                              className={`w-full text-left p-1.5 rounded-md text-xs flex items-center gap-2 transition cursor-pointer ${
+                                                isSelectedThis
+                                                  ? 'bg-emerald-50 border border-emerald-300 text-emerald-950 font-bold'
+                                                  : 'hover:bg-slate-50 text-slate-700'
+                                              }`}
+                                            >
+                                              {p.imageUrl ? (
+                                                <img src={p.imageUrl} alt="" className="w-6 h-6 rounded object-contain bg-white border border-slate-100 shrink-0" referrerPolicy="no-referrer" />
+                                              ) : (
+                                                <div className="w-6 h-6 rounded bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                                                  <ImageIcon className="w-3 h-3 text-slate-400" />
+                                                </div>
+                                              )}
+                                              <div className="min-w-0 flex-1">
+                                                <div className="truncate font-semibold">{p.name}</div>
+                                                <div className="text-[10px] text-slate-400 truncate">
+                                                  {p.brand || 'Dr. Oetker'} {p.weight ? `• ${p.weight}` : ''}
+                                                </div>
+                                              </div>
+                                              {isSelectedThis && (
+                                                <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                              )}
+                                            </button>
+                                          );
+                                        })
+                                      ) : (
+                                        <p className="text-[10px] text-slate-400 p-2 text-center italic">
+                                          Nenhum produto encontrado com "{productSearchQuery}".
+                                        </p>
+                                      )}
+                                    </div>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => setIsSearchingProduct(false)}
+                                      className="text-[10px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
+                                    >
+                                      Fechar busca e manter selecionado
+                                    </button>
+                                  </div>
+                                ) : (
+                                  (() => {
+                                    const selectedProd = productMap.get(editingProductId || rec.productId);
+                                    return (
+                                      <div className="flex items-center gap-2 bg-white p-1.5 rounded-lg border border-slate-200">
+                                        {selectedProd?.imageUrl ? (
+                                          <img src={selectedProd.imageUrl} alt="" className="w-7 h-7 rounded object-contain bg-white border border-slate-100 shrink-0" referrerPolicy="no-referrer" />
+                                        ) : (
+                                          <div className="w-7 h-7 rounded bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+                                            <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
+                                          </div>
+                                        )}
+                                        <div className="min-w-0 flex-1">
+                                          <p className="text-xs font-bold text-slate-900 leading-tight truncate">
+                                            {selectedProd?.name || 'Produto não identificado'}
+                                          </p>
+                                          <p className="text-[10px] text-slate-500 truncate">
+                                            {selectedProd?.brand || 'Dr. Oetker'} {selectedProd?.weight ? `• ${selectedProd.weight}` : ''}
+                                          </p>
+                                        </div>
+                                      </div>
+                                    );
+                                  })()
                                 )}
                               </div>
-                            )}
 
-                            {/* Actions */}
-                            <div className="flex items-center gap-1">
-                              {!isEditing && onUpdateRecord && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleStartEditPrice(rec)}
-                                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-white transition cursor-pointer"
-                                  title="Editar Preço"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
+                              {/* Price input + Actions */}
+                              <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-200">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[11px] font-bold text-slate-500">Preço: R$</span>
+                                  <input
+                                    type="text"
+                                    value={editPriceValue}
+                                    onChange={(e) => setEditPriceValue(e.target.value)}
+                                    className="w-20 px-1.5 py-0.5 text-xs font-mono font-bold bg-white border border-slate-300 rounded focus:outline-hidden focus:ring-1 focus:ring-emerald-500"
+                                    autoFocus
+                                  />
+                                </div>
+                                <div className="flex items-center gap-1.5 ml-auto">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveEditRecord(rec)}
+                                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+                                    title="Salvar alterações de produto e preço"
+                                  >
+                                    <Check className="w-3.5 h-3.5" /> Salvar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingRecordId(null);
+                                      setEditingProductId(null);
+                                      setIsSearchingProduct(false);
+                                    }}
+                                    className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded text-xs font-medium cursor-pointer"
+                                  >
+                                    Cancelar
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div>
+                                <p className="text-xs font-black text-slate-900 leading-snug line-clamp-2">
+                                  {prod?.name || 'Produto não identificado'}
+                                </p>
+                                <div className="flex items-center gap-1.5 text-[11px] text-slate-500 mt-1">
+                                  {prod?.brand && <span className="font-semibold text-slate-600">{prod.brand}</span>}
+                                  {prod?.weight && <span>• {prod.weight}</span>}
+                                  {prod?.category && (
+                                    <span className="text-[10px] bg-slate-200/80 text-slate-600 px-1.5 py-0.2 rounded-sm">
+                                      {prod.category}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="mt-2 pt-2 border-t border-slate-200/80 flex items-center justify-between gap-2">
+                                <div className="flex items-baseline gap-1.5">
+                                  <span className="text-sm font-black text-slate-950 font-mono">
+                                    R$ {rec.price.toFixed(2).replace('.', ',')}
+                                  </span>
+                                  {prod?.basePrice && prod.basePrice > 0 && (
+                                    <span className="text-[10px] text-slate-400 font-mono line-through">
+                                      R$ {prod.basePrice.toFixed(2).replace('.', ',')}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Actions */}
+                                <div className="flex items-center gap-1.5">
+                                  {!isEditing && onUpdateRecord && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setRecordToEditInModal(rec)}
+                                      className="px-2 py-1 rounded-lg text-slate-600 hover:text-emerald-700 bg-white hover:bg-emerald-50 border border-slate-200 hover:border-emerald-300 transition cursor-pointer flex items-center gap-1 shadow-2xs font-sans text-[11px] font-bold"
+                                      title="Alterar produto selecionado ou preço deste registro"
+                                    >
+                                      <Edit3 className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>Alterar Produto / Preço</span>
+                                    </button>
+                                  )}
 
                               {onDeleteRecord && (
                                 recordToDelete === rec.id ? (
@@ -593,6 +755,8 @@ export function SessionDetailModal({
                               )}
                             </div>
                           </div>
+                        </>
+                      )}
 
                           {cleanNotes && (
                             <p className="text-[10px] text-slate-500 italic mt-1 truncate">
@@ -748,6 +912,21 @@ export function SessionDetailModal({
               </div>
             </div>
           </div>
+        )}
+
+        {/* Dedicated Edit Audit Record Modal */}
+        {recordToEditInModal && (
+          <EditAuditRecordModal
+            isOpen={Boolean(recordToEditInModal)}
+            record={recordToEditInModal}
+            products={products}
+            chains={chains}
+            onClose={() => setRecordToEditInModal(null)}
+            onSave={(updatedRecord) => {
+              onUpdateRecord?.(updatedRecord);
+              setRecordToEditInModal(null);
+            }}
+          />
         )}
       </div>
     </div>
