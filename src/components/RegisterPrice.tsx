@@ -590,6 +590,17 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   }, [queueModalTab, outOfStockProductIds.length]);
 
   const [capturedProductIds, setCapturedProductIds] = useState<string[]>([]);
+
+  // Conjunto de IDs de produtos já registrados na sessão atual (capturados ou vinculados no lote/modo livre)
+  const registeredProductIdsSet = useMemo(() => {
+    const set = new Set<string>();
+    capturedProductIds.forEach(id => set.add(id));
+    batchItems.forEach(item => {
+      if (item.selectedProductId) set.add(item.selectedProductId);
+    });
+    return set;
+  }, [capturedProductIds, batchItems]);
+
   const [useGuidedMode, setUseGuidedMode] = useState<boolean>(true);
   const [keepCurrentPrice, setKeepCurrentPrice] = useState<boolean>(false);
   const [showFreeModeNoticeModal, setShowFreeModeNoticeModal] = useState<boolean>(false);
@@ -637,15 +648,15 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   // Inicializa a fila na primeira carga se estiver vazia
   useEffect(() => {
     if (guidedQueue.length === 0 && capturedProductIds.length === 0 && outOfStockProductIds.length === 0 && frequentProductsList.length > 0) {
-      setGuidedQueue(frequentProductsList);
+      setGuidedQueue(frequentProductsList.filter(p => !registeredProductIdsSet.has(p.id)));
     }
-  }, [frequentProductsList]);
+  }, [frequentProductsList, registeredProductIdsSet]);
 
-  // Active item in guided camera queue
+  // Active item in guided camera queue: nunca exibe produto já registrado nesta sessão
   const currentGuidedProduct = useMemo(() => {
     if (!useGuidedMode || guidedQueue.length === 0) return null;
-    return guidedQueue[0];
-  }, [useGuidedMode, guidedQueue]);
+    return guidedQueue.find(p => !registeredProductIdsSet.has(p.id) && !capturedProductIds.includes(p.id)) || null;
+  }, [useGuidedMode, guidedQueue, registeredProductIdsSet, capturedProductIds]);
 
   // Reseta opção de manter preço quando o produto ativo mudar
   useEffect(() => {
@@ -719,11 +730,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     setImmediatePrice('0,00');
     setModalProductSearchText('');
 
-    // Se estiver em modo guiado com produto alvo, avança imediatamente para o próximo da fila
-    if (useGuidedMode) {
-      setCapturedProductIds(prev => [...prev, product.id]);
-      setGuidedQueue(prev => prev.filter(p => p.id !== product.id));
-    }
+    // Sempre registra o produto vinculado nos capturados e o remove da fila guiada,
+    // garantindo que não reapareça na fila ao alternar entre Modo Livre e Modo Guiado
+    setCapturedProductIds(prev => prev.includes(product.id) ? prev : [...prev, product.id]);
+    setGuidedQueue(prev => prev.filter(p => p.id !== product.id));
+    setOutOfStockProductIds(prev => prev.filter(id => id !== product.id));
 
     // Cria o item no lote com o valor digitado e produto vinculado
     const newItem: BatchItem = {
@@ -970,16 +981,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
   const auditQueueProducts = useMemo(() => {
     return frequentProductsList.length > 0 ? frequentProductsList : products;
   }, [frequentProductsList, products]);
-
-  // Conjunto de IDs de produtos já registrados na sessão atual (capturados ou incluídos no lote)
-  const registeredProductIdsSet = useMemo(() => {
-    const set = new Set<string>();
-    capturedProductIds.forEach(id => set.add(id));
-    batchItems.forEach(item => {
-      if (item.selectedProductId) set.add(item.selectedProductId);
-    });
-    return set;
-  }, [capturedProductIds, batchItems]);
 
   // Quantidade de produtos da fila que já foram registrados
   const registeredFromQueueCount = useMemo(() => {
@@ -1985,6 +1986,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       ...prev,
       [itemId]: false
     }));
+    // Remove o produto selecionado da fila guiada e adiciona aos capturados da sessão
+    setCapturedProductIds(prev => prev.includes(selectedProduct.id) ? prev : [...prev, selectedProduct.id]);
+    setGuidedQueue(prev => prev.filter(p => p.id !== selectedProduct.id));
+    setOutOfStockProductIds(prev => prev.filter(id => id !== selectedProduct.id));
   };
 
   // Camera integration state
@@ -2226,7 +2231,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
     // Initialize guided queue with frequent products list if starting fresh
     if (guidedQueue.length === 0 && capturedProductIds.length === 0) {
-      setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id)));
+      setGuidedQueue(frequentProductsList.filter(p => !outOfStockProductIds.includes(p.id) && !registeredProductIdsSet.has(p.id)));
     }
     setUseGuidedMode(true);
 
@@ -3099,7 +3104,12 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         ) : (
                           <button
                             type="button"
-                            onClick={() => setUseGuidedMode(true)}
+                            onClick={() => {
+                              // Ao voltar para o Modo Guiado, garante que nenhum produto já registrado na pesquisa atual
+                              // (seja pelo modo livre ou no lote) permaneça na fila de auditoria
+                              setGuidedQueue(prev => prev.filter(p => !registeredProductIdsSet.has(p.id) && !capturedProductIds.includes(p.id)));
+                              setUseGuidedMode(true);
+                            }}
                             className="text-[11px] text-white/95 hover:text-white bg-red-600/80 hover:bg-red-600 border border-red-400/50 px-2.5 py-1 rounded-full font-bold transition cursor-pointer backdrop-blur-sm shadow-xs"
                           >
                             Modo Guiado
@@ -3303,25 +3313,50 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       if (!hasLastPrice && !(currentGuidedProduct.basePrice > 0)) return null;
 
                       return (
-                        <div className="flex items-center justify-center gap-2 sm:gap-3 w-full max-w-md px-1 mb-1.5 animate-fade-in select-none">
-                          {/* Último Preço registrado nesta rede */}
+                        <div className="flex items-center justify-center gap-2 sm:gap-3 w-full max-w-md px-1 mb-2 animate-fade-in select-none">
+                          {/* Card em Alto Destaque do Último Preço registrado nesta rede */}
                           {hasLastPrice ? (
-                            <div className="flex items-center gap-1.5 bg-black/85 backdrop-blur-md border border-amber-500/60 px-3 py-1.5 rounded-xl shadow-lg">
-                              <span className="text-[10px] sm:text-[11px] font-mono text-amber-300/80 font-bold uppercase tracking-wider">
-                                Último ({recUf}):
-                              </span>
-                              <span className="text-xs sm:text-sm font-mono font-black text-amber-300">
-                                R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                              </span>
+                            <div className={`flex items-center gap-2.5 sm:gap-3 bg-gradient-to-r from-amber-950/90 via-black/95 to-amber-950/90 backdrop-blur-xl border-2 ${
+                              keepCurrentPrice
+                                ? 'border-amber-300 ring-2 ring-amber-400/60 shadow-xl shadow-amber-900/60'
+                                : 'border-amber-400/80 hover:border-amber-400 ring-1 ring-amber-400/30'
+                            } px-3 sm:px-4 py-1.5 sm:py-2 rounded-2xl shadow-xl transition-all`}>
+                              <div className="w-8 h-8 rounded-xl bg-amber-500/25 border border-amber-400/70 flex items-center justify-center shrink-0 text-amber-300 shadow-inner">
+                                <Tag className="w-4 h-4 animate-pulse" />
+                              </div>
+                              <div className="flex flex-col text-left leading-tight">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] sm:text-[11px] font-mono text-amber-300 font-black uppercase tracking-wider">
+                                    Último Preço
+                                  </span>
+                                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-amber-400/30 text-amber-200 border border-amber-400/60">
+                                    {recUf}
+                                  </span>
+                                </div>
+                                <div className="flex items-baseline gap-1 mt-0.5">
+                                  <span className="text-xs sm:text-sm font-black text-amber-400/80 font-mono">R$</span>
+                                  <span className="text-xl sm:text-2xl font-black font-mono text-amber-300 tracking-tight drop-shadow-[0_2px_10px_rgba(251,191,36,0.45)]">
+                                    {lastRec.price.toFixed(2).replace('.', ',')}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           ) : currentGuidedProduct.basePrice > 0 ? (
-                            <div className="flex items-center gap-1.5 bg-black/85 backdrop-blur-md border border-emerald-500/60 px-3 py-1.5 rounded-xl shadow-lg">
-                              <span className="text-[10px] sm:text-[11px] font-mono text-emerald-400/80 font-bold uppercase tracking-wider">
-                                Ref:
-                              </span>
-                              <span className="text-xs sm:text-sm font-mono font-black text-emerald-400">
-                                R$ {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
-                              </span>
+                            <div className="flex items-center gap-2.5 sm:gap-3 bg-gradient-to-r from-emerald-950/90 via-black/95 to-emerald-950/90 backdrop-blur-xl border-2 border-emerald-400/80 ring-1 ring-emerald-400/30 px-3 sm:px-4 py-1.5 sm:py-2 rounded-2xl shadow-xl transition-all">
+                              <div className="w-8 h-8 rounded-xl bg-emerald-500/25 border border-emerald-400/70 flex items-center justify-center shrink-0 text-emerald-300 shadow-inner">
+                                <Sparkles className="w-4 h-4" />
+                              </div>
+                              <div className="flex flex-col text-left leading-tight">
+                                <span className="text-[10px] sm:text-[11px] font-mono text-emerald-300 font-black uppercase tracking-wider">
+                                  Preço Referência
+                                </span>
+                                <div className="flex items-baseline gap-1 mt-0.5">
+                                  <span className="text-xs sm:text-sm font-black text-emerald-400/80 font-mono">R$</span>
+                                  <span className="text-xl sm:text-2xl font-black font-mono text-emerald-300 tracking-tight drop-shadow-[0_2px_10px_rgba(52,211,153,0.4)]">
+                                    {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
                           ) : null}
 
@@ -3329,10 +3364,10 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                           {hasLastPrice && (
                             <label
                               htmlFor="camera-keep-price-toggle"
-                              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border text-xs sm:text-[13px] font-black transition-all cursor-pointer select-none shadow-lg active:scale-95 ${
+                              className={`flex items-center gap-2.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 font-black transition-all cursor-pointer select-none shadow-xl active:scale-95 ${
                                 keepCurrentPrice
-                                  ? 'bg-emerald-500/90 border-emerald-400 text-white ring-2 ring-emerald-400/60 shadow-emerald-900/40'
-                                  : 'bg-black/80 hover:bg-black/90 border-white/30 text-white/90 backdrop-blur-md'
+                                  ? 'bg-emerald-600 border-emerald-300 text-white ring-2 ring-emerald-400/60 shadow-emerald-900/60 scale-[1.02]'
+                                  : 'bg-black/85 hover:bg-black/95 border-white/30 text-white/90 backdrop-blur-xl'
                               }`}
                             >
                               <input
@@ -3342,9 +3377,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 onChange={(e) => setKeepCurrentPrice(e.target.checked)}
                                 className="w-4 h-4 rounded text-emerald-500 focus:ring-0 border-white/40 bg-black/40 cursor-pointer accent-emerald-500"
                               />
-                              <span className="whitespace-nowrap tracking-wide">
-                                Manter preço
-                              </span>
+                              <div className="flex flex-col text-left leading-none">
+                                <span className="text-xs sm:text-[13px] tracking-wide font-black whitespace-nowrap">
+                                  Manter preço
+                                </span>
+                                <span className="text-[8.5px] sm:text-[9.5px] font-medium opacity-80 mt-1 whitespace-nowrap">
+                                  {keepCurrentPrice ? 'Preço fixado ✓' : 'Gravar sem redigitar'}
+                                </span>
+                              </div>
                             </label>
                           )}
                         </div>
@@ -4615,10 +4655,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                               <button
                                 type="button"
                                 onClick={() => setImmediatePrice(lastRec.price.toFixed(2).replace('.', ','))}
-                                className="text-[10px] font-mono font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200 transition cursor-pointer flex items-center gap-1"
+                                className="text-xs font-mono font-black bg-amber-100 hover:bg-amber-200 text-amber-950 px-2.5 py-1 rounded-lg border border-amber-300 transition cursor-pointer flex items-center gap-1.5 shadow-xs active:scale-95"
                                 title="Preencher com o último preço registrado nesta rede"
                               >
-                                <span className="text-amber-600">Usar Último:</span>
+                                <Tag className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                <span className="text-amber-800 font-bold uppercase text-[10px]">Usar Último:</span>
                                 <strong>R$ {lastRec.price.toFixed(2).replace('.', ',')}</strong>
                               </button>
                             );
