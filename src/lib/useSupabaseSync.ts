@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
-import { Product, Chain, PriceRecord, User } from '../types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign } from '../types';
 
 export function useSupabaseSync() {
   const [isConfigured, setIsConfigured] = useState(
@@ -10,6 +10,13 @@ export function useSupabaseSync() {
   async function fetchAll() {
     if (!isConfigured) return null;
     
+    let campaignsRes: any = { data: null, error: null };
+    try {
+      campaignsRes = await supabase.from('guided_campaigns').select('*');
+    } catch {
+      campaignsRes = { data: null, error: null };
+    }
+
     const [productsRes, chainsRes, recordsRes, usersRes] = await Promise.all([
       supabase.from('products').select('*'),
       supabase.from('chains').select('*'),
@@ -88,7 +95,34 @@ export function useSupabaseSync() {
       password: u.password,
     })) as User[];
 
-    return { products, chains, records, users };
+    const guidedCampaigns = (campaignsRes?.data || []).map((camp: any) => {
+      let productIds: string[] = [];
+      if (Array.isArray(camp.product_ids)) {
+        productIds = camp.product_ids;
+      } else if (typeof camp.product_ids === 'string') {
+        try {
+          const parsed = JSON.parse(camp.product_ids);
+          if (Array.isArray(parsed)) productIds = parsed;
+        } catch {
+          productIds = camp.product_ids.split(',').map((s: string) => s.trim()).filter(Boolean);
+        }
+      }
+
+      return {
+        id: camp.id,
+        title: camp.title,
+        chainId: camp.chain_id,
+        state: camp.state || 'Minas Gerais',
+        productIds,
+        active: Boolean(camp.active),
+        notes: camp.notes || undefined,
+        createdBy: camp.created_by || undefined,
+        createdAt: camp.created_at || new Date().toISOString(),
+        updatedAt: camp.updated_at || undefined,
+      } as GuidedCampaign;
+    });
+
+    return { products, chains, records, users, guidedCampaigns };
   }
 
   return { isConfigured, fetchAll };

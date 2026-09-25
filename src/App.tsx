@@ -49,6 +49,10 @@ export default function App() {
               chains: data.chains,
               records: data.records,
               users: data.users,
+              guidedCampaigns:
+                data.guidedCampaigns && data.guidedCampaigns.length > 0
+                  ? data.guidedCampaigns
+                  : prev.guidedCampaigns || [],
             }));
           } else if (data && data.users.length === 0) {
             // Seed database with mock data if it's completely empty
@@ -543,37 +547,126 @@ export default function App() {
     [isConfigured],
   );
 
-  const handleAddGuidedCampaign = useCallback((newCampaign: GuidedCampaign) => {
-    setState((prev) => ({
-      ...prev,
-      guidedCampaigns: [newCampaign, ...(prev.guidedCampaigns || [])],
-    }));
-  }, []);
+  const handleAddGuidedCampaign = useCallback(
+    async (newCampaign: GuidedCampaign) => {
+      setState((prev) => ({
+        ...prev,
+        guidedCampaigns: [newCampaign, ...(prev.guidedCampaigns || [])],
+      }));
 
-  const handleUpdateGuidedCampaign = useCallback((updatedCampaign: GuidedCampaign) => {
-    setState((prev) => ({
-      ...prev,
-      guidedCampaigns: (prev.guidedCampaigns || []).map((c) =>
-        c.id === updatedCampaign.id ? updatedCampaign : c
-      ),
-    }));
-  }, []);
+      if (isConfigured) {
+        try {
+          const { error } = await supabase.from("guided_campaigns").insert({
+            id: newCampaign.id,
+            title: newCampaign.title,
+            chain_id: newCampaign.chainId,
+            state: newCampaign.state,
+            product_ids: newCampaign.productIds,
+            active: newCampaign.active,
+            notes: newCampaign.notes || null,
+            created_by: newCampaign.createdBy || null,
+            created_at: newCampaign.createdAt,
+            updated_at: newCampaign.updatedAt || new Date().toISOString(),
+          });
+          if (error) {
+            console.warn("Aviso ao salvar pesquisa guiada no Supabase:", error.message);
+          }
+        } catch (err) {
+          console.warn("Exceção ao inserir pesquisa guiada no Supabase:", err);
+        }
+      }
+    },
+    [isConfigured],
+  );
 
-  const handleDeleteGuidedCampaign = useCallback((campaignId: string) => {
-    setState((prev) => ({
-      ...prev,
-      guidedCampaigns: (prev.guidedCampaigns || []).filter((c) => c.id !== campaignId),
-    }));
-  }, []);
+  const handleUpdateGuidedCampaign = useCallback(
+    async (updatedCampaign: GuidedCampaign) => {
+      setState((prev) => ({
+        ...prev,
+        guidedCampaigns: (prev.guidedCampaigns || []).map((c) =>
+          c.id === updatedCampaign.id ? updatedCampaign : c
+        ),
+      }));
 
-  const handleToggleGuidedCampaign = useCallback((campaignId: string, active: boolean) => {
-    setState((prev) => ({
-      ...prev,
-      guidedCampaigns: (prev.guidedCampaigns || []).map((c) =>
-        c.id === campaignId ? { ...c, active, updatedAt: new Date().toISOString() } : c
-      ),
-    }));
-  }, []);
+      if (isConfigured) {
+        try {
+          const { error } = await supabase
+            .from("guided_campaigns")
+            .update({
+              title: updatedCampaign.title,
+              chain_id: updatedCampaign.chainId,
+              state: updatedCampaign.state,
+              product_ids: updatedCampaign.productIds,
+              active: updatedCampaign.active,
+              notes: updatedCampaign.notes || null,
+              created_by: updatedCampaign.createdBy || null,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", updatedCampaign.id);
+          if (error) {
+            console.warn("Aviso ao atualizar pesquisa guiada no Supabase:", error.message);
+          }
+        } catch (err) {
+          console.warn("Exceção ao atualizar pesquisa guiada no Supabase:", err);
+        }
+      }
+    },
+    [isConfigured],
+  );
+
+  const handleDeleteGuidedCampaign = useCallback(
+    async (campaignId: string) => {
+      setState((prev) => ({
+        ...prev,
+        guidedCampaigns: (prev.guidedCampaigns || []).filter((c) => c.id !== campaignId),
+      }));
+
+      if (isConfigured) {
+        try {
+          const { error } = await supabase
+            .from("guided_campaigns")
+            .delete()
+            .eq("id", campaignId);
+          if (error) {
+            console.warn("Aviso ao excluir pesquisa guiada no Supabase:", error.message);
+          }
+        } catch (err) {
+          console.warn("Exceção ao excluir pesquisa guiada no Supabase:", err);
+        }
+      }
+    },
+    [isConfigured],
+  );
+
+  const handleToggleGuidedCampaign = useCallback(
+    async (campaignId: string, active: boolean) => {
+      const updatedAt = new Date().toISOString();
+      setState((prev) => ({
+        ...prev,
+        guidedCampaigns: (prev.guidedCampaigns || []).map((c) =>
+          c.id === campaignId ? { ...c, active, updatedAt } : c
+        ),
+      }));
+
+      if (isConfigured) {
+        try {
+          const { error } = await supabase
+            .from("guided_campaigns")
+            .update({
+              active,
+              updated_at: updatedAt,
+            })
+            .eq("id", campaignId);
+          if (error) {
+            console.warn("Aviso ao alternar status da pesquisa guiada no Supabase:", error.message);
+          }
+        } catch (err) {
+          console.warn("Exceção ao alternar pesquisa guiada no Supabase:", err);
+        }
+      }
+    },
+    [isConfigured],
+  );
 
   // Enforce guest tab lock
   useEffect(() => {

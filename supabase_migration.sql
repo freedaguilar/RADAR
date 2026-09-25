@@ -98,3 +98,23 @@ CREATE TABLE ai_corrections (
 ALTER TABLE ai_corrections ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow public all on ai_corrections" ON ai_corrections FOR ALL TO public USING (true) WITH CHECK (true);
 
+-- Create guided campaigns table (Pesquisas Guiadas configuradas pela Gestão)
+CREATE TABLE IF NOT EXISTS guided_campaigns (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  chain_id TEXT REFERENCES chains(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'Minas Gerais',
+  product_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  active BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  created_by TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable Row Level Security and allow public access for guided campaigns
+ALTER TABLE guided_campaigns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public all on guided_campaigns" ON guided_campaigns;
+CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL TO public USING (true) WITH CHECK (true);
+
+

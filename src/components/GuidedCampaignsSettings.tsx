@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   Target,
   Plus,
@@ -19,6 +19,10 @@ import {
   CheckCircle2,
   SlidersHorizontal,
   Info,
+  Database,
+  Cloud,
+  Terminal,
+  Loader2,
 } from "lucide-react";
 import {
   Product,
@@ -29,6 +33,7 @@ import {
   getChainStates,
 } from "../types";
 import { normalizeString } from "../lib/textUtils";
+import { supabase } from "../lib/supabase";
 
 interface GuidedCampaignsSettingsProps {
   products: Product[];
@@ -82,6 +87,71 @@ export function GuidedCampaignsSettings({
 
   // Delete modal state
   const [deleteModalCampaign, setDeleteModalCampaign] = useState<GuidedCampaign | null>(null);
+
+  // Database Supabase sync state check
+  const [dbStatus, setDbStatus] = useState<"checking" | "ready" | "missing_table" | "unconfigured">("checking");
+  const [showSqlModal, setShowSqlModal] = useState(false);
+  const [sqlCopied, setSqlCopied] = useState(false);
+
+  const checkDatabaseStatus = async () => {
+    const isConfigured = !!import.meta.env.VITE_SUPABASE_URL && (!!import.meta.env.VITE_SUPABASE_ANON_KEY || !!import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY);
+    if (!isConfigured) {
+      setDbStatus("unconfigured");
+      return;
+    }
+    try {
+      const { error } = await supabase.from("guided_campaigns").select("id").limit(1);
+      if (error) {
+        if (
+          error.code === "42P01" ||
+          error.message?.includes("does not exist") ||
+          error.message?.includes("not found")
+        ) {
+          setDbStatus("missing_table");
+        } else {
+          setDbStatus("ready");
+        }
+      } else {
+        setDbStatus("ready");
+      }
+    } catch {
+      setDbStatus("missing_table");
+    }
+  };
+
+  useEffect(() => {
+    checkDatabaseStatus();
+  }, []);
+
+  const GUIDED_CAMPAIGNS_SQL = `-- Criação da tabela de Pesquisas Guiadas no Supabase
+CREATE TABLE IF NOT EXISTS guided_campaigns (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  chain_id TEXT REFERENCES chains(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'Minas Gerais',
+  product_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  active BOOLEAN NOT NULL DEFAULT true,
+  notes TEXT,
+  created_by TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Habilitar RLS e permitir leitura/escrita pública anônima
+ALTER TABLE guided_campaigns ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public all on guided_campaigns" ON guided_campaigns;
+CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL TO public USING (true) WITH CHECK (true);`;
+
+  const copySqlToClipboard = () => {
+    try {
+      navigator.clipboard.writeText(GUIDED_CAMPAIGNS_SQL);
+      setSqlCopied(true);
+      setTimeout(() => setSqlCopied(false), 3000);
+      showFeedback("success", "Script SQL copiado com sucesso! Execute-o no SQL Editor do Supabase.");
+    } catch {
+      showFeedback("error", "Não foi possível copiar automaticamente. Selecione o código no modal.");
+    }
+  };
 
   const showFeedback = (type: "success" | "error", message: string) => {
     setFeedbackBanner({ type, message });
@@ -431,6 +501,68 @@ export function GuidedCampaignsSettings({
               </button>
             </div>
           </div>
+
+          {/* Database Supabase Synchronization Status Banner */}
+          {dbStatus === "missing_table" && (
+            <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0 mt-0.5 sm:mt-0 shadow-xs">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-mono font-bold bg-amber-200 text-amber-900 px-1.5 py-0.5 rounded uppercase">
+                      Supabase Necessário
+                    </span>
+                    <h4 className="text-xs font-bold text-amber-950">
+                      Tabela 'guided_campaigns' ainda não criada no banco
+                    </h4>
+                  </div>
+                  <p className="text-xs text-amber-900 mt-1 leading-relaxed">
+                    As pesquisas criadas estão salvas em cache local neste dispositivo. Para salvar e sincronizar entre todos os gestores e convidados, crie a tabela <code>guided_campaigns</code> no seu banco de dados Supabase.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={copySqlToClipboard}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{sqlCopied ? "Copiado!" : "Copiar SQL"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSqlModal(true)}
+                  className="px-3 py-1.5 bg-white border border-amber-300 hover:bg-amber-100/50 text-amber-900 rounded-xl text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                >
+                  <Terminal className="w-3.5 h-3.5 text-amber-700" />
+                  <span>Ver Script SQL</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {dbStatus === "ready" && (
+            <div className="flex items-center justify-between p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl text-[11px] text-emerald-900 font-medium shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1 rounded-lg bg-emerald-500 text-white shrink-0">
+                  <Cloud className="w-3.5 h-3.5" />
+                </div>
+                <span>
+                  <strong>Banco de Dados Conectado:</strong> As pesquisas guiadas são salvas e sincronizadas em tempo real na tabela <code>guided_campaigns</code> do Supabase.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSqlModal(true)}
+                className="text-emerald-700 hover:text-emerald-900 hover:underline text-[10px] font-mono shrink-0 ml-2 cursor-pointer"
+              >
+                Ver SQL
+              </button>
+            </div>
+          )}
 
           {/* Filters Bar */}
           <div className="bg-white border border-[#E0E0E0] rounded-2xl p-3.5 shadow-2xs space-y-3">
@@ -1186,6 +1318,72 @@ export function GuidedCampaignsSettings({
               >
                 Excluir
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* SQL Script Information Modal */}
+      {showSqlModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-5 shadow-2xl border border-gray-200 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-slate-900 text-white rounded-xl">
+                  <Terminal className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-slate-900 font-sans">
+                    Script SQL para Tabela 'guided_campaigns'
+                  </h4>
+                  <p className="text-[11px] text-slate-500">
+                    Copie e execute no <strong>SQL Editor</strong> do seu painel Supabase.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSqlModal(false)}
+                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="relative">
+              <pre className="p-3.5 bg-slate-950 text-emerald-400 rounded-xl font-mono text-[11px] leading-relaxed overflow-x-auto max-h-[260px] border border-slate-800">
+                {GUIDED_CAMPAIGNS_SQL}
+              </pre>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={async () => {
+                  await checkDatabaseStatus();
+                  showFeedback("success", "Status do banco verificado.");
+                }}
+                className="text-xs text-slate-600 hover:text-slate-900 font-medium hover:underline cursor-pointer"
+              >
+                ↻ Verificar novamente
+              </button>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={() => setShowSqlModal(false)}
+                  className="px-3.5 py-1.5 border border-gray-200 text-gray-700 text-xs font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={copySqlToClipboard}
+                  className="px-4 py-1.5 bg-[#D40511] hover:bg-red-700 text-white text-xs font-bold rounded-xl transition flex items-center gap-1.5 shadow-md cursor-pointer"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{sqlCopied ? "Copiado!" : "Copiar SQL"}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
