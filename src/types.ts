@@ -98,10 +98,24 @@ export interface User {
   isGuest?: boolean;
 }
 
+export interface GuidedCampaign {
+  id: string;
+  title: string;
+  chainId: string;
+  state: string; // Ex: 'Minas Gerais', 'Goiás', ou 'Todos'
+  productIds: string[]; // Lista ordenada de IDs de produtos na fila da pesquisa guiada
+  active: boolean; // Se a pesquisa guiada está ativa ou desativada pelo gestor
+  createdAt: string;
+  updatedAt?: string;
+  createdBy?: string;
+  notes?: string;
+}
+
 export interface AppState {
   products: Product[];
   chains: Chain[];
   records: PriceRecord[];
   users: User[];
   currentUser: User | null;
+  guidedCampaigns?: GuidedCampaign[];
 }

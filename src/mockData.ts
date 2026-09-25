@@ -1,4 +1,18 @@
-import { Product, Chain, PriceRecord, User, getChainStates } from './types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign, getChainStates } from './types';
+
+export const INITIAL_GUIDED_CAMPAIGNS: GuidedCampaign[] = [
+  {
+    id: 'campaign-1',
+    title: 'Pesquisa Foco Linha Dr. Oetker - Super Nosso (MG)',
+    chainId: 'chain-1', // Super Nosso
+    state: 'Minas Gerais',
+    productIds: ['prod-1', 'prod-2', 'prod-3', 'prod-4', 'prod-6'],
+    active: true,
+    createdAt: new Date().toISOString(),
+    createdBy: 'Gestão PriceHub',
+    notes: 'Prioridade estratégica na categoria de fermentos, sobremesas e congelados Dr. Oetker.',
+  }
+];
 
 // Let's create localized products, inspired by Dr. Oetker & retail
 export const INITIAL_PRODUCTS: Product[] = [
@@ -310,6 +324,7 @@ export const getInitialState = (): {
   records: PriceRecord[];
   users: User[];
   currentUser: User | null;
+  guidedCampaigns: GuidedCampaign[];
 } => {
   // Try loading from localStorage
   try {
@@ -338,7 +353,10 @@ export const getInitialState = (): {
           chains: normalizedChains,
           records: parsed.records,
           users: parsed.users,
-          currentUser: hasValidUserObj ? parsed.currentUser : null
+          currentUser: hasValidUserObj ? parsed.currentUser : null,
+          guidedCampaigns: Array.isArray(parsed.guidedCampaigns) && parsed.guidedCampaigns.length > 0
+            ? parsed.guidedCampaigns
+            : INITIAL_GUIDED_CAMPAIGNS
         };
       }
     }
@@ -352,7 +370,8 @@ export const getInitialState = (): {
     chains: INITIAL_CHAINS,
     records: generateMockHistory(),
     users: INITIAL_USERS,
-    currentUser: null
+    currentUser: null,
+    guidedCampaigns: INITIAL_GUIDED_CAMPAIGNS
   };
 };
 
@@ -362,6 +381,7 @@ export const saveStateToLocalStorage = (state: {
   records: PriceRecord[];
   users: User[];
   currentUser: User | null;
+  guidedCampaigns?: GuidedCampaign[];
 }) => {
   try {
     localStorage.setItem('radar_price_state', JSON.stringify(state));

@@ -13,7 +13,7 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { AppState, Product, Chain, PriceRecord, User } from "./types";
+import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign } from "./types";
 import { getInitialState, saveStateToLocalStorage } from "./mockData";
 import { useSupabaseSync } from "./lib/useSupabaseSync";
 import { supabase } from "./lib/supabase";
@@ -542,6 +542,38 @@ export default function App() {
     },
     [isConfigured],
   );
+
+  const handleAddGuidedCampaign = useCallback((newCampaign: GuidedCampaign) => {
+    setState((prev) => ({
+      ...prev,
+      guidedCampaigns: [newCampaign, ...(prev.guidedCampaigns || [])],
+    }));
+  }, []);
+
+  const handleUpdateGuidedCampaign = useCallback((updatedCampaign: GuidedCampaign) => {
+    setState((prev) => ({
+      ...prev,
+      guidedCampaigns: (prev.guidedCampaigns || []).map((c) =>
+        c.id === updatedCampaign.id ? updatedCampaign : c
+      ),
+    }));
+  }, []);
+
+  const handleDeleteGuidedCampaign = useCallback((campaignId: string) => {
+    setState((prev) => ({
+      ...prev,
+      guidedCampaigns: (prev.guidedCampaigns || []).filter((c) => c.id !== campaignId),
+    }));
+  }, []);
+
+  const handleToggleGuidedCampaign = useCallback((campaignId: string, active: boolean) => {
+    setState((prev) => ({
+      ...prev,
+      guidedCampaigns: (prev.guidedCampaigns || []).map((c) =>
+        c.id === campaignId ? { ...c, active, updatedAt: new Date().toISOString() } : c
+      ),
+    }));
+  }, []);
 
   // Enforce guest tab lock
   useEffect(() => {
@@ -1193,6 +1225,7 @@ export default function App() {
             products={state.products}
             chains={state.chains}
             records={state.records}
+            guidedCampaigns={state.guidedCampaigns || []}
             onSaveRecord={handleSavePriceRecord}
             onUpdateRecord={handleUpdatePriceRecord}
             onDeleteRecord={handleDeletePriceRecord}
@@ -1222,6 +1255,11 @@ export default function App() {
             chains={state.chains}
             users={state.users}
             currentUser={state.currentUser}
+            guidedCampaigns={state.guidedCampaigns || []}
+            onAddCampaign={handleAddGuidedCampaign}
+            onUpdateCampaign={handleUpdateGuidedCampaign}
+            onDeleteCampaign={handleDeleteGuidedCampaign}
+            onToggleCampaign={handleToggleGuidedCampaign}
             onAddProduct={handleAddProduct}
             onDeleteProduct={handleDeleteProduct}
             onAddChain={handleAddChain}

@@ -19,10 +19,12 @@ import {
   KeyRound,
   Eye,
   EyeOff,
+  Target,
 } from "lucide-react";
-import { Product, Chain, User, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
+import { Product, Chain, User, GuidedCampaign, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
 import { normalizeString } from "../lib/textUtils";
+import { GuidedCampaignsSettings } from "./GuidedCampaignsSettings";
 
 function extractDominantColor(fileOrUrl: File | string): Promise<string> {
   return new Promise((resolve) => {
@@ -127,6 +129,11 @@ interface SettingsProps {
   onDeleteUser: (id: string) => void;
   onNavigate: (page: string, params?: any) => void;
   onLogout?: () => void;
+  guidedCampaigns?: GuidedCampaign[];
+  onAddCampaign?: (campaign: GuidedCampaign) => void;
+  onUpdateCampaign?: (campaign: GuidedCampaign) => void;
+  onDeleteCampaign?: (campaignId: string) => void;
+  onToggleCampaign?: (campaignId: string, active: boolean) => void;
 }
 
 export function Settings({
@@ -145,9 +152,14 @@ export function Settings({
   onDeleteUser,
   onNavigate,
   onLogout,
+  guidedCampaigns = [],
+  onAddCampaign,
+  onUpdateCampaign,
+  onDeleteCampaign,
+  onToggleCampaign,
 }: SettingsProps) {
   // Navigation tabs inside Settings
-  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users">(
+  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns">(
     "products",
   );
 
@@ -717,6 +729,28 @@ export function Settings({
           >
             <Layers className="w-4 h-4" />
             <span>Redes / Lojas</span>
+          </button>
+
+          <button
+            id="settings-tab-campaigns"
+            onClick={() => setActiveTab("campaigns")}
+            className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold leading-none flex items-center justify-between transition-colors cursor-pointer ${
+              activeTab === "campaigns"
+                ? "bg-[#1A1A1A] text-white"
+                : "bg-[#F5F5F5] text-gray-600 hover:bg-[#E0E0E0]"
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Target className={`w-4 h-4 ${activeTab === "campaigns" ? "text-red-400" : "text-[#D40511]"}`} />
+              <span>Pesquisas Guiadas</span>
+            </div>
+            {guidedCampaigns.filter(c => c.active).length > 0 && (
+              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full ${
+                activeTab === "campaigns" ? "bg-red-500 text-white" : "bg-emerald-100 text-emerald-800"
+              }`}>
+                {guidedCampaigns.filter(c => c.active).length} ativas
+              </span>
+            )}
           </button>
 
           <button
@@ -1945,6 +1979,23 @@ export function Settings({
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* TAB 4: GUIDED CAMPAIGNS CONFIGURATION */}
+          {activeTab === "campaigns" && (
+            <div className="space-y-6" id="settings-tab-campaigns-panel">
+              <GuidedCampaignsSettings
+                products={products}
+                chains={chains}
+                guidedCampaigns={guidedCampaigns}
+                onAddCampaign={onAddCampaign || (() => {})}
+                onUpdateCampaign={onUpdateCampaign || (() => {})}
+                onDeleteCampaign={onDeleteCampaign || (() => {})}
+                onToggleCampaign={onToggleCampaign || (() => {})}
+                currentUser={currentUser}
+                onNavigate={onNavigate}
+              />
             </div>
           )}
         </div>

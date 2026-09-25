@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Chain, PriceRecord, User, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, stripSessionMetaPrefix, getCleanObserverNotes, ResearchSessionMeta } from '../lib/textUtils';
 import StateIconMap from './StateIconMap';
@@ -161,6 +161,7 @@ interface RegisterPriceProps {
   products: Product[];
   chains: Chain[];
   records?: PriceRecord[];
+  guidedCampaigns?: GuidedCampaign[];
   onSaveRecord: (newRecord: PriceRecord) => void;
   onUpdateRecord?: (updatedRecord: PriceRecord) => void;
   onDeleteRecord?: (recordId: string) => void;
@@ -175,7 +176,7 @@ interface RegisterPriceProps {
   } | null;
 }
 
-export function RegisterPrice({ products, chains, records = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, onLogout, pageParams }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, records = [], guidedCampaigns = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, onLogout, pageParams }: RegisterPriceProps) {
   // Navigation Steps: 1 (Estado) | 2 (Rede) | 3 (Foto) | 4 (Confirmação) | 5 (Página de Conclusão)
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [completionData, setCompletionData] = useState<CompletionSummary | null>(null);
@@ -461,12 +462,50 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     return searchAndRankProducts(list, searchText);
   };
 
+  // Campanha/Pesquisa guiada liberada pelo gestor para a rede e estado selecionados
+  const activeGuidedCampaign = useMemo(() => {
+    if (!guidedCampaigns || guidedCampaigns.length === 0 || !selectedChainId || !selectedState) {
+      return null;
+    }
+    // Prioriza pesquisa para o estado exato; se não houver, busca para "Todos"
+    const exactMatch = guidedCampaigns.find(
+      (c) => c.active && c.chainId === selectedChainId && c.state === selectedState
+    );
+    if (exactMatch) return exactMatch;
+
+    const allStatesMatch = guidedCampaigns.find(
+      (c) => c.active && c.chainId === selectedChainId && c.state === 'Todos'
+    );
+    return allStatesMatch || null;
+  }, [guidedCampaigns, selectedChainId, selectedState]);
+
   // Queue List for Guided Camera Auditing based on selected chain and at least 1 record
   const frequentProductsList = useMemo(() => {
     if (!products || products.length === 0) return [];
 
     const activeProds = products.filter(p => p.active);
 
+    // 0. REGRA PRIORITÁRIA DE PESQUISA GUIADA LIBERADA PELO GESTOR:
+    // Se o gestor criou e ativou uma pesquisa guiada para esta rede e estado, a fila dos produtos
+    // será EXATAMENTE a que o gestor selecionou, na ordem definida pelo gestor!
+    if (activeGuidedCampaign && Array.isArray(activeGuidedCampaign.productIds) && activeGuidedCampaign.productIds.length > 0) {
+      const prodMap = new Map<string, Product>();
+      activeProds.forEach((p) => prodMap.set(p.id, p));
+
+      const campaignProducts: Product[] = [];
+      for (const pId of activeGuidedCampaign.productIds) {
+        const p = prodMap.get(pId);
+        if (p) {
+          campaignProducts.push(p);
+        }
+      }
+
+      if (campaignProducts.length > 0) {
+        return campaignProducts;
+      }
+    }
+
+    // Caso não haja pesquisa guiada ativa para esta rede e estado, mantém a regra atual de fila de produtos:
     const isMG = !selectedState || selectedState === 'Minas Gerais';
     const selectedChain = chains.find(c => c.id === selectedChainId);
     const chainStates = selectedChain ? getChainStates(selectedChain) : [];
@@ -2685,6 +2724,9 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                   const borderCol = chain.logoColor ? chain.logoColor.replace('bg-', 'border-') : 'border-slate-200';
                   const ringColor = chain.logoColor ? chain.logoColor.replace('bg-', 'ring-') : 'ring-red-500';
                   const allStates = getChainStates(chain);
+                  const hasActiveCampaign = guidedCampaigns.some(
+                    (c) => c.active && c.chainId === chain.id && (c.state === selectedState || c.state === 'Todos')
+                  );
 
                   return (
                     <button
@@ -2698,14 +2740,24 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       className={`p-5 rounded-2xl border text-left flex items-center gap-4 transition-all duration-300 group hover:-translate-y-0.5 hover:shadow-xs cursor-pointer ${
                         selectedChainId === chain.id
                           ? `${borderCol} ring-2 ${ringColor}/30 bg-slate-50/25`
+                          : hasActiveCampaign
+                          ? 'border-amber-300 bg-amber-50/20 hover:border-amber-400'
                           : 'border-slate-100 bg-white hover:border-slate-300 hover:bg-slate-50/10'
                       }`}
                     >
                       <RetailerLogo chain={chain} size="md" />
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-black text-slate-800 truncate leading-snug">
-                          {chain.name}
-                        </h3>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-sm font-black text-slate-800 truncate leading-snug">
+                            {chain.name}
+                          </h3>
+                          {hasActiveCampaign && (
+                            <span className="inline-flex items-center gap-1 text-[9px] font-mono font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
+                              <Target className="w-2.5 h-2.5 text-amber-600" />
+                              Pesquisa Guiada
+                            </span>
+                          )}
+                        </div>
                         <div className="flex flex-wrap items-center gap-1 mt-1">
                           {allStates.map((stName) => {
                             const uf = RESEARCH_STATES.find(s => s.name === stName)?.uf || stName.substring(0, 2).toUpperCase();
@@ -2770,6 +2822,44 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
           <div className="space-y-6" id="batch-workspace">
               {!useCamera && !isAnalyzingBatch ? (
                 <div className="space-y-6">
+                  {/* Banner de Pesquisa Guiada Ativa Liberada pela Gestão */}
+                  {activeGuidedCampaign && (
+                    <div className="p-3.5 bg-gradient-to-r from-amber-50 via-red-50/40 to-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-amber-500 text-white rounded-xl shrink-0 shadow-xs">
+                          <Target className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded-md border border-amber-300">
+                              Pesquisa Guiada Liberada pela Gestão
+                            </span>
+                            <span className="text-xs font-black text-gray-900 truncate">
+                              {activeGuidedCampaign.title}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-600 mt-1">
+                            Fila prioritária com <strong>{frequentProductsList.length} produtos selecionados</strong> pela gestão para esta auditoria.
+                            {activeGuidedCampaign.notes && (
+                              <span className="italic block mt-0.5 text-gray-500">
+                                "{activeGuidedCampaign.notes}"
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      {currentUser?.role === 'gestor' && onNavigate && (
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('settings')}
+                          className="text-[11px] text-[#D40511] font-bold hover:underline shrink-0 whitespace-nowrap hidden sm:inline"
+                        >
+                          Configurações &rarr;
+                        </button>
+                      )}
+                    </div>
+                  )}
+
                   {/* Triggers de entrada do Lote */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button
@@ -3134,9 +3224,16 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                             </span>
-                            <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-red-400 font-mono">
-                              AUDITORIA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
-                            </span>
+                            {activeGuidedCampaign ? (
+                              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-amber-300 font-mono flex items-center gap-1">
+                                <Target className="w-3 h-3 text-amber-400" />
+                                PESQUISA GUIADA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
+                              </span>
+                            ) : (
+                              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-red-400 font-mono">
+                                AUDITORIA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
+                              </span>
+                            )}
                           </div>
 
                           {currentGuidedProduct.category && (
@@ -4756,12 +4853,26 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
               {/* Header */}
               <div className="p-4 sm:p-5 border-b border-slate-150 flex items-center justify-between gap-3 bg-slate-50/80">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-xl shrink-0">
-                    <ListOrdered className="w-5 h-5" />
+                  <div className={`p-2.5 rounded-xl shrink-0 ${activeGuidedCampaign ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                    {activeGuidedCampaign ? <Target className="w-5 h-5 text-amber-600" /> : <ListOrdered className="w-5 h-5" />}
                   </div>
-                  <h3 className="text-sm sm:text-base font-black text-slate-800">
-                    Fila de Itens para Auditoria
-                  </h3>
+                  <div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <h3 className="text-sm sm:text-base font-black text-slate-800">
+                        {activeGuidedCampaign ? 'Pesquisa Guiada Liberada pela Gestão' : 'Fila de Itens para Auditoria'}
+                      </h3>
+                      {activeGuidedCampaign && (
+                        <span className="text-[10px] font-mono font-bold bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full uppercase">
+                          Personalizada
+                        </span>
+                      )}
+                    </div>
+                    {activeGuidedCampaign && (
+                      <p className="text-[11px] text-slate-500 font-medium mt-0.5 truncate max-w-[280px] sm:max-w-md">
+                        {activeGuidedCampaign.title}
+                      </p>
+                    )}
+                  </div>
                 </div>
                 <button
                   type="button"
