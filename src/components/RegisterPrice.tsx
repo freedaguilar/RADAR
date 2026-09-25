@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, UserCheck, ClipboardCheck, ListOrdered } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
@@ -294,17 +294,11 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     dataUrl: string;
     originalBytes: number;
     tempId: string;
+    step?: 'price' | 'product';
   } | null>(null);
   const [immediatePrice, setImmediatePrice] = useState('0,00');
 
-  // Modo Livre product linking states (optional linking on camera banner or modal)
-  const [freeModeSelectedProduct, setFreeModeSelectedProduct] = useState<Product | null>(null);
-  const [showFreeModeProductPicker, setShowFreeModeProductPicker] = useState(false);
-  const [freeModeSearchText, setFreeModeSearchText] = useState('');
-  const [freeModeBrandFilter, setFreeModeBrandFilter] = useState<'all' | 'oetker' | 'mavalerio' | 'competitor'>('all');
-
-  // In-modal product selection states (inside pendingPriceModal)
-  const [showModalProductPicker, setShowModalProductPicker] = useState(false);
+  // Modo Livre product linking filter states inside modal (after entering price)
   const [modalProductSearchText, setModalProductSearchText] = useState('');
   const [modalProductBrandFilter, setModalProductBrandFilter] = useState<'all' | 'oetker' | 'mavalerio' | 'competitor'>('all');
 
@@ -660,7 +654,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
 
   // Guided Queue Action Handlers
   const handleCaptureGuidedProduct = async () => {
-    const targetProduct = currentGuidedProduct || (!useGuidedMode ? freeModeSelectedProduct : null);
+    const targetProduct = useGuidedMode ? currentGuidedProduct : null;
     const shouldKeepPrice = keepCurrentPrice;
     
     // Por padrão, a opção sempre vem desmarcada para o próximo produto
@@ -671,8 +665,6 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         // Remove imediatamente o produto capturado da fila para exibir o próximo na tela
         setCapturedProductIds(prev => [...prev, targetProduct.id]);
         setGuidedQueue(prev => prev.filter(p => p.id !== targetProduct.id));
-      } else {
-        setFreeModeSelectedProduct(null);
       }
       await captureBatchFrame(targetProduct || undefined, true);
     } else {
@@ -707,61 +699,45 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         dataUrl,
         originalBytes,
         tempId,
+        step: 'price',
       });
-      setShowModalProductPicker(false);
       setModalProductSearchText('');
+      setModalProductBrandFilter('all');
       setImmediatePrice('0,00');
     }
   };
 
-  // Confirmação do preço digitado na hora pelo usuário
-  const handleConfirmImmediatePrice = async () => {
+  // Salva o registro da foto com o produto vinculado (no Modo Guiado ou ao escolher produto no Modo Livre)
+  const handleSaveWithProduct = async (product: Product) => {
     if (!pendingPriceModal) return;
-    const { targetProduct, dataUrl, originalBytes, tempId } = pendingPriceModal;
+    const { dataUrl, originalBytes, tempId } = pendingPriceModal;
     const numericPrice = parseFloat(immediatePrice.replace(',', '.')) || 0;
-
-    if (numericPrice <= 0) {
-      setErrorMsg('Por favor, informe um valor maior que zero para o produto.');
-      return;
-    }
-
-    const capturedTargetProduct = targetProduct;
     const capturedImmediatePrice = immediatePrice;
-    
+
     // Fecha o modal e limpa o valor para liberar imediatamente a tela
     setPendingPriceModal(null);
     setImmediatePrice('0,00');
-    setShowModalProductPicker(false);
     setModalProductSearchText('');
 
     // Se estiver em modo guiado com produto alvo, avança imediatamente para o próximo da fila
-    if (capturedTargetProduct && useGuidedMode) {
-      setCapturedProductIds(prev => [...prev, capturedTargetProduct.id]);
-      setGuidedQueue(prev => prev.filter(p => p.id !== capturedTargetProduct.id));
+    if (useGuidedMode) {
+      setCapturedProductIds(prev => [...prev, product.id]);
+      setGuidedQueue(prev => prev.filter(p => p.id !== product.id));
     }
 
-    // Se estiver no modo livre, desvincula o produto temporário
-    if (!useGuidedMode) {
-      setFreeModeSelectedProduct(null);
-      setKeepCurrentPrice(false);
-    }
-
-    // Cria o item no lote com o valor digitado
-    const selectedProdId = capturedTargetProduct ? capturedTargetProduct.id : '';
-    const prodSearch = capturedTargetProduct ? capturedTargetProduct.name : '';
-
+    // Cria o item no lote com o valor digitado e produto vinculado
     const newItem: BatchItem = {
       id: tempId,
       imagePreview: dataUrl,
       originalSizeKB: Math.round(originalBytes / 1024),
       compressedSizeKB: Math.round(originalBytes / 1024),
       status: 'compressing',
-      selectedProductId: selectedProdId,
-      productSearch: prodSearch,
+      selectedProductId: product.id,
+      productSearch: product.name,
       price: capturedImmediatePrice,
-      notes: capturedTargetProduct ? `[Preço Digitado] ${capturedTargetProduct.name}` : '',
+      notes: `[Preço Digitado] ${product.name}`,
       selectedChainId: selectedChainId,
-      confidence: capturedTargetProduct ? 'high' : 'low',
+      confidence: 'high',
       isKeptPrice: false,
       state: selectedState,
     };
@@ -783,17 +759,16 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
       const todayStr = new Date().toISOString().split('T')[0];
       const recordId = `rec-field-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
 
-      // Se for convidado, marca como pendente para auditoria de gestor!
       const isGuest = !!currentUser?.isGuest;
       const sessionMeta = getCurrentSessionMeta(false);
       const cleanUserNotes = stripSessionMetaPrefix(notes).trim();
       const finalNotes = isGuest
-        ? serializePendingMeta(prodSearch, numericPrice, cleanUserNotes || `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
+        ? serializePendingMeta(product.name, numericPrice, cleanUserNotes || `[Registro Convidado: ${currentUser?.name || 'Convidado'}]`, sessionMeta)
         : serializeSessionMeta(cleanUserNotes, sessionMeta);
 
       const newRecord: PriceRecord = {
         id: recordId,
-        productId: selectedProdId,
+        productId: product.id,
         chainId: selectedChainId,
         price: numericPrice,
         date: todayStr,
@@ -812,7 +787,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         recordId: recordId,
         status: isGuest ? ('pending' as const) : ('success' as const),
         price: capturedImmediatePrice,
-        aiAnalysisMessage: capturedTargetProduct ? 'Produto vinculado pelo usuário' : 'Preço registrado pelo usuário'
+        aiAnalysisMessage: 'Produto vinculado pelo usuário'
       } : item));
     } catch (err) {
       console.error('Camera frame compression/upload/save failed:', err);
@@ -823,11 +798,116 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
     }
   };
 
+  // Salva o registro da foto com o preço informado, mas SEM vincular a um produto (Vincular Depois)
+  const handleSaveWithoutProduct = async () => {
+    if (!pendingPriceModal) return;
+    const { dataUrl, originalBytes, tempId } = pendingPriceModal;
+    const numericPrice = parseFloat(immediatePrice.replace(',', '.')) || 0;
+    const capturedImmediatePrice = immediatePrice;
+
+    // Fecha o modal e limpa o valor para liberar imediatamente a tela
+    setPendingPriceModal(null);
+    setImmediatePrice('0,00');
+    setModalProductSearchText('');
+
+    // Cria o item no lote com o valor digitado, sem produto vinculado
+    const newItem: BatchItem = {
+      id: tempId,
+      imagePreview: dataUrl,
+      originalSizeKB: Math.round(originalBytes / 1024),
+      compressedSizeKB: Math.round(originalBytes / 1024),
+      status: 'compressing',
+      selectedProductId: '',
+      productSearch: '',
+      price: capturedImmediatePrice,
+      notes: '[Modo Livre - Vincular depois]',
+      selectedChainId: selectedChainId,
+      confidence: 'low',
+      isKeptPrice: false,
+      state: selectedState,
+    };
+
+    setBatchItems(prev => [...prev, newItem]);
+
+    try {
+      const comp = await compressSingleImagePromise(dataUrl, originalBytes);
+
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        imagePreview: comp.compressedBase64,
+        originalSizeKB: comp.originalSizeKB,
+        compressedSizeKB: comp.compressedSizeKB,
+        status: 'uploading' as const
+      } : item));
+
+      const finalImageUrl = await uploadToSupabaseStorage(comp.compressedBase64, 'images');
+      const todayStr = new Date().toISOString().split('T')[0];
+      const recordId = `rec-pending-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+      const isGuest = !!currentUser?.isGuest;
+      const sessionMeta = getCurrentSessionMeta(false);
+      const cleanUserNotes = stripSessionMetaPrefix(notes).trim();
+      const finalNotes = serializePendingMeta('', numericPrice, cleanUserNotes || '[Modo Livre - Vincular depois]', sessionMeta);
+
+      const newRecord: PriceRecord = {
+        id: recordId,
+        productId: '',
+        chainId: selectedChainId,
+        price: numericPrice,
+        date: todayStr,
+        imageUrl: finalImageUrl || '',
+        notes: finalNotes,
+        userName: currentUser?.name || 'Vendedor Autônomo',
+        userEmail: currentUser?.email || 'vendas@radar.com',
+        state: selectedState,
+      };
+
+      onSaveRecord(newRecord);
+
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        imageUrl: finalImageUrl,
+        recordId: recordId,
+        status: 'pending' as const,
+        price: capturedImmediatePrice,
+        aiAnalysisMessage: 'Preço registrado • Vincular produto depois'
+      } : item));
+    } catch (err) {
+      console.error('Camera frame compression/upload/save failed:', err);
+      setBatchItems(prev => prev.map(item => item.id === tempId ? {
+        ...item,
+        status: 'failed' as const
+      } : item));
+    }
+  };
+
+  // Confirmação do preço digitado na hora pelo usuário
+  const handleConfirmImmediatePrice = async () => {
+    if (!pendingPriceModal) return;
+    const { targetProduct } = pendingPriceModal;
+    const numericPrice = parseFloat(immediatePrice.replace(',', '.')) || 0;
+
+    if (numericPrice <= 0) {
+      setErrorMsg('Por favor, informe um valor maior que zero para o produto.');
+      return;
+    }
+
+    // Se estiver no Modo Guiado com produto já definido, salva direto com esse produto
+    if (useGuidedMode && targetProduct) {
+      await handleSaveWithProduct(targetProduct);
+      return;
+    }
+
+    // Se estiver no Modo Livre, avança para a etapa de vincular o produto (com botão vincular depois)
+    setPendingPriceModal(prev => prev ? { ...prev, step: 'product' } : null);
+    setModalProductSearchText('');
+    setModalProductBrandFilter('all');
+  };
+
   // Cancela a foto atual sem avançar a fila, permitindo ao usuário tirar outra foto
   const handleCancelImmediatePrice = () => {
     setPendingPriceModal(null);
     setImmediatePrice('0,00');
-    setShowModalProductPicker(false);
     setModalProductSearchText('');
   };
 
@@ -3028,14 +3108,14 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                       </div>
                     </div>
 
-                    {/* Informação do produto na parte superior sobre a câmera (sem poluir o visual) */}
+                    {/* Informação do produto na parte superior sobre a câmera (com foto em destaque máximo) */}
                     {currentGuidedProduct ? (
                       <motion.div
                         key={currentGuidedProduct.id}
                         initial={{ opacity: 0, y: -6 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: 6 }}
-                        className="bg-black/65 backdrop-blur-md border border-white/20 rounded-2xl p-2.5 sm:p-3 text-white shadow-2xl max-w-2xl mx-auto"
+                        className="bg-black/75 backdrop-blur-md border border-white/20 rounded-2xl sm:rounded-3xl p-2.5 sm:p-3.5 text-white shadow-2xl max-w-2xl mx-auto"
                       >
                         {/* Subheader da auditoria */}
                         <div className="flex items-center justify-between pb-1.5 border-b border-white/10 mb-2">
@@ -3044,20 +3124,20 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                             </span>
-                            <span className="text-[10px] font-black uppercase tracking-wider text-red-400 font-mono">
+                            <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-red-400 font-mono">
                               AUDITORIA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
                             </span>
                           </div>
 
                           {currentGuidedProduct.category && (
-                            <span className="text-[10px] font-bold text-slate-200 bg-white/10 px-2 py-0.5 rounded-md border border-white/10 font-mono truncate max-w-[150px]">
+                            <span className="text-[10px] sm:text-[11px] font-bold text-slate-200 bg-white/10 px-2 py-0.5 rounded-md border border-white/10 font-mono truncate max-w-[170px]">
                               {currentGuidedProduct.category}
                             </span>
                           )}
                         </div>
 
-                        {/* Linha com imagem e detalhes do produto */}
-                        <div className="flex items-center gap-3">
+                        {/* Linha com imagem em destaque máximo e detalhes do produto */}
+                        <div className="flex items-center gap-3 sm:gap-4">
                           {currentGuidedProduct.imageUrl ? (
                             <button
                               type="button"
@@ -3065,7 +3145,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 url: currentGuidedProduct.imageUrl!,
                                 name: currentGuidedProduct.name
                               })}
-                              className="relative group w-12 h-12 sm:w-14 sm:h-14 rounded-xl overflow-hidden border border-white/20 hover:border-red-400 bg-white shrink-0 p-0.5 cursor-pointer transition focus:outline-none"
+                              className="relative group w-16 h-16 xs:w-20 xs:h-20 sm:w-24 sm:h-24 rounded-2xl overflow-hidden border-2 border-white/30 hover:border-red-400 bg-white shrink-0 p-1 cursor-pointer transition-all duration-200 shadow-xl focus:outline-none ring-1 ring-black/40"
                               title="Clique para ver a foto do produto ampliada"
                             >
                               <img
@@ -3074,251 +3154,83 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                                 className="w-full h-full object-contain"
                                 referrerPolicy="no-referrer"
                               />
-                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
-                                <Eye className="w-4 h-4 text-white drop-shadow" />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center transition-opacity rounded-2xl">
+                                <Eye className="w-5 h-5 text-white drop-shadow" />
+                                <span className="text-[8px] font-bold text-white uppercase tracking-wider mt-0.5 font-mono">Ampliar</span>
                               </div>
                             </button>
                           ) : (
-                            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl border border-dashed border-white/20 bg-white/10 flex items-center justify-center shrink-0">
-                              <Package className="w-6 h-6 text-red-400" />
+                            <div className="w-16 h-16 xs:w-20 xs:h-20 sm:w-24 sm:h-24 rounded-2xl border-2 border-dashed border-white/20 bg-white/10 flex flex-col items-center justify-center shrink-0 p-1">
+                              <Package className="w-7 h-7 text-red-400" />
+                              <span className="text-[8px] text-white/50 font-bold uppercase mt-1">Sem foto</span>
                             </div>
                           )}
 
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-[10px] font-black text-red-400 uppercase tracking-widest font-mono">
-                                {currentGuidedProduct.brand || 'Marca'}
+                          <div className="min-w-0 flex-1 flex flex-col justify-center">
+                            {/* Badges de Marca, Peso e Código Interno */}
+                            <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                              <span className={`text-[10px] sm:text-[11px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md font-mono ${
+                                !currentGuidedProduct.isCompetitor && (currentGuidedProduct.brand || '').toLowerCase().includes('oetker')
+                                  ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40'
+                                  : !currentGuidedProduct.isCompetitor && ((currentGuidedProduct.brand || '').toLowerCase().includes('mavalerio') || (currentGuidedProduct.brand || '').toLowerCase().includes('mavalério'))
+                                  ? 'bg-purple-500/25 text-purple-300 border border-purple-500/40'
+                                  : 'bg-amber-500/25 text-amber-300 border border-amber-500/40'
+                              }`}>
+                                {currentGuidedProduct.brand || (currentGuidedProduct.isCompetitor ? 'Concorrente' : 'Dr. Oetker')}
                               </span>
                               {currentGuidedProduct.weight && (
-                                <span className="text-[10px] text-white/70 font-medium">
-                                  • {currentGuidedProduct.weight}
+                                <span className="text-[10px] sm:text-xs font-bold text-white/90 bg-white/10 px-2 py-0.5 rounded-md font-mono border border-white/10">
+                                  {currentGuidedProduct.weight}
+                                </span>
+                              )}
+                              {currentGuidedProduct.internalCode && (
+                                <span className="text-[9px] sm:text-[10px] font-mono text-white/60 bg-black/40 px-1.5 py-0.5 rounded border border-white/10">
+                                  #{currentGuidedProduct.internalCode}
                                 </span>
                               )}
                             </div>
+
+                            {/* Nome do Produto com Tipografia Maior e Destacada */}
                             <h3
-                              className="text-xs sm:text-sm font-black text-white truncate leading-tight mt-0.5"
+                              className="text-sm xs:text-base sm:text-lg font-black text-white leading-tight line-clamp-2 drop-shadow-xs"
                               title={currentGuidedProduct.name}
                             >
                               {currentGuidedProduct.name}
                             </h3>
 
-                            {/* Preço de Referência, Último Preço na Rede e Manter Preço */}
-                            {(() => {
-                              const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId, selectedState);
-                              const hasLastPrice = !!lastRec && lastRec.price > 0;
-                              const recState = lastRec?.state || selectedState || 'Minas Gerais';
-                              const recUf = RESEARCH_STATES.find(s => s.name === recState)?.uf || recState;
-
-                              return (
-                                <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
-                                  <div className="flex items-center gap-1.5">
-                                    {hasLastPrice ? (
-                                      <span className="text-[11px] font-mono font-bold text-amber-300 bg-amber-950/75 border border-amber-500/40 px-2 py-0.5 rounded-md">
-                                        Último ({recUf}): R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                                      </span>
-                                    ) : currentGuidedProduct.basePrice > 0 ? (
-                                      <span className="text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/75 border border-emerald-500/40 px-2 py-0.5 rounded-md">
-                                        Ref: R$ {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
-                                      </span>
-                                    ) : null}
-                                  </div>
-
-                                  {hasLastPrice && (
-                                    <label
-                                      htmlFor="camera-keep-price-toggle"
-                                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all cursor-pointer select-none shrink-0 ${
-                                        keepCurrentPrice
-                                          ? 'bg-emerald-500/35 border-emerald-400 text-emerald-300 ring-1 ring-emerald-400/60 shadow-xs'
-                                          : 'bg-white/10 hover:bg-white/15 border-white/20 text-white/90'
-                                      }`}
-                                    >
-                                      <input
-                                        id="camera-keep-price-toggle"
-                                        type="checkbox"
-                                        checked={keepCurrentPrice}
-                                        onChange={(e) => setKeepCurrentPrice(e.target.checked)}
-                                        className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-0 border-white/30 bg-black/40 cursor-pointer accent-emerald-500"
-                                      />
-                                      <span className="font-extrabold whitespace-nowrap">
-                                        Manter preço
-                                      </span>
-                                    </label>
-                                  )}
-                                </div>
-                              );
-                            })()}
+                            {/* Categoria / Subcategoria */}
+                            {(currentGuidedProduct.category || currentGuidedProduct.subcategory) && (
+                              <p className="text-[11px] text-white/70 truncate mt-1">
+                                {currentGuidedProduct.category}{currentGuidedProduct.subcategory ? ` • ${currentGuidedProduct.subcategory}` : ''}
+                              </p>
+                            )}
                           </div>
                         </div>
                       </motion.div>
                     ) : (
                       /* Modo Livre Banner */
-                      freeModeSelectedProduct ? (
-                        <div className="bg-black/75 backdrop-blur-md border border-white/25 rounded-2xl p-2.5 sm:p-3 text-white shadow-2xl max-w-2xl mx-auto">
-                          {/* Subheader do Modo Livre com Produto Vinculado */}
-                          <div className="flex items-center justify-between pb-1.5 border-b border-white/10 mb-2">
+                      <div className="bg-black/65 backdrop-blur-md border border-white/20 rounded-2xl p-2.5 sm:p-3 text-white shadow-2xl max-w-2xl mx-auto flex items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-red-600/30 border border-red-500/50 flex items-center justify-center text-red-400 shrink-0">
+                            <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
+                          </div>
+                          <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                              <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300 font-mono">
-                                Modo Livre • Produto Vinculado (Opcional)
-                              </span>
+                              <span className="text-xs font-black text-white block">Modo Livre</span>
+                              <span className="text-[9px] font-bold text-white/60 bg-white/10 px-1.5 py-0.2 rounded font-mono">Sem fila</span>
                             </div>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setShowFreeModeProductPicker(true);
-                                  setFreeModeSearchText('');
-                                }}
-                                className="text-[10px] font-bold text-white/90 hover:text-white bg-white/15 px-2 py-0.5 rounded-md hover:bg-white/25 transition cursor-pointer"
-                                title="Trocar produto vinculado"
-                              >
-                                Trocar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setFreeModeSelectedProduct(null);
-                                  setKeepCurrentPrice(false);
-                                }}
-                                className="text-[10px] font-bold text-rose-300 hover:text-rose-100 bg-rose-950/60 px-2 py-0.5 rounded-md border border-rose-500/30 hover:bg-rose-900 transition cursor-pointer"
-                                title="Remover vínculo deste produto no modo livre"
-                              >
-                                Desvincular
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Detalhes do Produto Selecionado */}
-                          <div className="flex items-center gap-3">
-                            {freeModeSelectedProduct.imageUrl ? (
-                              <button
-                                type="button"
-                                onClick={() => setFullscreenProductPhoto({
-                                  url: freeModeSelectedProduct.imageUrl!,
-                                  name: freeModeSelectedProduct.name
-                                })}
-                                className="relative group w-11 h-11 sm:w-13 sm:h-13 rounded-xl overflow-hidden border border-white/20 bg-white shrink-0 p-0.5 cursor-pointer"
-                                title="Ver foto ampliada"
-                              >
-                                <img
-                                  src={freeModeSelectedProduct.imageUrl}
-                                  alt={freeModeSelectedProduct.name}
-                                  className="w-full h-full object-contain"
-                                  referrerPolicy="no-referrer"
-                                />
-                              </button>
-                            ) : (
-                              <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-xl border border-white/20 bg-white/10 flex items-center justify-center shrink-0 text-slate-300">
-                                <Package className="w-6 h-6" />
-                              </div>
-                            )}
-
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5 flex-wrap">
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-white/70 font-mono">
-                                  {freeModeSelectedProduct.brand || 'Marca'}
-                                </span>
-                                {freeModeSelectedProduct.weight && (
-                                  <span className="text-[10px] text-white/70 font-mono">
-                                    • {freeModeSelectedProduct.weight}
-                                  </span>
-                                )}
-                                {freeModeSelectedProduct.internalCode && (
-                                  <span className="text-[9px] font-mono text-white/60 bg-white/10 px-1 rounded">
-                                    #{freeModeSelectedProduct.internalCode}
-                                  </span>
-                                )}
-                              </div>
-
-                              <h3 className="text-xs sm:text-sm font-black text-white truncate leading-tight">
-                                {freeModeSelectedProduct.name}
-                              </h3>
-
-                              {(() => {
-                                const lastRec = getLastPriceForProductInChain(freeModeSelectedProduct.id, selectedChainId, selectedState);
-                                const hasLastPrice = !!lastRec && lastRec.price > 0;
-                                const recState = lastRec?.state || selectedState || 'Minas Gerais';
-                                const recUf = RESEARCH_STATES.find(s => s.name === recState)?.uf || recState;
-
-                                return (
-                                  <div className="flex items-center justify-between gap-2 mt-1.5 flex-wrap">
-                                    <div className="flex items-center gap-1.5">
-                                      {hasLastPrice ? (
-                                        <span className="text-[10px] sm:text-[11px] font-mono font-bold text-amber-300 bg-amber-950/75 border border-amber-500/40 px-2 py-0.5 rounded-md">
-                                          Último ({recUf}): R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                                        </span>
-                                      ) : freeModeSelectedProduct.basePrice > 0 ? (
-                                        <span className="text-[10px] sm:text-[11px] font-mono font-bold text-emerald-400 bg-emerald-950/75 border border-emerald-500/40 px-2 py-0.5 rounded-md">
-                                          Ref: R$ {freeModeSelectedProduct.basePrice.toFixed(2).replace('.', ',')}
-                                        </span>
-                                      ) : null}
-                                    </div>
-
-                                    {hasLastPrice && (
-                                      <label
-                                        htmlFor="free-camera-keep-price-toggle"
-                                        className={`flex items-center gap-1.5 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg border text-[10px] sm:text-[11px] font-bold transition-all cursor-pointer select-none shrink-0 ${
-                                          keepCurrentPrice
-                                            ? 'bg-emerald-500/35 border-emerald-400 text-emerald-300 ring-1 ring-emerald-400/60 shadow-xs'
-                                            : 'bg-white/10 hover:bg-white/15 border-white/20 text-white/90'
-                                        }`}
-                                      >
-                                        <input
-                                          id="free-camera-keep-price-toggle"
-                                          type="checkbox"
-                                          checked={keepCurrentPrice}
-                                          onChange={(e) => setKeepCurrentPrice(e.target.checked)}
-                                          className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-0 border-white/30 bg-black/40 cursor-pointer accent-emerald-500"
-                                        />
-                                        <span className="font-extrabold whitespace-nowrap">
-                                          Manter preço
-                                        </span>
-                                      </label>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </div>
+                            <span className="text-[11px] text-white/70 block truncate">Aponte para o produto e etiqueta de preço</span>
                           </div>
                         </div>
-                      ) : (
-                        <div className="bg-black/65 backdrop-blur-md border border-white/20 rounded-2xl p-2.5 sm:p-3 text-white shadow-2xl max-w-2xl mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-red-600/30 border border-red-500/50 flex items-center justify-center text-red-400 shrink-0">
-                              <Camera className="w-4 h-4 sm:w-5 sm:h-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-black text-white block">Modo Livre</span>
-                                <span className="text-[9px] font-bold text-white/60 bg-white/10 px-1.5 py-0.2 rounded font-mono">Sem fila</span>
-                              </div>
-                              <span className="text-[11px] text-white/70 block truncate">Aponte para o produto e etiqueta de preço</span>
-                            </div>
-                          </div>
 
-                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setShowFreeModeProductPicker(true);
-                                setFreeModeSearchText('');
-                              }}
-                              className="text-[11px] font-bold text-white bg-white/20 hover:bg-white/30 active:scale-95 border border-white/30 px-3 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 backdrop-blur-sm shadow-xs"
-                              title="Vincular a um produto específico do catálogo (opcional)"
-                            >
-                              <Package className="w-3.5 h-3.5 text-amber-300" />
-                              <span>Vincular produto (opcional)</span>
-                            </button>
-
-                            {batchItems.length > 0 && (
-                              <span className="text-[11px] font-mono font-bold text-white bg-white/15 px-2.5 py-1.5 rounded-xl border border-white/20">
-                                {batchItems.length} {batchItems.length === 1 ? 'foto' : 'fotos'}
-                              </span>
-                            )}
+                        {batchItems.length > 0 && (
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className="text-[11px] font-mono font-bold text-white bg-white/15 px-2.5 py-1.5 rounded-xl border border-white/20">
+                              {batchItems.length} {batchItems.length === 1 ? 'foto' : 'fotos'}
+                            </span>
                           </div>
-                        </div>
-                      )
+                        )}
+                      </div>
                     )}
                   </div>
 
@@ -3380,6 +3292,64 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
                         </div>
                       </div>
                     )}
+
+                    {/* Barra Superior aos Controles: Último Preço & Manter Preço (posicionada acima do botão de captura para telas verticais/mobile) */}
+                    {currentGuidedProduct && (() => {
+                      const lastRec = getLastPriceForProductInChain(currentGuidedProduct.id, selectedChainId, selectedState);
+                      const hasLastPrice = !!lastRec && lastRec.price > 0;
+                      const recState = lastRec?.state || selectedState || 'Minas Gerais';
+                      const recUf = RESEARCH_STATES.find(s => s.name === recState)?.uf || recState;
+
+                      if (!hasLastPrice && !(currentGuidedProduct.basePrice > 0)) return null;
+
+                      return (
+                        <div className="flex items-center justify-center gap-2 sm:gap-3 w-full max-w-md px-1 mb-1.5 animate-fade-in select-none">
+                          {/* Último Preço registrado nesta rede */}
+                          {hasLastPrice ? (
+                            <div className="flex items-center gap-1.5 bg-black/85 backdrop-blur-md border border-amber-500/60 px-3 py-1.5 rounded-xl shadow-lg">
+                              <span className="text-[10px] sm:text-[11px] font-mono text-amber-300/80 font-bold uppercase tracking-wider">
+                                Último ({recUf}):
+                              </span>
+                              <span className="text-xs sm:text-sm font-mono font-black text-amber-300">
+                                R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                              </span>
+                            </div>
+                          ) : currentGuidedProduct.basePrice > 0 ? (
+                            <div className="flex items-center gap-1.5 bg-black/85 backdrop-blur-md border border-emerald-500/60 px-3 py-1.5 rounded-xl shadow-lg">
+                              <span className="text-[10px] sm:text-[11px] font-mono text-emerald-400/80 font-bold uppercase tracking-wider">
+                                Ref:
+                              </span>
+                              <span className="text-xs sm:text-sm font-mono font-black text-emerald-400">
+                                R$ {currentGuidedProduct.basePrice.toFixed(2).replace('.', ',')}
+                              </span>
+                            </div>
+                          ) : null}
+
+                          {/* Botão de Manter Preço */}
+                          {hasLastPrice && (
+                            <label
+                              htmlFor="camera-keep-price-toggle"
+                              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl border text-xs sm:text-[13px] font-black transition-all cursor-pointer select-none shadow-lg active:scale-95 ${
+                                keepCurrentPrice
+                                  ? 'bg-emerald-500/90 border-emerald-400 text-white ring-2 ring-emerald-400/60 shadow-emerald-900/40'
+                                  : 'bg-black/80 hover:bg-black/90 border-white/30 text-white/90 backdrop-blur-md'
+                              }`}
+                            >
+                              <input
+                                id="camera-keep-price-toggle"
+                                type="checkbox"
+                                checked={keepCurrentPrice}
+                                onChange={(e) => setKeepCurrentPrice(e.target.checked)}
+                                className="w-4 h-4 rounded text-emerald-500 focus:ring-0 border-white/40 bg-black/40 cursor-pointer accent-emerald-500"
+                              />
+                              <span className="whitespace-nowrap tracking-wide">
+                                Manter preço
+                              </span>
+                            </label>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Linha de Controles: [Pular item] [Pular categoria] - [🔴 Botão Vermelho Redondo] - [Não tem na loja] [Concluir] */}
                     <div className="flex items-center justify-between w-full max-w-md gap-1 xs:gap-1.5 sm:gap-2.5 px-1">
@@ -4311,7 +4281,7 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
         </div>
       )}
 
-      {/* Modal para digitar o preço na hora caso não tenha marcado "Manter Preço" */}
+      {/* Modal para digitar o preço na hora e vincular produto (Modo Livre / Modo Guiado) */}
       {pendingPriceModal && (
         <div
           id="immediate-price-input-modal"
@@ -4321,599 +4291,407 @@ export function RegisterPrice({ products, chains, records = [], onSaveRecord, on
             className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl border border-slate-150 animate-scale-up flex flex-col max-h-[92vh]"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header com preview da foto capturada */}
-            <div className="relative bg-slate-900 h-36 sm:h-44 w-full overflow-hidden flex items-center justify-center shrink-0">
-              <img
-                src={pendingPriceModal.dataUrl}
-                alt="Foto capturada"
-                className="w-full h-full object-contain bg-black/40"
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-xs text-white text-[10px] font-bold font-mono px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-xs">
-                <Camera className="w-3 h-3 text-amber-400" />
-                Foto Capturada
-              </div>
-            </div>
+            {pendingPriceModal.step === 'product' ? (
+              /* ======================================================== */
+              /* ETAPA 2 (Modo Livre): Vincular a Algum Produto          */
+              /* ======================================================== */
+              <div className="flex flex-col h-full max-h-[92vh] overflow-hidden">
+                {/* Header compacto com resumo do preço inserido */}
+                <div className="p-4 sm:p-5 border-b border-slate-150 bg-slate-50/90 flex items-center justify-between gap-3 shrink-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-slate-900 overflow-hidden shrink-0 border border-slate-200 shadow-2xs">
+                      <img
+                        src={pendingPriceModal.dataUrl}
+                        alt="Foto capturada"
+                        className="w-full h-full object-contain"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
+                          Preço Informado
+                        </span>
+                        <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.2 rounded font-mono">
+                          OK
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-1 mt-0.5">
+                        <span className="text-xs font-bold text-slate-400 font-mono">R$</span>
+                        <span className="text-xl sm:text-2xl font-black text-[#D40511] font-mono leading-none">
+                          {immediatePrice}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-            {/* Conteúdo scrollável */}
-            <div className="p-4 sm:p-6 flex flex-col gap-3.5 sm:gap-4 overflow-y-auto">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
-                    Informe o Preço de Varejo na Gôndola
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingPriceModal(prev => prev ? { ...prev, step: 'price' } : null)}
+                    className="text-xs font-bold text-slate-600 hover:text-slate-900 bg-white border border-slate-200 hover:bg-slate-100 px-2.5 py-1.5 rounded-xl transition cursor-pointer shrink-0 shadow-2xs"
+                    title="Editar valor digitado"
+                  >
+                    Editar preço
+                  </button>
                 </div>
-                <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">
-                  Registro de Preço de Varejo
-                </h3>
-              </div>
 
-              {/* Seção: Produto Vinculado (Opcional no Modo Livre) */}
-              <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 sm:p-3.5">
-                {showModalProductPicker ? (
-                  /* Busca integrada de produto no modal */
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200">
-                      <span className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
-                        <Search className="w-3.5 h-3.5 text-[#D40511]" />
-                        Selecione o Produto (Opcional)
-                      </span>
+                {/* Título e orientações */}
+                <div className="px-4 pt-3.5 pb-2 sm:px-5 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-red-100 text-[#D40511] rounded-lg shrink-0">
+                      <Package className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm sm:text-base font-black text-slate-800 leading-tight">
+                        Vincular a Algum Produto
+                      </h3>
+                      <p className="text-[11px] text-slate-500 font-medium">
+                        Selecione o produto do catálogo ou clique em <strong>Vincular depois</strong>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Barra de busca e filtros */}
+                <div className="px-4 pb-2.5 sm:px-5 space-y-2 shrink-0">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      autoFocus
+                      value={modalProductSearchText}
+                      onChange={(e) => setModalProductSearchText(e.target.value)}
+                      placeholder="Buscar por nome, marca ou código..."
+                      className="w-full pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold placeholder:text-slate-400 text-slate-800 focus:outline-none focus:bg-white focus:border-[#D40511] focus:ring-1 focus:ring-[#D40511]"
+                    />
+                    {modalProductSearchText && (
                       <button
                         type="button"
-                        onClick={() => {
-                          setShowModalProductPicker(false);
-                          setModalProductSearchText('');
-                        }}
-                        className="text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer"
+                        onClick={() => setModalProductSearchText('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
                       >
-                        Cancelar
+                        <X className="w-4 h-4" />
                       </button>
-                    </div>
-
-                    <div className="relative">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
-                      <input
-                        type="text"
-                        autoFocus
-                        value={modalProductSearchText}
-                        onChange={(e) => setModalProductSearchText(e.target.value)}
-                        placeholder="Buscar por nome, marca ou código..."
-                        className="w-full pl-8 pr-7 py-2 bg-white border border-slate-200 rounded-xl text-xs font-semibold placeholder:text-slate-400 text-slate-800 focus:outline-none focus:border-[#D40511] focus:ring-1 focus:ring-[#D40511]"
-                      />
-                      {modalProductSearchText && (
-                        <button
-                          type="button"
-                          onClick={() => setModalProductSearchText('')}
-                          className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Chips de filtro */}
-                    <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
-                      {[
-                        { id: 'all', label: 'Todos' },
-                        { id: 'oetker', label: 'Dr. Oetker' },
-                        { id: 'mavalerio', label: 'Mavalério' },
-                        { id: 'competitor', label: 'Concorrentes' },
-                      ].map((filter) => (
-                        <button
-                          key={filter.id}
-                          type="button"
-                          onClick={() => setModalProductBrandFilter(filter.id as any)}
-                          className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold transition whitespace-nowrap cursor-pointer ${
-                            modalProductBrandFilter === filter.id
-                              ? 'bg-[#D40511] text-white'
-                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
-                          }`}
-                        >
-                          {filter.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Lista com scroll dos produtos */}
-                    <div className="max-h-48 overflow-y-auto divide-y divide-slate-100 bg-white rounded-xl border border-slate-200/80 p-1">
-                      {(() => {
-                        const items = getFilteredCatalogProducts(modalProductSearchText, modalProductBrandFilter);
-                        if (items.length === 0) {
-                          return (
-                            <div className="py-6 text-center text-slate-400">
-                              <p className="text-xs font-bold">Nenhum produto encontrado</p>
-                              <p className="text-[10px] text-slate-400 mt-0.5">Tente outro termo de busca</p>
-                            </div>
-                          );
-                        }
-
-                        return items.map((p) => {
-                          const lastRec = getLastPriceForProductInChain(p.id, selectedChainId, selectedState);
-                          const isOetker = !p.isCompetitor && (p.brand || '').toLowerCase().includes('oetker');
-                          const isMavalerio = !p.isCompetitor && ((p.brand || '').toLowerCase().includes('mavalerio') || (p.brand || '').toLowerCase().includes('mavalério'));
-
-                          return (
-                            <div
-                              key={p.id}
-                              onClick={() => {
-                                setPendingPriceModal(prev => prev ? { ...prev, targetProduct: p } : null);
-                                setShowModalProductPicker(false);
-                                setModalProductSearchText('');
-                                // Sugere preço caso esteja zerado
-                                if (immediatePrice === '0,00') {
-                                  if (lastRec && lastRec.price > 0) {
-                                    setImmediatePrice(lastRec.price.toFixed(2).replace('.', ','));
-                                  } else if (p.basePrice > 0) {
-                                    setImmediatePrice(p.basePrice.toFixed(2).replace('.', ','));
-                                  }
-                                }
-                              }}
-                              className="p-2 hover:bg-slate-50 rounded-lg transition cursor-pointer flex items-center justify-between gap-2.5"
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 p-0.5">
-                                  {p.imageUrl ? (
-                                    <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                                  ) : (
-                                    <Package className="w-4 h-4 text-slate-300" />
-                                  )}
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1">
-                                    <span
-                                      className={`text-[8px] font-black uppercase tracking-wider px-1 py-0.2 rounded font-mono ${
-                                        isOetker
-                                          ? 'bg-emerald-100 text-emerald-800'
-                                          : isMavalerio
-                                          ? 'bg-purple-100 text-purple-800'
-                                          : 'bg-amber-100 text-amber-800'
-                                      }`}
-                                    >
-                                      {p.brand || (p.isCompetitor ? 'Concorrente' : 'Dr. Oetker')}
-                                    </span>
-                                    {p.weight && (
-                                      <span className="text-[9px] text-slate-400">
-                                        • {p.weight}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <h4 className="text-xs font-bold text-slate-800 truncate">
-                                    {p.name}
-                                  </h4>
-                                </div>
-                              </div>
-
-                              <div className="text-right shrink-0 flex flex-col items-end">
-                                {lastRec && lastRec.price > 0 ? (
-                                  <span className="text-[9px] font-mono font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200">
-                                    R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                                  </span>
-                                ) : p.basePrice > 0 ? (
-                                  <span className="text-[9px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                                    R$ {p.basePrice.toFixed(2).replace('.', ',')}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          );
-                        });
-                      })()}
-                    </div>
+                    )}
                   </div>
-                ) : pendingPriceModal.targetProduct ? (
-                  /* Produto vinculado exibido com opção de trocar ou desvincular */
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between pb-1 border-b border-slate-200/80">
-                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 font-mono flex items-center gap-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        Produto Vinculado (Opcional)
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowModalProductPicker(true);
-                            setModalProductSearchText('');
-                          }}
-                          className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition cursor-pointer"
-                        >
-                          Trocar
-                        </button>
-                        <span className="text-slate-300">|</span>
-                        <button
-                          type="button"
-                          onClick={() => setPendingPriceModal(prev => prev ? { ...prev, targetProduct: null } : null)}
-                          className="text-[11px] font-bold text-rose-600 hover:text-rose-800 transition cursor-pointer"
-                          title="Remover vínculo e registrar apenas com o preço"
-                        >
-                          Desvincular
-                        </button>
-                      </div>
-                    </div>
 
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 p-1">
-                        {pendingPriceModal.targetProduct.imageUrl ? (
-                          <img
-                            src={pendingPriceModal.targetProduct.imageUrl}
-                            alt={pendingPriceModal.targetProduct.name}
-                            className="w-full h-full object-contain"
-                            referrerPolicy="no-referrer"
-                          />
-                        ) : (
-                          <Package className="w-6 h-6 text-slate-300" />
-                        )}
-                      </div>
+                  {/* Chips de filtro */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                    {[
+                      { id: 'all', label: 'Todos' },
+                      { id: 'oetker', label: 'Dr. Oetker' },
+                      { id: 'mavalerio', label: 'Mavalério' },
+                      { id: 'competitor', label: 'Concorrentes' },
+                    ].map((filter) => (
+                      <button
+                        key={filter.id}
+                        type="button"
+                        onClick={() => setModalProductBrandFilter(filter.id as any)}
+                        className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold transition whitespace-nowrap cursor-pointer ${
+                          modalProductBrandFilter === filter.id
+                            ? 'bg-[#D40511] text-white shadow-2xs'
+                            : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                        }`}
+                      >
+                        {filter.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 font-mono">
-                            {pendingPriceModal.targetProduct.brand || 'Marca'}
-                          </span>
-                          {pendingPriceModal.targetProduct.weight && (
-                            <span className="text-[10px] text-slate-400 font-medium">
-                              • {pendingPriceModal.targetProduct.weight}
-                            </span>
-                          )}
-                          {pendingPriceModal.targetProduct.internalCode && (
-                            <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">
-                              #{pendingPriceModal.targetProduct.internalCode}
-                            </span>
-                          )}
+                {/* Lista rolável de produtos */}
+                <div className="flex-1 overflow-y-auto px-4 sm:px-5 py-1 space-y-1.5 divide-y divide-slate-100">
+                  {(() => {
+                    const items = getFilteredCatalogProducts(modalProductSearchText, modalProductBrandFilter);
+                    if (items.length === 0) {
+                      return (
+                        <div className="py-8 text-center text-slate-400 space-y-2">
+                          <PackageX className="w-8 h-8 mx-auto text-slate-300" />
+                          <p className="text-xs font-bold text-slate-600">Nenhum produto encontrado</p>
+                          <p className="text-[11px] text-slate-400">Tente buscar por outro termo ou vincule depois</p>
+                          <button
+                            type="button"
+                            onClick={handleSaveWithoutProduct}
+                            className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 rounded-xl text-xs font-bold transition cursor-pointer"
+                          >
+                            <Clock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>Vincular depois</span>
+                          </button>
                         </div>
-                        <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate leading-tight">
-                          {pendingPriceModal.targetProduct.name}
-                        </h4>
-                        <p className="text-[10px] text-slate-400 truncate">
-                          {pendingPriceModal.targetProduct.category}
-                        </p>
-                      </div>
-                    </div>
+                      );
+                    }
 
-                    {/* Preços de referência rápidos */}
-                    <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 flex-wrap">
-                      {pendingPriceModal.targetProduct.basePrice > 0 && (
-                        <button
-                          type="button"
-                          onClick={() => setImmediatePrice(pendingPriceModal.targetProduct!.basePrice.toFixed(2).replace('.', ','))}
-                          className="text-[10px] font-mono font-bold bg-white hover:bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200 transition cursor-pointer flex items-center gap-1"
-                          title="Preencher com o preço base de tabela"
+                    return items.map((p) => {
+                      const lastRec = getLastPriceForProductInChain(p.id, selectedChainId, selectedState);
+                      const isOetker = !p.isCompetitor && (p.brand || '').toLowerCase().includes('oetker');
+                      const isMavalerio = !p.isCompetitor && ((p.brand || '').toLowerCase().includes('mavalerio') || (p.brand || '').toLowerCase().includes('mavalério'));
+
+                      return (
+                        <div
+                          key={p.id}
+                          onClick={() => handleSaveWithProduct(p)}
+                          className="pt-1.5 first:pt-0 p-2 hover:bg-red-50/50 hover:border-red-200 border border-transparent rounded-xl transition cursor-pointer flex items-center justify-between gap-2.5 group"
                         >
-                          <span className="text-slate-400">Usar Base:</span>
-                          <strong className="text-slate-800">R$ {pendingPriceModal.targetProduct.basePrice.toFixed(2).replace('.', ',')}</strong>
-                        </button>
-                      )}
+                          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                            <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 p-0.5 group-hover:border-red-300 transition">
+                              {p.imageUrl ? (
+                                <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                              ) : (
+                                <Package className="w-5 h-5 text-slate-300" />
+                              )}
+                            </div>
 
-                      {(() => {
-                        const lastRec = getLastPriceForProductInChain(pendingPriceModal.targetProduct.id, selectedChainId, selectedState);
-                        if (lastRec && lastRec.price > 0) {
-                          return (
-                            <button
-                              type="button"
-                              onClick={() => setImmediatePrice(lastRec.price.toFixed(2).replace('.', ','))}
-                              className="text-[10px] font-mono font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200 transition cursor-pointer flex items-center gap-1"
-                              title="Preencher com o último preço registrado nesta rede"
-                            >
-                              <span className="text-amber-600">Usar Último:</span>
-                              <strong>R$ {lastRec.price.toFixed(2).replace('.', ',')}</strong>
-                            </button>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </div>
-                  </div>
-                ) : (
-                  /* Nenhum produto vinculado (opcional) */
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="w-8 h-8 rounded-xl bg-slate-200/70 flex items-center justify-center text-slate-500 shrink-0">
-                        <Package className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <span className="text-xs font-bold text-slate-800 block truncate">
-                          Nenhum produto vinculado
-                        </span>
-                        <span className="text-[10px] text-slate-400 block truncate">
-                          Opcional: vincule ao catálogo agora ou depois
-                        </span>
-                      </div>
-                    </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span
+                                  className={`text-[8.5px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded font-mono ${
+                                    isOetker
+                                      ? 'bg-emerald-100 text-emerald-800'
+                                      : isMavalerio
+                                      ? 'bg-purple-100 text-purple-800'
+                                      : 'bg-amber-100 text-amber-800'
+                                  }`}
+                                >
+                                  {p.brand || (p.isCompetitor ? 'Concorrente' : 'Dr. Oetker')}
+                                </span>
+                                {p.weight && (
+                                  <span className="text-[10px] text-slate-400">
+                                    • {p.weight}
+                                  </span>
+                                )}
+                                {p.internalCode && (
+                                  <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">
+                                    #{p.internalCode}
+                                  </span>
+                                )}
+                              </div>
+                              <h4 className="text-xs font-bold text-slate-800 truncate group-hover:text-[#D40511] transition">
+                                {p.name}
+                              </h4>
+                            </div>
+                          </div>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setShowModalProductPicker(true);
-                        setModalProductSearchText('');
-                      }}
-                      className="px-3 py-1.5 bg-[#D40511] hover:bg-[#b0040e] active:scale-95 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 cursor-pointer shadow-2xs"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Vincular</span>
-                    </button>
-                  </div>
-                )}
-              </div>
+                          <div className="text-right shrink-0 flex items-center gap-2">
+                            {lastRec && lastRec.price > 0 ? (
+                              <span className="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                                R$ {lastRec.price.toFixed(2).replace('.', ',')}
+                              </span>
+                            ) : p.basePrice > 0 ? (
+                              <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                                R$ {p.basePrice.toFixed(2).replace('.', ',')}
+                              </span>
+                            ) : null}
 
-              {/* Input Numérico com shift de decimais da direita pra esquerda */}
-              <div className="bg-slate-50 border-2 border-slate-200 focus-within:border-[#D40511] focus-within:bg-white rounded-2xl p-3.5 sm:p-4 transition flex flex-col items-center justify-center shadow-2xs">
-                <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1">
-                  Preço de Varejo (R$)
-                </label>
-                <div className="flex items-baseline justify-center gap-1.5 w-full">
-                  <span className="text-2xl font-black text-slate-400 font-mono">R$</span>
-                  <input
-                    id="input-immediate-price"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoFocus
-                    value={immediatePrice}
-                    onChange={(e) => setImmediatePrice(formatToCalculatorPrice(e.target.value))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleConfirmImmediatePrice();
-                      }
-                    }}
-                    className="w-48 text-center text-3xl sm:text-4xl font-black font-mono text-[#D40511] bg-transparent outline-hidden border-b-2 border-slate-300 focus:border-[#D40511] tracking-tight"
-                    placeholder="0,00"
-                  />
+                            <span className="text-xs font-bold text-[#D40511] group-hover:translate-x-0.5 transition flex items-center">
+                              <ChevronRight className="w-4 h-4" />
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+
+                {/* Footer de ações da Etapa 2 */}
+                <div className="p-3 sm:p-4 border-t border-slate-150 bg-slate-50/90 flex items-center justify-between gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPendingPriceModal(prev => prev ? { ...prev, step: 'price' } : null)}
+                    className="py-2.5 px-3.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Voltar</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    id="btn-link-product-later"
+                    onClick={handleSaveWithoutProduct}
+                    className="py-2.5 px-4 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-black rounded-xl text-xs uppercase tracking-wider transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+                    title="Salvar registro e vincular o produto depois"
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Vincular depois</span>
+                  </button>
                 </div>
               </div>
+            ) : (
+              /* ======================================================== */
+              /* ETAPA 1: Inserir o Preço                                */
+              /* ======================================================== */
+              <div className="flex flex-col h-full overflow-hidden">
+                {/* Header com preview da foto capturada */}
+                <div className="relative bg-slate-900 h-36 sm:h-44 w-full overflow-hidden flex items-center justify-center shrink-0">
+                  <img
+                    src={pendingPriceModal.dataUrl}
+                    alt="Foto capturada"
+                    className="w-full h-full object-contain bg-black/40"
+                    referrerPolicy="no-referrer"
+                  />
+                  <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-xs text-white text-[10px] font-bold font-mono px-2.5 py-1 rounded-full flex items-center gap-1.5 shadow-xs">
+                    <Camera className="w-3 h-3 text-amber-400" />
+                    Foto Capturada
+                  </div>
+                </div>
 
-              {/* Botões de Ação */}
-              <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
-                <button
-                  type="button"
-                  id="btn-cancel-immediate-price"
-                  onClick={handleCancelImmediatePrice}
-                  className="order-2 sm:order-1 flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition duration-150 cursor-pointer text-center"
-                >
-                  Tirar outra foto
-                </button>
-                <button
-                  type="button"
-                  id="btn-confirm-immediate-price"
-                  onClick={handleConfirmImmediatePrice}
-                  disabled={immediatePrice === '0,00'}
-                  className="order-1 sm:order-2 flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-wider transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2"
-                >
-                  <Check className="w-4 h-4 text-white shrink-0" />
-                  <span>{useGuidedMode ? 'Confirmar & Próximo' : 'Confirmar Preço'}</span>
-                </button>
+                {/* Conteúdo scrollável */}
+                <div className="p-4 sm:p-6 flex flex-col gap-3.5 sm:gap-4 overflow-y-auto">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 font-mono">
+                        {useGuidedMode ? 'Confirmação de Preço' : 'Preço de Gôndola'}
+                      </span>
+                    </div>
+                    <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">
+                      {useGuidedMode ? 'Informe o Preço na Gôndola' : 'Inserir Preço'}
+                    </h3>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      {useGuidedMode
+                        ? 'Digite o valor de varejo encontrado para o produto abaixo'
+                        : 'Digite o valor de varejo para continuar'}
+                    </p>
+                  </div>
+
+                  {/* Se estiver no Modo Guiado: exibe card do produto que está sendo auditado */}
+                  {useGuidedMode && pendingPriceModal.targetProduct && (
+                    <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-3 sm:p-3.5 space-y-2">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 p-1">
+                          {pendingPriceModal.targetProduct.imageUrl ? (
+                            <img
+                              src={pendingPriceModal.targetProduct.imageUrl}
+                              alt={pendingPriceModal.targetProduct.name}
+                              className="w-full h-full object-contain"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <Package className="w-6 h-6 text-slate-300" />
+                          )}
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500 font-mono">
+                              {pendingPriceModal.targetProduct.brand || 'Marca'}
+                            </span>
+                            {pendingPriceModal.targetProduct.weight && (
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                • {pendingPriceModal.targetProduct.weight}
+                              </span>
+                            )}
+                            {pendingPriceModal.targetProduct.internalCode && (
+                              <span className="text-[9px] font-mono text-slate-400 bg-slate-100 px-1 rounded">
+                                #{pendingPriceModal.targetProduct.internalCode}
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="text-xs sm:text-sm font-black text-slate-900 truncate leading-tight">
+                            {pendingPriceModal.targetProduct.name}
+                          </h4>
+                          <p className="text-[10px] text-slate-400 truncate">
+                            {pendingPriceModal.targetProduct.category}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Atalhos de preço */}
+                      <div className="flex items-center gap-1.5 pt-1.5 border-t border-slate-200/60 flex-wrap">
+                        {pendingPriceModal.targetProduct.basePrice > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setImmediatePrice(pendingPriceModal.targetProduct!.basePrice.toFixed(2).replace('.', ','))}
+                            className="text-[10px] font-mono font-bold bg-white hover:bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border border-slate-200 transition cursor-pointer flex items-center gap-1"
+                            title="Preencher com o preço base de tabela"
+                          >
+                            <span className="text-slate-400">Usar Base:</span>
+                            <strong className="text-slate-800">R$ {pendingPriceModal.targetProduct.basePrice.toFixed(2).replace('.', ',')}</strong>
+                          </button>
+                        )}
+
+                        {(() => {
+                          const lastRec = getLastPriceForProductInChain(pendingPriceModal.targetProduct.id, selectedChainId, selectedState);
+                          if (lastRec && lastRec.price > 0) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => setImmediatePrice(lastRec.price.toFixed(2).replace('.', ','))}
+                                className="text-[10px] font-mono font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200 transition cursor-pointer flex items-center gap-1"
+                                title="Preencher com o último preço registrado nesta rede"
+                              >
+                                <span className="text-amber-600">Usar Último:</span>
+                                <strong>R$ {lastRec.price.toFixed(2).replace('.', ',')}</strong>
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Input Numérico com shift de decimais da direita pra esquerda */}
+                  <div className="bg-slate-50 border-2 border-slate-200 focus-within:border-[#D40511] focus-within:bg-white rounded-2xl p-4 sm:p-5 transition flex flex-col items-center justify-center shadow-2xs">
+                    <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-1.5">
+                      Preço de Varejo (R$)
+                    </label>
+                    <div className="flex items-baseline justify-center gap-1.5 w-full">
+                      <span className="text-2xl font-black text-slate-400 font-mono">R$</span>
+                      <input
+                        id="input-immediate-price"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        autoFocus
+                        value={immediatePrice}
+                        onChange={(e) => setImmediatePrice(formatToCalculatorPrice(e.target.value))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleConfirmImmediatePrice();
+                          }
+                        }}
+                        className="w-48 text-center text-3xl sm:text-4xl font-black font-mono text-[#D40511] bg-transparent outline-hidden border-b-2 border-slate-300 focus:border-[#D40511] tracking-tight"
+                        placeholder="0,00"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Botões de Ação da Etapa 1 */}
+                  <div className="flex flex-col sm:flex-row gap-2.5 pt-1">
+                    <button
+                      type="button"
+                      id="btn-cancel-immediate-price"
+                      onClick={handleCancelImmediatePrice}
+                      className="order-2 sm:order-1 flex-1 py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition duration-150 cursor-pointer text-center"
+                    >
+                      Tirar outra foto
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-confirm-immediate-price"
+                      onClick={handleConfirmImmediatePrice}
+                      disabled={immediatePrice === '0,00'}
+                      className="order-1 sm:order-2 flex-1 py-3.5 px-6 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-xl text-xs font-black uppercase tracking-wider transition duration-150 cursor-pointer shadow-md flex items-center justify-center gap-2"
+                    >
+                      {useGuidedMode ? (
+                        <>
+                          <Check className="w-4 h-4 text-white shrink-0" />
+                          <span>Confirmar & Próximo</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>Avançar</span>
+                          <ArrowRight className="w-4 h-4 text-white shrink-0" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       )}
-
-      {/* Modal: Vincular Produto no Modo Livre da Câmera (Opcional) */}
-      <AnimatePresence>
-        {showFreeModeProductPicker && (
-          <div
-            id="free-mode-product-picker-modal"
-            className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-xs animate-fade-in"
-            onClick={() => {
-              setShowFreeModeProductPicker(false);
-              setFreeModeSearchText('');
-            }}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 12 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 12 }}
-              transition={{ duration: 0.18 }}
-              className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh] border border-slate-200"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Header */}
-              <div className="p-4 sm:p-5 border-b border-slate-150 flex items-center justify-between gap-3 bg-slate-50/80">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-red-100 text-[#D40511] rounded-xl shrink-0">
-                    <Package className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-black text-slate-800">
-                      Vincular a um Produto (Opcional)
-                    </h3>
-                    <p className="text-[11px] text-slate-500">
-                      Modo Livre da Câmera • Opção não obrigatória
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowFreeModeProductPicker(false);
-                    setFreeModeSearchText('');
-                  }}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded-xl transition cursor-pointer"
-                  title="Fechar"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Barra de Busca & Filtros de Marca */}
-              <div className="p-3 sm:p-4 border-b border-slate-150 bg-white space-y-2.5">
-                <div className="relative">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input
-                    type="text"
-                    autoFocus
-                    value={freeModeSearchText}
-                    onChange={(e) => setFreeModeSearchText(e.target.value)}
-                    placeholder="Buscar por nome, marca, código ou categoria..."
-                    className="w-full pl-9 pr-9 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm font-semibold placeholder:text-slate-400 text-slate-800 focus:outline-none focus:bg-white focus:border-[#D40511] focus:ring-1 focus:ring-[#D40511]"
-                  />
-                  {freeModeSearchText && (
-                    <button
-                      type="button"
-                      onClick={() => setFreeModeSearchText('')}
-                      className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
-                  {[
-                    { id: 'all', label: 'Todos' },
-                    { id: 'oetker', label: 'Dr. Oetker' },
-                    { id: 'mavalerio', label: 'Mavalério' },
-                    { id: 'competitor', label: 'Concorrentes' },
-                  ].map((filter) => (
-                    <button
-                      key={filter.id}
-                      type="button"
-                      onClick={() => setFreeModeBrandFilter(filter.id as any)}
-                      className={`px-3 py-1 rounded-full text-xs font-bold transition whitespace-nowrap cursor-pointer ${
-                        freeModeBrandFilter === filter.id
-                          ? 'bg-[#D40511] text-white shadow-2xs'
-                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
-                      }`}
-                    >
-                      {filter.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Lista de Produtos */}
-              <div className="flex-1 overflow-y-auto p-3 sm:p-4 space-y-2 divide-y divide-slate-100">
-                {(() => {
-                  const filtered = getFilteredCatalogProducts(freeModeSearchText, freeModeBrandFilter);
-                  if (filtered.length === 0) {
-                    return (
-                      <div className="py-12 text-center text-slate-400">
-                        <PackageX className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-                        <p className="text-xs font-bold">Nenhum produto encontrado</p>
-                        <p className="text-[11px] text-slate-400 mt-1">Tente pesquisar com outros termos</p>
-                      </div>
-                    );
-                  }
-
-                  return filtered.map((p) => {
-                    const isSelected = freeModeSelectedProduct?.id === p.id;
-                    const lastRec = getLastPriceForProductInChain(p.id, selectedChainId, selectedState);
-                    const isOetker = !p.isCompetitor && (p.brand || '').toLowerCase().includes('oetker');
-                    const isMavalerio = !p.isCompetitor && ((p.brand || '').toLowerCase().includes('mavalerio') || (p.brand || '').toLowerCase().includes('mavalério'));
-
-                    return (
-                      <div
-                        key={p.id}
-                        onClick={() => {
-                          setFreeModeSelectedProduct(p);
-                          setShowFreeModeProductPicker(false);
-                          setFreeModeSearchText('');
-                        }}
-                        className={`pt-2 first:pt-0 p-2.5 rounded-xl transition cursor-pointer flex items-center justify-between gap-3 ${
-                          isSelected
-                            ? 'bg-red-50/80 border border-red-200'
-                            : 'hover:bg-slate-50 border border-transparent'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3 min-w-0 flex-1">
-                          <div className="w-11 h-11 rounded-lg bg-white border border-slate-200 overflow-hidden flex items-center justify-center shrink-0 p-0.5">
-                            {p.imageUrl ? (
-                              <img src={p.imageUrl} alt={p.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
-                            ) : (
-                              <Package className="w-5 h-5 text-slate-300" />
-                            )}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span
-                                className={`text-[9px] font-black uppercase tracking-wider px-1.5 py-0.2 rounded font-mono ${
-                                  isOetker
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : isMavalerio
-                                    ? 'bg-purple-100 text-purple-800'
-                                    : 'bg-amber-100 text-amber-800'
-                                }`}
-                              >
-                                {p.brand || (p.isCompetitor ? 'Concorrente' : 'Dr. Oetker')}
-                              </span>
-                              {p.internalCode && (
-                                <span className="text-[9px] font-mono text-slate-400">
-                                  #{p.internalCode}
-                                </span>
-                              )}
-                              {p.weight && (
-                                <span className="text-[10px] text-slate-500 font-medium">
-                                  • {p.weight}
-                                </span>
-                              )}
-                            </div>
-                            <h4 className="text-xs sm:text-sm font-black text-slate-800 truncate mt-0.5">
-                              {p.name}
-                            </h4>
-                            <p className="text-[10px] text-slate-400 truncate">
-                              {p.category} {p.subcategory ? `• ${p.subcategory}` : ''}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="text-right shrink-0 flex flex-col items-end gap-1">
-                          {lastRec && lastRec.price > 0 ? (
-                            <span className="text-[10px] font-mono font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded">
-                              Último: R$ {lastRec.price.toFixed(2).replace('.', ',')}
-                            </span>
-                          ) : p.basePrice > 0 ? (
-                            <span className="text-[10px] font-mono font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded">
-                              Ref: R$ {p.basePrice.toFixed(2).replace('.', ',')}
-                            </span>
-                          ) : null}
-
-                          <span className="text-[10px] font-bold text-[#D40511] flex items-center gap-0.5">
-                            {isSelected ? 'Selecionado' : 'Vincular'}
-                            <ChevronRight className="w-3 h-3" />
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-
-              {/* Footer */}
-              <div className="p-3 sm:p-4 border-t border-slate-150 bg-slate-50 flex items-center justify-between gap-2">
-                {freeModeSelectedProduct ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFreeModeSelectedProduct(null);
-                      setShowFreeModeProductPicker(false);
-                      setFreeModeSearchText('');
-                    }}
-                    className="px-3.5 py-2 text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded-xl transition cursor-pointer"
-                  >
-                    Desvincular produto atual
-                  </button>
-                ) : (
-                  <span className="text-[11px] text-slate-400">
-                    A vinculação é opcional
-                  </span>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowFreeModeProductPicker(false);
-                    setFreeModeSearchText('');
-                  }}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-                >
-                  Continuar sem vincular
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Modal: Fila Completa de Itens para Auditoria com Destaque de Itens "Não tem na loja" */}
       <AnimatePresence>
