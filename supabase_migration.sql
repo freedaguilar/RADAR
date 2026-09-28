@@ -117,4 +117,19 @@ ALTER TABLE guided_campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Allow public all on guided_campaigns" ON guided_campaigns;
 CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL TO public USING (true) WITH CHECK (true);
 
+-- Create custom traditional queues table (Ajuste da Fila Tradicional pelo Gestor)
+CREATE TABLE IF NOT EXISTS custom_traditional_queues (
+  id TEXT PRIMARY KEY,
+  chain_id TEXT REFERENCES chains(id) ON DELETE CASCADE,
+  state TEXT NOT NULL DEFAULT 'Minas Gerais',
+  product_ids TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_by TEXT
+);
+
+-- Enable Row Level Security and allow public access for custom traditional queues
+ALTER TABLE custom_traditional_queues ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Allow public all on custom_traditional_queues" ON custom_traditional_queues;
+CREATE POLICY "Allow public all on custom_traditional_queues" ON custom_traditional_queues FOR ALL TO public USING (true) WITH CHECK (true);
+
 

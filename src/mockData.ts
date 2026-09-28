@@ -1,4 +1,4 @@
-import { Product, Chain, PriceRecord, User, GuidedCampaign, getChainStates } from './types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, getChainStates } from './types';
 
 export const INITIAL_GUIDED_CAMPAIGNS: GuidedCampaign[] = [
   {
@@ -325,6 +325,7 @@ export const getInitialState = (): {
   users: User[];
   currentUser: User | null;
   guidedCampaigns: GuidedCampaign[];
+  customTraditionalQueues: CustomTraditionalQueue[];
 } => {
   // Try loading from localStorage
   try {
@@ -356,7 +357,10 @@ export const getInitialState = (): {
           currentUser: hasValidUserObj ? parsed.currentUser : null,
           guidedCampaigns: Array.isArray(parsed.guidedCampaigns) && parsed.guidedCampaigns.length > 0
             ? parsed.guidedCampaigns
-            : INITIAL_GUIDED_CAMPAIGNS
+            : INITIAL_GUIDED_CAMPAIGNS,
+          customTraditionalQueues: Array.isArray(parsed.customTraditionalQueues)
+            ? parsed.customTraditionalQueues
+            : []
         };
       }
     }
@@ -371,7 +375,8 @@ export const getInitialState = (): {
     records: generateMockHistory(),
     users: INITIAL_USERS,
     currentUser: null,
-    guidedCampaigns: INITIAL_GUIDED_CAMPAIGNS
+    guidedCampaigns: INITIAL_GUIDED_CAMPAIGNS,
+    customTraditionalQueues: []
   };
 };
 
@@ -382,6 +387,7 @@ export const saveStateToLocalStorage = (state: {
   users: User[];
   currentUser: User | null;
   guidedCampaigns?: GuidedCampaign[];
+  customTraditionalQueues?: CustomTraditionalQueue[];
 }) => {
   try {
     localStorage.setItem('radar_price_state', JSON.stringify(state));

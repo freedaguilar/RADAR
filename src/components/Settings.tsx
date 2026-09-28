@@ -20,11 +20,13 @@ import {
   Eye,
   EyeOff,
   Target,
+  ListOrdered,
 } from "lucide-react";
-import { Product, Chain, User, GuidedCampaign, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
+import { Product, Chain, User, GuidedCampaign, PriceRecord, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
 import { normalizeString } from "../lib/textUtils";
 import { GuidedCampaignsSettings } from "./GuidedCampaignsSettings";
+import { TraditionalQueueSettings } from "./TraditionalQueueSettings";
 
 function extractDominantColor(fileOrUrl: File | string): Promise<string> {
   return new Promise((resolve) => {
@@ -130,10 +132,14 @@ interface SettingsProps {
   onNavigate: (page: string, params?: any) => void;
   onLogout?: () => void;
   guidedCampaigns?: GuidedCampaign[];
+  records?: PriceRecord[];
+  customTraditionalQueues?: CustomTraditionalQueue[];
   onAddCampaign?: (campaign: GuidedCampaign) => void;
   onUpdateCampaign?: (campaign: GuidedCampaign) => void;
   onDeleteCampaign?: (campaignId: string) => void;
   onToggleCampaign?: (campaignId: string, active: boolean) => void;
+  onSaveCustomQueue?: (queue: CustomTraditionalQueue) => void;
+  onResetCustomQueue?: (chainId: string, state: string) => void;
 }
 
 export function Settings({
@@ -153,13 +159,17 @@ export function Settings({
   onNavigate,
   onLogout,
   guidedCampaigns = [],
+  records = [],
+  customTraditionalQueues = [],
   onAddCampaign,
   onUpdateCampaign,
   onDeleteCampaign,
   onToggleCampaign,
+  onSaveCustomQueue = () => {},
+  onResetCustomQueue = () => {},
 }: SettingsProps) {
   // Navigation tabs inside Settings
-  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns">(
+  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns" | "traditional_queue">(
     "products",
   );
 
@@ -674,18 +684,70 @@ export function Settings({
 
   return (
     <div className="space-y-6" id="settings-view">
-      {/* Settings Title */}
-      <div className="border-b border-[#E0E0E0] pb-6" id="settings-header">
-        <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase font-mono">
-          Painel de Gerenciamento do Gestor
-        </span>
-        <h1 className="text-3xl font-black text-[#1A1A1A] font-sans">
-          Configurações do PriceHub
-        </h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Gerencie o catálogo de produtos ativos, credencie novas
-          redes/bandeiras do varejo e configure o acesso de colaboradores.
-        </p>
+      {/* Settings Title & Compact Active Session */}
+      <div className="border-b border-[#E0E0E0] pb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4" id="settings-header">
+        <div>
+          <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase font-mono">
+            Painel de Gerenciamento do Gestor
+          </span>
+          <h1 className="text-2xl sm:text-3xl font-black text-[#1A1A1A] font-sans">
+            Configurações do PriceHub
+          </h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-1">
+            Gerencie o catálogo de produtos ativos, credencie redes do varejo, configure pesquisas guiadas e ajuste filas.
+          </p>
+        </div>
+
+        {/* Compact Active Session Info (Top Right) */}
+        {currentUser && onLogout && (
+          <div className="flex items-center gap-3 bg-white border border-[#E0E0E0] p-2 sm:px-3 sm:py-2 rounded-2xl shadow-2xs self-start md:self-auto shrink-0" id="settings-session-container">
+            <span className="w-9 h-9 rounded-xl bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden shadow-2xs">
+              {currentUser.avatarUrl &&
+              (currentUser.avatarUrl.startsWith("http") ||
+                currentUser.avatarUrl.startsWith("data:")) ? (
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.name}
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                currentUser.avatarUrl ||
+                currentUser.name.substring(0, 2).toUpperCase()
+              )}
+            </span>
+            <div className="min-w-0 pr-1">
+              <div className="flex items-center gap-1.5">
+                <p className="text-xs font-bold text-[#1A1A1A] truncate max-w-[140px] sm:max-w-[180px]">
+                  {currentUser.name}
+                </p>
+                <span
+                  className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded uppercase ${
+                    currentUser.isGuest
+                      ? "bg-amber-100 text-amber-900"
+                      : currentUser.role === "gestor"
+                      ? "bg-purple-100 text-purple-800"
+                      : "bg-blue-100 text-blue-800"
+                  }`}
+                >
+                  {currentUser.isGuest ? "Convidado" : currentUser.role}
+                </span>
+              </div>
+              <p className="text-[10px] text-gray-400 truncate font-mono max-w-[160px] sm:max-w-[200px]">
+                {currentUser.email}
+              </p>
+            </div>
+            <button
+              type="button"
+              id="settings-logout-btn"
+              onClick={onLogout}
+              className="p-2 text-gray-400 hover:text-[#D40511] hover:bg-red-50 rounded-xl transition cursor-pointer"
+              title="Sair da Conta Atual"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {successBanner && (
@@ -698,54 +760,58 @@ export function Settings({
         </div>
       )}
 
-      {/* Grid containing Tab Navigation (Sidebar style) and Tab Contents */}
-      <div
-        className="grid grid-cols-1 lg:grid-cols-4 gap-6"
-        id="settings-content-grid"
-      >
-        {/* Tab Left Navigation Menu */}
-        <div className="lg:col-span-1 space-y-2" id="settings-tabs-menu">
+      {/* Horizontal Tab Navigation Bar (Top navigation, no lateral squashing) */}
+      <div className="bg-white border border-[#E0E0E0] rounded-2xl p-1.5 shadow-2xs overflow-x-auto scrollbar-none" id="settings-tabs-menu">
+        <div className="flex items-center gap-1.5 min-w-max">
           <button
             id="settings-tab-products"
             onClick={() => setActiveTab("products")}
-            className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold leading-none flex items-center gap-2.5 transition-colors cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === "products"
-                ? "bg-[#1A1A1A] text-white"
-                : "bg-[#F5F5F5] text-gray-600 hover:bg-[#E0E0E0]"
+                ? "bg-[#1A1A1A] text-white shadow-xs"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
             <Package className="w-4 h-4" />
             <span>Portfólio de Produtos</span>
+            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+              activeTab === "products" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {products.length}
+            </span>
           </button>
 
           <button
             id="settings-tab-chains"
             onClick={() => setActiveTab("chains")}
-            className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold leading-none flex items-center gap-2.5 transition-colors cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === "chains"
-                ? "bg-[#1A1A1A] text-white"
-                : "bg-[#F5F5F5] text-gray-600 hover:bg-[#E0E0E0]"
+                ? "bg-[#1A1A1A] text-white shadow-xs"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
             <Layers className="w-4 h-4" />
             <span>Redes / Lojas</span>
+            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+              activeTab === "chains" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {chains.length}
+            </span>
           </button>
 
           <button
             id="settings-tab-campaigns"
             onClick={() => setActiveTab("campaigns")}
-            className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold leading-none flex items-center justify-between transition-colors cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === "campaigns"
-                ? "bg-[#1A1A1A] text-white"
-                : "bg-[#F5F5F5] text-gray-600 hover:bg-[#E0E0E0]"
+                ? "bg-[#1A1A1A] text-white shadow-xs"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
-            <div className="flex items-center gap-2.5">
-              <Target className={`w-4 h-4 ${activeTab === "campaigns" ? "text-red-400" : "text-[#D40511]"}`} />
-              <span>Pesquisas Guiadas</span>
-            </div>
+            <Target className={`w-4 h-4 ${activeTab === "campaigns" ? "text-red-400" : "text-[#D40511]"}`} />
+            <span>Pesquisas Guiadas</span>
             {guidedCampaigns.filter(c => c.active).length > 0 && (
-              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-full ${
+              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
                 activeTab === "campaigns" ? "bg-red-500 text-white" : "bg-emerald-100 text-emerald-800"
               }`}>
                 {guidedCampaigns.filter(c => c.active).length} ativas
@@ -754,87 +820,50 @@ export function Settings({
           </button>
 
           <button
+            id="settings-tab-traditional-queue"
+            onClick={() => setActiveTab("traditional_queue")}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === "traditional_queue"
+                ? "bg-[#1A1A1A] text-white shadow-xs"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
+          >
+            <ListOrdered className={`w-4 h-4 ${activeTab === "traditional_queue" ? "text-amber-400" : "text-amber-600"}`} />
+            <span>Fila Tradicional</span>
+            {customTraditionalQueues.length > 0 && (
+              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                activeTab === "traditional_queue" ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-800"
+              }`}>
+                {customTraditionalQueues.length} salva{customTraditionalQueues.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </button>
+
+          <button
             id="settings-tab-users"
             onClick={() => setActiveTab("users")}
-            className={`w-full text-left px-4 py-3 rounded-xl text-xs font-bold leading-none flex items-center gap-2.5 transition-colors cursor-pointer ${
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
               activeTab === "users"
-                ? "bg-[#1A1A1A] text-white"
-                : "bg-[#F5F5F5] text-gray-600 hover:bg-[#E0E0E0]"
+                ? "bg-[#1A1A1A] text-white shadow-xs"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
             }`}
           >
             <Users2 className="w-4 h-4" />
             <span>Colaboradores / Usuários</span>
+            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+              activeTab === "users" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+            }`}>
+              {users.length}
+            </span>
           </button>
-
-          {/* Current Session / Sair da Conta Card */}
-          {currentUser && onLogout && (
-            <div
-              className="mt-6 pt-5 border-t border-gray-200"
-              id="settings-session-container"
-            >
-              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-2.5">
-                Sessão Ativa
-              </p>
-              <div className="p-3 bg-[#F5F5F5] border border-[#E0E0E0] rounded-xl mb-3">
-                <div className="flex items-center gap-2.5 mb-2">
-                  <span className="w-8 h-8 rounded-full bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden">
-                    {currentUser.avatarUrl &&
-                    (currentUser.avatarUrl.startsWith("http") ||
-                      currentUser.avatarUrl.startsWith("data:")) ? (
-                      <img
-                        src={currentUser.avatarUrl}
-                        alt={currentUser.name}
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    ) : (
-                      currentUser.avatarUrl ||
-                      currentUser.name.substring(0, 2).toUpperCase()
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-bold text-[#1A1A1A] truncate">
-                      {currentUser.name}
-                    </p>
-                    <p className="text-[10px] text-gray-500 truncate font-mono">
-                      {currentUser.email}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between text-[9px] font-mono font-bold text-gray-500 pt-2 border-t border-gray-200/80">
-                  <span>Perfil:</span>
-                  <span
-                    className={`px-1.5 py-0.5 rounded uppercase ${
-                      currentUser.isGuest
-                        ? "bg-amber-100 text-amber-900"
-                        : currentUser.role === "gestor"
-                        ? "bg-purple-100 text-purple-800"
-                        : "bg-blue-100 text-blue-800"
-                    }`}
-                  >
-                    {currentUser.isGuest ? "Convidado" : currentUser.role}
-                  </span>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                id="settings-logout-btn"
-                onClick={onLogout}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-red-50 hover:bg-red-100 text-[#D40511] border border-red-200 text-xs font-bold rounded-xl transition-all cursor-pointer shadow-2xs group"
-              >
-                <LogOut className="w-3.5 h-3.5 group-hover:-translate-x-0.5 transition-transform" />
-                <span>Sair da Conta Atual</span>
-              </button>
-            </div>
-          )}
         </div>
+      </div>
 
-        {/* Tab Content Panels */}
-        <div
-          className="lg:col-span-3 bg-white border border-[#E0E0E0] rounded-2xl p-6"
-          id="settings-tab-content-panel"
-        >
+      {/* Tab Content Panels (Full Width) */}
+      <div
+        className="w-full bg-white border border-[#E0E0E0] rounded-2xl p-4 sm:p-6 shadow-xs"
+        id="settings-tab-content-panel"
+      >
           {/* TAB 1: PRODUCT LIST & TOGGLES */}
           {activeTab === "products" && (
             <div className="space-y-6" id="settings-tab-products-panel">
@@ -1998,8 +2027,23 @@ export function Settings({
               />
             </div>
           )}
+
+          {/* TAB 5: TRADITIONAL QUEUE ADJUSTMENT */}
+          {activeTab === "traditional_queue" && (
+            <div className="space-y-6" id="settings-tab-traditional-queue-panel">
+              <TraditionalQueueSettings
+                products={products}
+                chains={chains}
+                records={records}
+                currentUser={currentUser}
+                guidedCampaigns={guidedCampaigns}
+                customTraditionalQueues={customTraditionalQueues}
+                onSaveCustomQueue={onSaveCustomQueue}
+                onResetCustomQueue={onResetCustomQueue}
+              />
+            </div>
+          )}
         </div>
-      </div>
 
       {/* Custom Delete Confirmation Modal */}
       {deleteConfirm && (

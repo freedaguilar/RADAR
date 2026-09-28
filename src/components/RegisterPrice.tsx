@@ -1,9 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered, Target } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Chain, PriceRecord, User, GuidedCampaign, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, stripSessionMetaPrefix, getCleanObserverNotes, ResearchSessionMeta } from '../lib/textUtils';
+import { findCustomTraditionalQueue } from '../lib/traditionalQueue';
 import StateIconMap from './StateIconMap';
 
 // Summary data for the research completion screen
@@ -162,6 +163,7 @@ interface RegisterPriceProps {
   chains: Chain[];
   records?: PriceRecord[];
   guidedCampaigns?: GuidedCampaign[];
+  customTraditionalQueues?: CustomTraditionalQueue[];
   onSaveRecord: (newRecord: PriceRecord) => void;
   onUpdateRecord?: (updatedRecord: PriceRecord) => void;
   onDeleteRecord?: (recordId: string) => void;
@@ -176,7 +178,7 @@ interface RegisterPriceProps {
   } | null;
 }
 
-export function RegisterPrice({ products, chains, records = [], guidedCampaigns = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, onLogout, pageParams }: RegisterPriceProps) {
+export function RegisterPrice({ products, chains, records = [], guidedCampaigns = [], customTraditionalQueues = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, onLogout, pageParams }: RegisterPriceProps) {
   // Navigation Steps: 1 (Estado) | 2 (Rede) | 3 (Foto) | 4 (Confirmação) | 5 (Página de Conclusão)
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
   const [completionData, setCompletionData] = useState<CompletionSummary | null>(null);
@@ -462,50 +464,140 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     return searchAndRankProducts(list, searchText);
   };
 
+  // Helpers robustos para verificação e mapeamento de Pesquisas Guiadas
+  const getCampaignChainId = (c: any): string => String(c?.chainId || c?.chain_id || '');
+
+  const isCampaignActive = (c: any): boolean =>
+    c?.active === true || c?.active === 'true' || c?.active === 1 || c?.active === 't';
+
+  const getCampaignProductIds = (c: any): string[] => {
+    const raw = c?.productIds || c?.product_ids;
+    if (Array.isArray(raw)) return raw.map((id: any) => String(id));
+    if (typeof raw === 'string') {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed.map((id: any) => String(id));
+      } catch {}
+      return raw.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+    return [];
+  };
+
+  const isStateMatch = (campState?: string, targetState?: string): boolean => {
+    if (!campState || !targetState) return false;
+    const cs = campState.trim().toLowerCase();
+    const ts = targetState.trim().toLowerCase();
+    if (cs === 'todos' || cs === 'todas') return true;
+    if (cs === ts) return true;
+    const cNorm = normalizeString(cs);
+    const tNorm = normalizeString(ts);
+    if (cNorm === tNorm) return true;
+    const stateMap: Record<string, string> = {
+      'mg': 'minas gerais', 'minas gerais': 'mg',
+      'sp': 'sao paulo', 'sao paulo': 'sp',
+      'rj': 'rio de janeiro', 'rio de janeiro': 'rj',
+      'es': 'espirito santo', 'espirito santo': 'es',
+      'pr': 'parana', 'parana': 'pr',
+      'sc': 'santa catarina', 'santa catarina': 'sc',
+      'rs': 'rio grande do sul', 'rio grande do sul': 'rs',
+      'go': 'goias', 'goias': 'go',
+      'df': 'distrito federal', 'distrito federal': 'df',
+      'ba': 'bahia', 'bahia': 'ba',
+      'pe': 'pernambuco', 'pernambuco': 'pe',
+      'ce': 'ceara', 'ceara': 'ce',
+    };
+    return stateMap[cNorm] === tNorm;
+  };
+
   // Campanha/Pesquisa guiada liberada pelo gestor para a rede e estado selecionados
   const activeGuidedCampaign = useMemo(() => {
     if (!guidedCampaigns || guidedCampaigns.length === 0 || !selectedChainId || !selectedState) {
       return null;
     }
-    // Prioriza pesquisa para o estado exato; se não houver, busca para "Todos"
-    const exactMatch = guidedCampaigns.find(
-      (c) => c.active && c.chainId === selectedChainId && c.state === selectedState
-    );
+
+    // 1. Prioridade máxima: correspondência exata para a rede e estado selecionados
+    const exactMatch = guidedCampaigns.find((c) => {
+      if (!isCampaignActive(c)) return false;
+      const cChain = getCampaignChainId(c);
+      if (cChain !== selectedChainId) return false;
+      const cState = (c.state || '').trim().toLowerCase();
+      const tState = selectedState.trim().toLowerCase();
+      return cState === tState || normalizeString(cState) === normalizeString(tState);
+    });
     if (exactMatch) return exactMatch;
 
-    const allStatesMatch = guidedCampaigns.find(
-      (c) => c.active && c.chainId === selectedChainId && c.state === 'Todos'
-    );
-    return allStatesMatch || null;
+    // 2. Correspondência para a rede com estado "Todos"
+    const allStatesMatch = guidedCampaigns.find((c) => {
+      if (!isCampaignActive(c)) return false;
+      const cChain = getCampaignChainId(c);
+      if (cChain !== selectedChainId) return false;
+      const cState = (c.state || '').trim().toLowerCase();
+      return cState === 'todos' || cState === 'todas';
+    });
+    if (allStatesMatch) return allStatesMatch;
+
+    // 3. Correspondência flexível (ex: MG <-> Minas Gerais)
+    const flexibleMatch = guidedCampaigns.find((c) => {
+      if (!isCampaignActive(c)) return false;
+      const cChain = getCampaignChainId(c);
+      if (cChain !== selectedChainId) return false;
+      return isStateMatch(c.state, selectedState);
+    });
+    return flexibleMatch || null;
   }, [guidedCampaigns, selectedChainId, selectedState]);
 
   // Queue List for Guided Camera Auditing based on selected chain and at least 1 record
   const frequentProductsList = useMemo(() => {
     if (!products || products.length === 0) return [];
 
-    const activeProds = products.filter(p => p.active);
-
-    // 0. REGRA PRIORITÁRIA DE PESQUISA GUIADA LIBERADA PELO GESTOR:
+    // 0. REGRA PRIORITÁRIA ABSOLUTA DE PESQUISA GUIADA ATIVA LIBERADA PELO GESTOR:
     // Se o gestor criou e ativou uma pesquisa guiada para esta rede e estado, a fila dos produtos
-    // será EXATAMENTE a que o gestor selecionou, na ordem definida pelo gestor!
-    if (activeGuidedCampaign && Array.isArray(activeGuidedCampaign.productIds) && activeGuidedCampaign.productIds.length > 0) {
-      const prodMap = new Map<string, Product>();
-      activeProds.forEach((p) => prodMap.set(p.id, p));
+    // será EXCLUSIVAMENTE os produtos selecionados pelo gestor, na ordem exata definida pelo gestor!
+    if (activeGuidedCampaign) {
+      const targetProductIds = getCampaignProductIds(activeGuidedCampaign);
+      if (targetProductIds.length > 0) {
+        const prodMap = new Map<string, Product>();
+        products.forEach((p) => prodMap.set(p.id, p));
 
-      const campaignProducts: Product[] = [];
-      for (const pId of activeGuidedCampaign.productIds) {
-        const p = prodMap.get(pId);
-        if (p) {
-          campaignProducts.push(p);
+        const campaignProducts: Product[] = [];
+        for (const pId of targetProductIds) {
+          const p = prodMap.get(pId);
+          if (p) {
+            campaignProducts.push(p);
+          }
         }
-      }
 
-      if (campaignProducts.length > 0) {
-        return campaignProducts;
+        // Retorna EXCLUSIVAMENTE a fila definida pelo gestor
+        if (campaignProducts.length > 0) {
+          return campaignProducts;
+        }
       }
     }
 
-    // Caso não haja pesquisa guiada ativa para esta rede e estado, mantém a regra atual de fila de produtos:
+    // 1. REGRA DE FILA TRADICIONAL CUSTOMIZADA PELO GESTOR (quando NÃO há pesquisa guiada ativa):
+    // Se o gestor ajustou e personalizou a fila tradicional desta rede e estado, respeita essa ordem e produtos!
+    const customQueue = findCustomTraditionalQueue(selectedChainId, selectedState, customTraditionalQueues);
+    if (customQueue && Array.isArray(customQueue.productIds) && customQueue.productIds.length > 0) {
+      const prodMap = new Map<string, Product>();
+      products.forEach((p) => prodMap.set(p.id, p));
+
+      const customProducts: Product[] = [];
+      for (const pId of customQueue.productIds) {
+        const p = prodMap.get(pId);
+        if (p && p.active) {
+          customProducts.push(p);
+        }
+      }
+
+      // Retorna EXCLUSIVAMENTE a fila tradicional personalizada definida pelo gestor
+      if (customProducts.length > 0) {
+        return customProducts;
+      }
+    }
+
+    // 2. REGRA PADRÃO AUTOMÁTICA (quando não há personalização do gestor nem pesquisa guiada ativa):
+    // Mantém a regra padrão de produtos com pelo menos 1 registro na rede:
+    const activeProds = products.filter(p => p.active);
     const isMG = !selectedState || selectedState === 'Minas Gerais';
     const selectedChain = chains.find(c => c.id === selectedChainId);
     const chainStates = selectedChain ? getChainStates(selectedChain) : [];
@@ -613,7 +705,19 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
 
       return a.name.localeCompare(b.name);
     });
-  }, [products, chains, records, selectedChainId, selectedState, chainRecordCounts, mgChainRecordCounts, productRecordCounts]);
+  }, [
+    products,
+    chains,
+    records,
+    selectedChainId,
+    selectedState,
+    activeGuidedCampaign,
+    guidedCampaigns,
+    customTraditionalQueues,
+    chainRecordCounts,
+    mgChainRecordCounts,
+    productRecordCounts,
+  ]);
 
   const [guidedQueue, setGuidedQueue] = useState<Product[]>([]);
   const [outOfStockProductIds, setOutOfStockProductIds] = useState<string[]>([]);
@@ -684,10 +788,44 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     setResearchStartTime(new Date().toISOString());
   }, [selectedChainId, selectedState]);
 
+  // Sincroniza e garante que a fila respeite EXCLUSIVAMENTE a pesquisa guiada ativa ou restaure o padrão se desativada
+  useEffect(() => {
+    if (activeGuidedCampaign) {
+      // Quando há pesquisa guiada ativa na rede e estado selecionados:
+      // A fila DEVE respeitar EXCLUSIVAMENTE a fila da pesquisa guiada na ordem exata definida pelo gestor!
+      setGuidedQueue((prev) => {
+        // Se ainda não houve capturas nesta sessão de pesquisa, usa a fila completa da campanha
+        if (capturedProductIds.length === 0 && outOfStockProductIds.length === 0) {
+          return frequentProductsList;
+        }
+        // Se já houve itens capturados ou marcados sem estoque, mantém estritamente apenas os produtos da campanha que continuam pendentes
+        const pendingInCampaign = frequentProductsList.filter(
+          (p) => !registeredProductIdsSet.has(p.id) && !outOfStockProductIds.includes(p.id)
+        );
+        return pendingInCampaign;
+      });
+    } else if (selectedChainId && selectedState) {
+      // Quando a pesquisa guiada é desativada pelo gestor, a fila volta a ser a padrão
+      if (capturedProductIds.length === 0 && outOfStockProductIds.length === 0) {
+        setGuidedQueue(frequentProductsList);
+      }
+    }
+  }, [
+    activeGuidedCampaign?.id,
+    activeGuidedCampaign?.active,
+    activeGuidedCampaign?.updatedAt,
+    frequentProductsList,
+  ]);
+
   // Inicializa a fila na primeira carga se estiver vazia
   useEffect(() => {
-    if (guidedQueue.length === 0 && capturedProductIds.length === 0 && outOfStockProductIds.length === 0 && frequentProductsList.length > 0) {
-      setGuidedQueue(frequentProductsList.filter(p => !registeredProductIdsSet.has(p.id)));
+    if (
+      guidedQueue.length === 0 &&
+      capturedProductIds.length === 0 &&
+      outOfStockProductIds.length === 0 &&
+      frequentProductsList.length > 0
+    ) {
+      setGuidedQueue(frequentProductsList.filter((p) => !registeredProductIdsSet.has(p.id)));
     }
   }, [frequentProductsList, registeredProductIdsSet]);
 
@@ -1018,8 +1156,12 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
 
   // Lista completa de produtos na fila de auditoria para a rede/estado selecionados
   const auditQueueProducts = useMemo(() => {
+    // Quando há pesquisa guiada ativa na rede e estado selecionados, a fila respeita EXCLUSIVAMENTE a pesquisa guiada
+    if (activeGuidedCampaign) {
+      return frequentProductsList;
+    }
     return frequentProductsList.length > 0 ? frequentProductsList : products;
-  }, [frequentProductsList, products]);
+  }, [activeGuidedCampaign, frequentProductsList, products]);
 
   // Quantidade de produtos da fila que já foram registrados
   const registeredFromQueueCount = useMemo(() => {
@@ -2724,9 +2866,12 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                   const borderCol = chain.logoColor ? chain.logoColor.replace('bg-', 'border-') : 'border-slate-200';
                   const ringColor = chain.logoColor ? chain.logoColor.replace('bg-', 'ring-') : 'ring-red-500';
                   const allStates = getChainStates(chain);
-                  const hasActiveCampaign = guidedCampaigns.some(
-                    (c) => c.active && c.chainId === chain.id && (c.state === selectedState || c.state === 'Todos')
-                  );
+                  const hasActiveCampaign = guidedCampaigns.some((c) => {
+                    if (!isCampaignActive(c)) return false;
+                    const cChain = getCampaignChainId(c);
+                    if (cChain !== chain.id) return false;
+                    return isStateMatch(c.state, selectedState);
+                  });
 
                   return (
                     <button
@@ -3410,32 +3555,62 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                       if (!hasLastPrice && !(currentGuidedProduct.basePrice > 0)) return null;
 
                       return (
-                        <div className="flex items-center justify-center gap-2 sm:gap-3 w-full max-w-md px-1 mb-2 animate-fade-in select-none">
-                          {/* Card em Alto Destaque do Último Preço registrado nesta rede */}
+                        <div className="flex items-center justify-center w-full max-w-md px-1 mb-2 animate-fade-in select-none">
+                          {/* Card em Alto Destaque do Último Preço registrado nesta rede com botão de Manter Preço integrado abaixo */}
                           {hasLastPrice ? (
-                            <div className={`flex items-center gap-2.5 sm:gap-3 bg-gradient-to-r from-amber-950/90 via-black/95 to-amber-950/90 backdrop-blur-xl border-2 ${
+                            <div className={`flex flex-col bg-gradient-to-b from-amber-950/90 via-black/95 to-amber-950/90 backdrop-blur-xl border-2 ${
                               keepCurrentPrice
-                                ? 'border-amber-300 ring-2 ring-amber-400/60 shadow-xl shadow-amber-900/60'
+                                ? 'border-emerald-400 ring-2 ring-emerald-400/50 shadow-xl shadow-emerald-950/50'
                                 : 'border-amber-400/80 hover:border-amber-400 ring-1 ring-amber-400/30'
-                            } px-3 sm:px-4 py-1.5 sm:py-2 rounded-2xl shadow-xl transition-all`}>
-                              <div className="w-8 h-8 rounded-xl bg-amber-500/25 border border-amber-400/70 flex items-center justify-center shrink-0 text-amber-300 shadow-inner">
-                                <Tag className="w-4 h-4 animate-pulse" />
+                            } px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-2xl shadow-xl transition-all min-w-[210px] sm:min-w-[240px] max-w-xs`}>
+                              {/* Topo do Badge: Ícone à esquerda e Linha 1 (Último Preço) + Linha 2 (Preço) à direita */}
+                              <div className="flex items-center gap-2.5 sm:gap-3">
+                                <div className="w-9 h-9 rounded-xl bg-amber-500/25 border border-amber-400/70 flex items-center justify-center shrink-0 text-amber-300 shadow-inner">
+                                  <Tag className="w-4 h-4 animate-pulse" />
+                                </div>
+                                <div className="flex flex-col text-left leading-tight">
+                                  {/* Linha 1: Último Preço (UF) */}
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] sm:text-[11px] font-mono text-amber-300 font-black uppercase tracking-wider">
+                                      Último Preço
+                                    </span>
+                                    <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-amber-400/30 text-amber-200 border border-amber-400/60">
+                                      ({recUf})
+                                    </span>
+                                  </div>
+
+                                  {/* Linha 2: Preço na linha abaixo de Último Preço (UF) */}
+                                  <div className="flex items-baseline gap-1 mt-0.5">
+                                    <span className="text-xs sm:text-sm font-black text-amber-400/80 font-mono">R$</span>
+                                    <span className="text-xl sm:text-2xl font-black font-mono text-amber-300 tracking-tight drop-shadow-[0_2px_10px_rgba(251,191,36,0.45)]">
+                                      {lastRec.price.toFixed(2).replace('.', ',')}
+                                    </span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="flex flex-col text-left leading-tight">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] sm:text-[11px] font-mono text-amber-300 font-black uppercase tracking-wider">
-                                    Último Preço
+
+                              {/* Botão de Manter Preço integrado abaixo do preço, dentro do mesmo badge */}
+                              <div className="mt-2 pt-1.5 border-t border-amber-400/20">
+                                <label
+                                  htmlFor="camera-keep-price-toggle"
+                                  className={`flex items-center justify-center gap-2 w-full py-1.5 px-3 rounded-xl border text-xs font-black transition-all cursor-pointer select-none active:scale-95 ${
+                                    keepCurrentPrice
+                                      ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-300 text-white shadow-md shadow-emerald-950/40'
+                                      : 'bg-white/10 hover:bg-white/15 border-white/20 text-white/90 hover:text-white'
+                                  }`}
+                                >
+                                  <input
+                                    id="camera-keep-price-toggle"
+                                    type="checkbox"
+                                    checked={keepCurrentPrice}
+                                    onChange={(e) => setKeepCurrentPrice(e.target.checked)}
+                                    className="w-3.5 h-3.5 rounded text-emerald-500 focus:ring-0 border-white/40 bg-black/40 cursor-pointer accent-emerald-500"
+                                  />
+                                  <span className="tracking-wide">
+                                    Manter preço
                                   </span>
-                                  <span className="text-[9px] font-mono font-black px-1.5 py-0.5 rounded bg-amber-400/30 text-amber-200 border border-amber-400/60">
-                                    {recUf}
-                                  </span>
-                                </div>
-                                <div className="flex items-baseline gap-1 mt-0.5">
-                                  <span className="text-xs sm:text-sm font-black text-amber-400/80 font-mono">R$</span>
-                                  <span className="text-xl sm:text-2xl font-black font-mono text-amber-300 tracking-tight drop-shadow-[0_2px_10px_rgba(251,191,36,0.45)]">
-                                    {lastRec.price.toFixed(2).replace('.', ',')}
-                                  </span>
-                                </div>
+                              
+                                </label>
                               </div>
                             </div>
                           ) : currentGuidedProduct.basePrice > 0 ? (
@@ -3456,34 +3631,6 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                               </div>
                             </div>
                           ) : null}
-
-                          {/* Botão de Manter Preço */}
-                          {hasLastPrice && (
-                            <label
-                              htmlFor="camera-keep-price-toggle"
-                              className={`flex items-center gap-2.5 px-3 sm:px-4 py-2 sm:py-2.5 rounded-2xl border-2 font-black transition-all cursor-pointer select-none shadow-xl active:scale-95 ${
-                                keepCurrentPrice
-                                  ? 'bg-emerald-600 border-emerald-300 text-white ring-2 ring-emerald-400/60 shadow-emerald-900/60 scale-[1.02]'
-                                  : 'bg-black/85 hover:bg-black/95 border-white/30 text-white/90 backdrop-blur-xl'
-                              }`}
-                            >
-                              <input
-                                id="camera-keep-price-toggle"
-                                type="checkbox"
-                                checked={keepCurrentPrice}
-                                onChange={(e) => setKeepCurrentPrice(e.target.checked)}
-                                className="w-4 h-4 rounded text-emerald-500 focus:ring-0 border-white/40 bg-black/40 cursor-pointer accent-emerald-500"
-                              />
-                              <div className="flex flex-col text-left leading-none">
-                                <span className="text-xs sm:text-[13px] tracking-wide font-black whitespace-nowrap">
-                                  Manter preço
-                                </span>
-                                <span className="text-[8.5px] sm:text-[9.5px] font-medium opacity-80 mt-1 whitespace-nowrap">
-                                  {keepCurrentPrice ? 'Preço fixado ✓' : 'Gravar sem redigitar'}
-                                </span>
-                              </div>
-                            </label>
-                          )}
                         </div>
                       );
                     })()}

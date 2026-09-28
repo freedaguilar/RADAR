@@ -23,6 +23,7 @@ import {
   Cloud,
   Terminal,
   Loader2,
+  GripVertical,
 } from "lucide-react";
 import {
   Product,
@@ -68,6 +69,8 @@ export function GuidedCampaignsSettings({
   const [formActive, setFormActive] = useState(true);
   const [formNotes, setFormNotes] = useState("");
   const [formProductIds, setFormProductIds] = useState<string[]>([]);
+  const [draggedProductIndex, setDraggedProductIndex] = useState<number | null>(null);
+  const [dragOverProductIndex, setDragOverProductIndex] = useState<number | null>(null);
   const [formError, setFormError] = useState("");
   const [feedbackBanner, setFeedbackBanner] = useState<{
     type: "success" | "error";
@@ -90,6 +93,8 @@ export function GuidedCampaignsSettings({
 
   // Database Supabase sync state check
   const [dbStatus, setDbStatus] = useState<"checking" | "ready" | "missing_table" | "unconfigured">("checking");
+  const [dbRowCount, setDbRowCount] = useState<number | null>(null);
+  const [isCheckingDb, setIsCheckingDb] = useState(false);
   const [showSqlModal, setShowSqlModal] = useState(false);
   const [sqlCopied, setSqlCopied] = useState(false);
 
@@ -99,8 +104,11 @@ export function GuidedCampaignsSettings({
       setDbStatus("unconfigured");
       return;
     }
+    setIsCheckingDb(true);
     try {
-      const { error } = await supabase.from("guided_campaigns").select("id").limit(1);
+      const { data, count, error } = await supabase
+        .from("guided_campaigns")
+        .select("id", { count: 'exact' });
       if (error) {
         if (
           error.code === "42P01" ||
@@ -108,14 +116,20 @@ export function GuidedCampaignsSettings({
           error.message?.includes("not found")
         ) {
           setDbStatus("missing_table");
+          setDbRowCount(null);
         } else {
           setDbStatus("ready");
+          setDbRowCount(data ? (data as any[]).length : 0);
         }
       } else {
         setDbStatus("ready");
+        setDbRowCount(typeof count === 'number' ? count : (data ? (data as any[]).length : 0));
       }
     } catch {
       setDbStatus("missing_table");
+      setDbRowCount(null);
+    } finally {
+      setIsCheckingDb(false);
     }
   };
 
@@ -320,6 +334,17 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
       const temp = next[index + 1];
       next[index + 1] = next[index];
       next[index] = temp;
+      return next;
+    });
+  };
+
+  // Drag and drop reorder product handler
+  const handleReorderProducts = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return;
+    setFormProductIds((prev) => {
+      const next = [...prev];
+      const [movedItem] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, movedItem);
       return next;
     });
   };
@@ -545,22 +570,39 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
           )}
 
           {dbStatus === "ready" && (
-            <div className="flex items-center justify-between p-3 bg-emerald-50/80 border border-emerald-200 rounded-2xl text-[11px] text-emerald-900 font-medium shadow-2xs">
-              <div className="flex items-center gap-2.5">
-                <div className="p-1 rounded-lg bg-emerald-500 text-white shrink-0">
-                  <Cloud className="w-3.5 h-3.5" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 bg-emerald-50/90 border border-emerald-200 rounded-2xl text-[11px] text-emerald-950 font-medium shadow-2xs gap-2">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-1.5 rounded-xl bg-emerald-600 text-white shrink-0 shadow-2xs">
+                  <Cloud className="w-4 h-4" />
                 </div>
-                <span>
-                  <strong>Banco de Dados Conectado:</strong> As pesquisas guiadas são salvas e sincronizadas em tempo real na tabela <code>guided_campaigns</code> do Supabase.
-                </span>
+                <div>
+                  <span className="block font-bold text-emerald-900">
+                    Banco de Dados Supabase Ativo &bull; Tabela <code>guided_campaigns</code>
+                  </span>
+                  <span className="text-[10px] text-emerald-700">
+                    {dbRowCount !== null ? `${dbRowCount} pesquisa(s) salva(s) no banco de dados.` : "Sincronização em tempo real ativa."} Todas as alterações de gestores e filas para convidados são gravadas na nuvem.
+                  </span>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowSqlModal(true)}
-                className="text-emerald-700 hover:text-emerald-900 hover:underline text-[10px] font-mono shrink-0 ml-2 cursor-pointer"
-              >
-                Ver SQL
-              </button>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={checkDatabaseStatus}
+                  disabled={isCheckingDb}
+                  className="px-2.5 py-1 bg-white border border-emerald-300 hover:bg-emerald-100/50 text-emerald-800 rounded-lg text-[10px] font-bold transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  title="Atualizar verificação do banco"
+                >
+                  <Loader2 className={`w-3 h-3 ${isCheckingDb ? 'animate-spin' : ''}`} />
+                  <span>{isCheckingDb ? "Verificando..." : "Sincronizar"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSqlModal(true)}
+                  className="text-emerald-700 hover:text-emerald-900 hover:underline text-[10px] font-mono shrink-0 cursor-pointer px-1 py-1"
+                >
+                  Ver SQL
+                </button>
+              </div>
             </div>
           )}
 
@@ -1162,7 +1204,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                     Ordem na Câmera Guiada ({selectedProductsList.length})
                   </span>
                   <span className="text-[10px] text-gray-400 font-mono">
-                    Use ↑ ↓ para ordenar
+                    Arraste ou use ↑ ↓ para ordenar
                   </span>
                 </div>
 
@@ -1176,71 +1218,125 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                       </p>
                     </div>
                   ) : (
-                    selectedProductsList.map((p, index) => (
-                      <div
-                        key={p.id}
-                        className="p-2 bg-white flex items-center justify-between gap-2 hover:bg-gray-50 transition-colors"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {/* Position badge */}
-                          <span className="w-5 h-5 rounded-full bg-red-100 text-[#D40511] font-mono font-black text-[10px] flex items-center justify-center shrink-0">
-                            {index + 1}
-                          </span>
+                    selectedProductsList.map((p, index) => {
+                      const isDragging = draggedProductIndex === index;
+                      const isDragOver = dragOverProductIndex === index;
 
-                          <div className="w-7 h-7 rounded bg-gray-50 border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
-                            {p.imageUrl ? (
-                              <img
-                                src={p.imageUrl}
-                                alt={p.name}
-                                className="w-full h-full object-contain p-0.5"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <Package className="w-3.5 h-3.5 text-gray-400" />
-                            )}
-                          </div>
+                      return (
+                        <div
+                          key={p.id}
+                          draggable
+                          onDragStart={(e) => {
+                            setDraggedProductIndex(index);
+                            e.dataTransfer.effectAllowed = "move";
+                            e.dataTransfer.setData("text/plain", String(index));
+                          }}
+                          onDragOver={(e) => {
+                            e.preventDefault();
+                            e.dataTransfer.dropEffect = "move";
+                            if (dragOverProductIndex !== index) {
+                              setDragOverProductIndex(index);
+                            }
+                          }}
+                          onDragLeave={() => {
+                            if (dragOverProductIndex === index) {
+                              setDragOverProductIndex(null);
+                            }
+                          }}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (draggedProductIndex !== null && draggedProductIndex !== index) {
+                              handleReorderProducts(draggedProductIndex, index);
+                            }
+                            setDraggedProductIndex(null);
+                            setDragOverProductIndex(null);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedProductIndex(null);
+                            setDragOverProductIndex(null);
+                          }}
+                          className={`p-2 bg-white flex items-center justify-between gap-2 transition-all select-none cursor-grab active:cursor-grabbing ${
+                            isDragging
+                              ? "opacity-40 scale-[0.98] border-2 border-dashed border-[#D40511] bg-red-50/40 shadow-inner"
+                              : isDragOver
+                              ? "border-2 border-[#D40511] bg-red-50/20 shadow-md ring-2 ring-red-400/20"
+                              : "hover:bg-gray-50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {/* Grip handle for dragging */}
+                            <div
+                              className="text-gray-400 hover:text-gray-700 p-0.5 rounded shrink-0 transition"
+                              title="Arraste para reposicionar o produto na fila"
+                            >
+                              <GripVertical className="w-3.5 h-3.5" />
+                            </div>
 
-                          <div className="min-w-0">
-                            <p className="text-xs font-bold text-gray-800 truncate" title={p.name}>
-                              {p.name}
-                            </p>
-                            <span className="text-[9px] text-gray-500 font-mono">
-                              {p.brand || "Dr. Oetker"} {p.weight ? `• ${p.weight}` : ""}
+                            {/* Position badge */}
+                            <span className="w-5 h-5 rounded-full bg-red-100 text-[#D40511] font-mono font-black text-[10px] flex items-center justify-center shrink-0">
+                              {index + 1}
                             </span>
+
+                            <div className="w-7 h-7 rounded bg-gray-50 border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
+                              {p.imageUrl ? (
+                                <img
+                                  src={p.imageUrl}
+                                  alt={p.name}
+                                  className="w-full h-full object-contain p-0.5 pointer-events-none"
+                                  draggable={false}
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <Package className="w-3.5 h-3.5 text-gray-400" />
+                              )}
+                            </div>
+
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-gray-800 truncate" title={p.name}>
+                                {p.name}
+                              </p>
+                              <span className="text-[9px] text-gray-500 font-mono">
+                                {p.brand || "Dr. Oetker"} {p.weight ? `• ${p.weight}` : ""}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Order arrows and remove buttons (kept intact) */}
+                          <div
+                            className="flex items-center gap-0.5 shrink-0"
+                            onDragStart={(e) => e.stopPropagation()}
+                            onMouseDown={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleMoveProductUp(index)}
+                              disabled={index === 0}
+                              className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-20 disabled:hover:text-gray-400 cursor-pointer"
+                              title="Mover para cima"
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveProductDown(index)}
+                              disabled={index === selectedProductsList.length - 1}
+                              className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-20 disabled:hover:text-gray-400 cursor-pointer"
+                              title="Mover para baixo"
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleProduct(p.id)}
+                              className="p-1 text-red-400 hover:text-red-700 ml-0.5 cursor-pointer"
+                              title="Remover da fila"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-
-                        {/* Order arrows and remove */}
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleMoveProductUp(index)}
-                            disabled={index === 0}
-                            className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-20 disabled:hover:text-gray-400"
-                            title="Mover para cima"
-                          >
-                            <ChevronUp className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMoveProductDown(index)}
-                            disabled={index === selectedProductsList.length - 1}
-                            className="p-1 text-gray-400 hover:text-gray-700 disabled:opacity-20 disabled:hover:text-gray-400"
-                            title="Mover para baixo"
-                          >
-                            <ChevronDown className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleProduct(p.id)}
-                            className="p-1 text-red-400 hover:text-red-700 ml-0.5"
-                            title="Remover da fila"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>

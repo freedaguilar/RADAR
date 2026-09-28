@@ -1,23 +1,139 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from './supabase';
-import { Product, Chain, PriceRecord, User, GuidedCampaign } from '../types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue } from '../types';
 
-export function useSupabaseSync() {
+export function useSupabaseSync(
+  onCampaignsRealtimeUpdate?: (campaigns: GuidedCampaign[]) => void,
+  onCustomQueuesRealtimeUpdate?: (queues: CustomTraditionalQueue[]) => void
+) {
   const [isConfigured, setIsConfigured] = useState(
     !!import.meta.env.VITE_SUPABASE_URL && (!!import.meta.env.VITE_SUPABASE_ANON_KEY || !!import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
   );
 
+  const callbackRef = useRef(onCampaignsRealtimeUpdate);
+  callbackRef.current = onCampaignsRealtimeUpdate;
+
+  const customQueuesCallbackRef = useRef(onCustomQueuesRealtimeUpdate);
+  customQueuesCallbackRef.current = onCustomQueuesRealtimeUpdate;
+
+  async function fetchCampaigns(): Promise<GuidedCampaign[]> {
+    if (!isConfigured) return [];
+    try {
+      const { data, error } = await supabase.from('guided_campaigns').select('*').order('created_at', { ascending: false });
+      if (error) {
+        console.warn('Aviso ao consultar guided_campaigns no Supabase:', error.message);
+        return [];
+      }
+      return (data || []).map((camp: any) => {
+        let productIds: string[] = [];
+        const rawIds = camp.product_ids || camp.productIds;
+        if (Array.isArray(rawIds)) {
+          productIds = rawIds;
+        } else if (typeof rawIds === 'string') {
+          try {
+            const parsed = JSON.parse(rawIds);
+            if (Array.isArray(parsed)) productIds = parsed;
+          } catch {
+            productIds = rawIds.split(',').map((s: string) => s.trim()).filter(Boolean);
+          }
+        }
+
+        return {
+          id: String(camp.id),
+          title: camp.title,
+          chainId: camp.chain_id || camp.chainId,
+          state: camp.state || 'Minas Gerais',
+          productIds,
+          active: Boolean(camp.active === true || camp.active === 'true' || camp.active === 1 || camp.active === 't'),
+          notes: camp.notes || undefined,
+          createdBy: camp.created_by || camp.createdBy || undefined,
+          createdAt: camp.created_at || camp.createdAt || new Date().toISOString(),
+          updatedAt: camp.updated_at || camp.updatedAt || undefined,
+        } as GuidedCampaign;
+      });
+    } catch (err) {
+      console.warn('Exceção ao buscar pesquisas guiadas do Supabase:', err);
+      return [];
+    }
+  }
+
+  async function fetchCustomQueues(): Promise<CustomTraditionalQueue[]> {
+    if (!isConfigured) return [];
+    try {
+      const { data, error } = await supabase.from('custom_traditional_queues').select('*');
+      if (error) {
+        return [];
+      }
+      return (data || []).map((q: any) => {
+        let productIds: string[] = [];
+        const rawIds = q.product_ids || q.productIds;
+        if (Array.isArray(rawIds)) {
+          productIds = rawIds;
+        } else if (typeof rawIds === 'string') {
+          try {
+            const parsed = JSON.parse(rawIds);
+            if (Array.isArray(parsed)) productIds = parsed;
+          } catch {
+            productIds = rawIds.split(',').map((s: string) => s.trim()).filter(Boolean);
+          }
+        }
+        return {
+          id: String(q.id),
+          chainId: q.chain_id || q.chainId,
+          state: q.state || 'Minas Gerais',
+          productIds,
+          updatedAt: q.updated_at || q.updatedAt || new Date().toISOString(),
+          updatedBy: q.updated_by || q.updatedBy || undefined,
+        } as CustomTraditionalQueue;
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  // Realtime subscription para guided_campaigns e custom_traditional_queues
+  useEffect(() => {
+    if (!isConfigured) return;
+
+    try {
+      const channel = supabase
+        .channel('realtime-guided-campaigns')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'guided_campaigns' },
+          async () => {
+            const updated = await fetchCampaigns();
+            if (callbackRef.current) {
+              callbackRef.current(updated);
+            }
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'custom_traditional_queues' },
+          async () => {
+            const updated = await fetchCustomQueues();
+            if (customQueuesCallbackRef.current) {
+              customQueuesCallbackRef.current(updated);
+            }
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    } catch (e) {
+      console.debug('Supabase realtime channel subscription caught exception:', e);
+    }
+  }, [isConfigured]);
+
   async function fetchAll() {
     if (!isConfigured) return null;
     
-    let campaignsRes: any = { data: null, error: null };
-    try {
-      campaignsRes = await supabase.from('guided_campaigns').select('*');
-    } catch {
-      campaignsRes = { data: null, error: null };
-    }
-
-    const [productsRes, chainsRes, recordsRes, usersRes] = await Promise.all([
+    const [campaignsList, customQueuesList, productsRes, chainsRes, recordsRes, usersRes] = await Promise.all([
+      fetchCampaigns(),
+      fetchCustomQueues(),
       supabase.from('products').select('*'),
       supabase.from('chains').select('*'),
       supabase.from('price_records').select('*'),
@@ -95,35 +211,8 @@ export function useSupabaseSync() {
       password: u.password,
     })) as User[];
 
-    const guidedCampaigns = (campaignsRes?.data || []).map((camp: any) => {
-      let productIds: string[] = [];
-      if (Array.isArray(camp.product_ids)) {
-        productIds = camp.product_ids;
-      } else if (typeof camp.product_ids === 'string') {
-        try {
-          const parsed = JSON.parse(camp.product_ids);
-          if (Array.isArray(parsed)) productIds = parsed;
-        } catch {
-          productIds = camp.product_ids.split(',').map((s: string) => s.trim()).filter(Boolean);
-        }
-      }
-
-      return {
-        id: camp.id,
-        title: camp.title,
-        chainId: camp.chain_id,
-        state: camp.state || 'Minas Gerais',
-        productIds,
-        active: Boolean(camp.active),
-        notes: camp.notes || undefined,
-        createdBy: camp.created_by || undefined,
-        createdAt: camp.created_at || new Date().toISOString(),
-        updatedAt: camp.updated_at || undefined,
-      } as GuidedCampaign;
-    });
-
-    return { products, chains, records, users, guidedCampaigns };
+    return { products, chains, records, users, guidedCampaigns: campaignsList, customTraditionalQueues: customQueuesList };
   }
 
-  return { isConfigured, fetchAll };
+  return { isConfigured, fetchAll, fetchCampaigns, fetchCustomQueues };
 }

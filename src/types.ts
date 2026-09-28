@@ -111,6 +111,15 @@ export interface GuidedCampaign {
   notes?: string;
 }
 
+export interface CustomTraditionalQueue {
+  id: string; // ex: `queue-${chainId}-${state}`
+  chainId: string;
+  state: string; // ex: 'Minas Gerais', 'Goiás', etc.
+  productIds: string[]; // Lista ordenada personalizada pelo gestor
+  updatedAt: string;
+  updatedBy?: string;
+}
+
 export interface AppState {
   products: Product[];
   chains: Chain[];
@@ -118,4 +127,5 @@ export interface AppState {
   users: User[];
   currentUser: User | null;
   guidedCampaigns?: GuidedCampaign[];
+  customTraditionalQueues?: CustomTraditionalQueue[];
 }

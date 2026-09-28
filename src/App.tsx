@@ -13,11 +13,12 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign } from "./types";
+import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue } from "./types";
 import { getInitialState, saveStateToLocalStorage } from "./mockData";
 import { useSupabaseSync } from "./lib/useSupabaseSync";
 import { supabase } from "./lib/supabase";
 import { parsePriceRecordMeta } from "./lib/textUtils";
+import { isStateMatch } from "./lib/traditionalQueue";
 
 // import Components
 import { Login } from "./components/Login";
@@ -28,7 +29,24 @@ import { Audit } from "./components/Audit";
 import { Settings } from "./components/Settings";
 
 export default function App() {
-  const { isConfigured, fetchAll } = useSupabaseSync();
+  const handleCampaignsRealtimeUpdate = useCallback((freshCampaigns: GuidedCampaign[]) => {
+    setState((prev) => ({
+      ...prev,
+      guidedCampaigns: freshCampaigns,
+    }));
+  }, []);
+
+  const handleCustomQueuesRealtimeUpdate = useCallback((freshQueues: CustomTraditionalQueue[]) => {
+    setState((prev) => ({
+      ...prev,
+      customTraditionalQueues: freshQueues,
+    }));
+  }, []);
+
+  const { isConfigured, fetchAll, fetchCampaigns, fetchCustomQueues } = useSupabaseSync(
+    handleCampaignsRealtimeUpdate,
+    handleCustomQueuesRealtimeUpdate
+  );
   const [isInitializing, setIsInitializing] = useState(true);
 
   // Global app state
@@ -50,9 +68,13 @@ export default function App() {
               records: data.records,
               users: data.users,
               guidedCampaigns:
-                data.guidedCampaigns && data.guidedCampaigns.length > 0
+                Array.isArray(data.guidedCampaigns)
                   ? data.guidedCampaigns
                   : prev.guidedCampaigns || [],
+              customTraditionalQueues:
+                Array.isArray(data.customTraditionalQueues)
+                  ? data.customTraditionalQueues
+                  : prev.customTraditionalQueues || [],
             }));
           } else if (data && data.users.length === 0) {
             // Seed database with mock data if it's completely empty
@@ -148,7 +170,7 @@ export default function App() {
   }, [state]);
 
   // Session login
-  const handleLoginSuccess = (user: User) => {
+  const handleLoginSuccess = async (user: User) => {
     setState((prev) => {
       const exists = prev.users.some(
         (u) => u.id === user.id || (Boolean(u.email) && Boolean(user.email) && u.email.toLowerCase() === user.email.toLowerCase())
@@ -163,6 +185,21 @@ export default function App() {
       setActiveTab("registrar");
     } else {
       setActiveTab("dashboard");
+    }
+
+    // Refresh campaigns from Supabase immediately on login so guests and auditors have the freshest data
+    if (isConfigured) {
+      try {
+        const fresh = await fetchCampaigns();
+        if (Array.isArray(fresh)) {
+          setState((prev) => ({
+            ...prev,
+            guidedCampaigns: fresh,
+          }));
+        }
+      } catch (err) {
+        console.debug("Login campaigns refresh skipped:", err);
+      }
     }
   };
 
@@ -668,6 +705,70 @@ export default function App() {
     [isConfigured],
   );
 
+  const handleSaveCustomQueue = useCallback(
+    async (queue: CustomTraditionalQueue) => {
+      setState((prev) => {
+        const existing = prev.customTraditionalQueues || [];
+        const filtered = existing.filter(
+          (q) => q.id !== queue.id && !(q.chainId === queue.chainId && isStateMatch(q.state, queue.state))
+        );
+        return {
+          ...prev,
+          customTraditionalQueues: [queue, ...filtered],
+        };
+      });
+
+      if (isConfigured) {
+        try {
+          const { error } = await supabase.from("custom_traditional_queues").upsert({
+            id: queue.id,
+            chain_id: queue.chainId,
+            state: queue.state,
+            product_ids: queue.productIds,
+            updated_at: queue.updatedAt,
+            updated_by: queue.updatedBy || null,
+          });
+          if (error) {
+            console.debug("Aviso ao salvar fila tradicional no Supabase:", error.message);
+          }
+        } catch (err) {
+          console.debug("Exceção ao inserir fila tradicional no Supabase:", err);
+        }
+      }
+    },
+    [isConfigured],
+  );
+
+  const handleResetCustomQueue = useCallback(
+    async (chainId: string, stateName: string) => {
+      setState((prev) => {
+        const existing = prev.customTraditionalQueues || [];
+        const filtered = existing.filter(
+          (q) => !(q.chainId === chainId && isStateMatch(q.state, stateName))
+        );
+        return {
+          ...prev,
+          customTraditionalQueues: filtered,
+        };
+      });
+
+      if (isConfigured) {
+        try {
+          const { error } = await supabase
+            .from("custom_traditional_queues")
+            .delete()
+            .match({ chain_id: chainId, state: stateName });
+          if (error) {
+            console.debug("Aviso ao excluir fila tradicional no Supabase:", error.message);
+          }
+        } catch (err) {
+          console.debug("Exceção ao resetar fila tradicional no Supabase:", err);
+        }
+      }
+    },
+    [isConfigured],
+  );
+
   // Enforce guest tab lock
   useEffect(() => {
     if (state.currentUser?.isGuest && activeTab !== "registrar") {
@@ -739,6 +840,12 @@ export default function App() {
           chains: data.chains,
           records: data.records,
           users: data.users,
+          guidedCampaigns: Array.isArray(data.guidedCampaigns)
+            ? data.guidedCampaigns
+            : prev.guidedCampaigns || [],
+          customTraditionalQueues: Array.isArray(data.customTraditionalQueues)
+            ? data.customTraditionalQueues
+            : prev.customTraditionalQueues || [],
         }));
       }
     } catch (err) {
@@ -1052,6 +1159,8 @@ export default function App() {
             products={state.products}
             chains={state.chains}
             records={state.records}
+            guidedCampaigns={state.guidedCampaigns || []}
+            customTraditionalQueues={state.customTraditionalQueues || []}
             onSaveRecord={handleSavePriceRecord}
             onUpdateRecord={handleUpdatePriceRecord}
             onDeleteRecord={handleDeletePriceRecord}
@@ -1319,6 +1428,7 @@ export default function App() {
             chains={state.chains}
             records={state.records}
             guidedCampaigns={state.guidedCampaigns || []}
+            customTraditionalQueues={state.customTraditionalQueues || []}
             onSaveRecord={handleSavePriceRecord}
             onUpdateRecord={handleUpdatePriceRecord}
             onDeleteRecord={handleDeletePriceRecord}
@@ -1346,9 +1456,13 @@ export default function App() {
           <Settings
             products={state.products}
             chains={state.chains}
+            records={state.records}
             users={state.users}
             currentUser={state.currentUser}
             guidedCampaigns={state.guidedCampaigns || []}
+            customTraditionalQueues={state.customTraditionalQueues || []}
+            onSaveCustomQueue={handleSaveCustomQueue}
+            onResetCustomQueue={handleResetCustomQueue}
             onAddCampaign={handleAddGuidedCampaign}
             onUpdateCampaign={handleUpdateGuidedCampaign}
             onDeleteCampaign={handleDeleteGuidedCampaign}
