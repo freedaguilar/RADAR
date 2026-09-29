@@ -780,7 +780,8 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
   useEffect(() => {
     setCapturedProductIds([]);
     setOutOfStockProductIds([]);
-    setGuidedQueue(frequentProductsList);
+    const pendingProducts = frequentProductsList.filter((p) => !registeredProductIdsSet.has(p.id));
+    setGuidedQueue(pendingProducts.length > 0 ? pendingProducts : frequentProductsList);
     setKeepCurrentPrice(false);
     setHasShownFreeModeNotice(false);
     setShowFreeModeNoticeModal(false);
@@ -788,33 +789,39 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     setResearchStartTime(new Date().toISOString());
   }, [selectedChainId, selectedState]);
 
-  // Sincroniza e garante que a fila respeite EXCLUSIVAMENTE a pesquisa guiada ativa ou restaure o padrão se desativada
+  // Sincroniza e garante que a fila respeite a pesquisa guiada ativa ou restaure o padrão se desativada
+  const activeCampaignKey = activeGuidedCampaign
+    ? `${activeGuidedCampaign.id}_${activeGuidedCampaign.active ? '1' : '0'}`
+    : 'none';
+  const lastActiveCampaignKeyRef = useRef<string>(activeCampaignKey);
+
   useEffect(() => {
-    if (activeGuidedCampaign) {
-      // Quando há pesquisa guiada ativa na rede e estado selecionados:
-      // A fila DEVE respeitar EXCLUSIVAMENTE a fila da pesquisa guiada na ordem exata definida pelo gestor!
-      setGuidedQueue((prev) => {
-        // Se ainda não houve capturas nesta sessão de pesquisa, usa a fila completa da campanha
-        if (capturedProductIds.length === 0 && outOfStockProductIds.length === 0) {
-          return frequentProductsList;
-        }
-        // Se já houve itens capturados ou marcados sem estoque, mantém estritamente apenas os produtos da campanha que continuam pendentes
-        const pendingInCampaign = frequentProductsList.filter(
+    const campaignChanged = activeCampaignKey !== lastActiveCampaignKeyRef.current;
+    lastActiveCampaignKeyRef.current = activeCampaignKey;
+
+    if (activeGuidedCampaign && activeGuidedCampaign.active) {
+      // Quando a pesquisa guiada é ativada ou muda de campanha, ou na inicialização (nenhuma captura ainda realizada):
+      if (campaignChanged || (capturedProductIds.length === 0 && outOfStockProductIds.length === 0)) {
+        setGuidedQueue(() => {
+          const pendingInCampaign = frequentProductsList.filter(
+            (p) => !registeredProductIdsSet.has(p.id) && !outOfStockProductIds.includes(p.id)
+          );
+          return pendingInCampaign.length > 0 ? pendingInCampaign : frequentProductsList;
+        });
+      }
+    } else if (selectedChainId && selectedState) {
+      // Quando a pesquisa guiada é desativada pelo gestor, a fila volta a ser a padrão se ainda não iniciada
+      if (campaignChanged || (capturedProductIds.length === 0 && outOfStockProductIds.length === 0)) {
+        const pendingDefault = frequentProductsList.filter(
           (p) => !registeredProductIdsSet.has(p.id) && !outOfStockProductIds.includes(p.id)
         );
-        return pendingInCampaign;
-      });
-    } else if (selectedChainId && selectedState) {
-      // Quando a pesquisa guiada é desativada pelo gestor, a fila volta a ser a padrão
-      if (capturedProductIds.length === 0 && outOfStockProductIds.length === 0) {
-        setGuidedQueue(frequentProductsList);
+        setGuidedQueue(pendingDefault.length > 0 ? pendingDefault : frequentProductsList);
       }
     }
   }, [
-    activeGuidedCampaign?.id,
-    activeGuidedCampaign?.active,
-    activeGuidedCampaign?.updatedAt,
-    frequentProductsList,
+    activeCampaignKey,
+    selectedChainId,
+    selectedState,
   ]);
 
   // Inicializa a fila na primeira carga se estiver vazia
@@ -825,15 +832,16 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
       outOfStockProductIds.length === 0 &&
       frequentProductsList.length > 0
     ) {
-      setGuidedQueue(frequentProductsList.filter((p) => !registeredProductIdsSet.has(p.id)));
+      const initialPending = frequentProductsList.filter((p) => !registeredProductIdsSet.has(p.id));
+      setGuidedQueue(initialPending.length > 0 ? initialPending : frequentProductsList);
     }
-  }, [frequentProductsList, registeredProductIdsSet]);
+  }, [frequentProductsList.length]);
 
-  // Active item in guided camera queue: nunca exibe produto já registrado nesta sessão
+  // Active item in guided camera queue: o produto da vez na câmera é SEMPRE o topo da fila (guidedQueue[0])
   const currentGuidedProduct = useMemo(() => {
     if (!useGuidedMode || guidedQueue.length === 0) return null;
-    return guidedQueue.find(p => !registeredProductIdsSet.has(p.id) && !capturedProductIds.includes(p.id)) || null;
-  }, [useGuidedMode, guidedQueue, registeredProductIdsSet, capturedProductIds]);
+    return guidedQueue[0] || null;
+  }, [useGuidedMode, guidedQueue]);
 
   // Reseta opção de manter preço quando o produto ativo mudar
   useEffect(() => {
@@ -930,7 +938,15 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
       state: selectedState,
     };
 
-    setBatchItems(prev => [...prev, newItem]);
+    // Se o produto já estava no lote (correção de registro), substitui o registro anterior
+    const existingOldItem = batchItems.find(i => i.selectedProductId === product.id && i.id !== tempId);
+    if (existingOldItem?.recordId && onDeleteRecord) {
+      onDeleteRecord(existingOldItem.recordId);
+    }
+    setBatchItems(prev => {
+      const filtered = prev.filter(i => !(i.selectedProductId === product.id && i.id !== tempId));
+      return [...filtered, newItem];
+    });
 
     try {
       const comp = await compressSingleImagePromise(dataUrl, originalBytes);
@@ -1225,20 +1241,27 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     setOutOfStockProductIds(prev => prev.filter(id => id !== prod.id));
     // 2. Remove dos capturados para permitir novo registro ou atualização
     setCapturedProductIds(prev => prev.filter(id => id !== prod.id));
-    // 3. Continua a fila a partir do item que o usuário selecionou
+
+    // 3. Continua a fila a partir do item que o usuário selecionou:
+    // O item selecionado (prod) SEMPRE fica no topo da nova fila para auditoria ou correção imediata
     const targetIdx = auditQueueProducts.findIndex(p => p.id === prod.id);
     if (targetIdx !== -1) {
       const rotated = [...auditQueueProducts.slice(targetIdx), ...auditQueueProducts.slice(0, targetIdx)];
-      const activeCaptured = capturedProductIds.filter(id => id !== prod.id);
-      const activeOutOfStock = outOfStockProductIds.filter(id => id !== prod.id);
-      const newQueue = rotated.filter(p => !activeCaptured.includes(p.id) && !activeOutOfStock.includes(p.id));
-      setGuidedQueue(newQueue);
+      // Os itens seguintes continuam a sequência a partir deste ponto, excluindo outros itens já registrados ou sem estoque
+      const nextPending = rotated.filter(p => 
+        p.id !== prod.id && 
+        !outOfStockProductIds.includes(p.id) && 
+        !capturedProductIds.includes(p.id) &&
+        !registeredProductIdsSet.has(p.id)
+      );
+      setGuidedQueue([prod, ...nextPending]);
     } else {
       setGuidedQueue(prev => {
         const filtered = prev.filter(p => p.id !== prod.id);
         return [prod, ...filtered];
       });
     }
+
     // 4. Ativa o modo guiado
     setUseGuidedMode(true);
     // 5. Se estiver na etapa de confirmação (4), volta para a etapa de fotos (3) com a câmera
@@ -1644,7 +1667,15 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
       state: selectedState,
     };
 
-    setBatchItems(prev => [...prev, newItem]);
+    // Se o produto já estava no lote (correção de registro), substitui o registro anterior
+    const existingOldItem = selectedProdId ? batchItems.find(i => i.selectedProductId === selectedProdId && i.id !== tempId) : null;
+    if (existingOldItem?.recordId && onDeleteRecord) {
+      onDeleteRecord(existingOldItem.recordId);
+    }
+    setBatchItems(prev => {
+      const filtered = selectedProdId ? prev.filter(i => !(i.selectedProductId === selectedProdId && i.id !== tempId)) : prev;
+      return [...filtered, newItem];
+    });
 
     try {
       const comp = await compressSingleImagePromise(dataUrl, originalBytes);
@@ -3369,7 +3400,12 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                             </span>
-                            {activeGuidedCampaign ? (
+                            {registeredProductIdsSet.has(currentGuidedProduct.id) ? (
+                              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-300 font-mono flex items-center gap-1 bg-emerald-950/70 px-2 py-0.5 rounded-full border border-emerald-400/50">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                                CORRIGIR REGISTRO
+                              </span>
+                            ) : activeGuidedCampaign ? (
                               <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-amber-300 font-mono flex items-center gap-1">
                                 <Target className="w-3 h-3 text-amber-400" />
                                 PESQUISA GUIADA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
@@ -5219,10 +5255,10 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                               isOutOfStock
                                 ? 'bg-rose-600 hover:bg-rose-700 text-white'
                                 : isRegistered
-                                ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-250'
+                                ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300'
                                 : 'bg-emerald-600 hover:bg-emerald-700 text-white'
                             }`}
-                            title={isRegistered ? 'Recapturar' : 'Registrar'}
+                            title={isRegistered ? 'Corrigir registro na câmera' : 'Registrar na câmera'}
                           >
                             <Camera className="w-4 h-4" />
                           </button>
