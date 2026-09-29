@@ -25,6 +25,7 @@ import {
   MoveUp,
   MoveDown,
   GripVertical,
+  ArrowUpDown,
 } from 'lucide-react';
 import {
   Product,
@@ -100,6 +101,16 @@ export function TraditionalQueueSettings({
   // Estados de drag-and-drop da fila
   const [draggedProductId, setDraggedProductId] = useState<string | null>(null);
   const [dragOverProductId, setDragOverProductId] = useState<string | null>(null);
+
+  // Seleção múltipla de produtos na fila
+  const [selectedQueueProductIds, setSelectedQueueProductIds] = useState<string[]>([]);
+
+  // Estado para modal de posicionar acima ou abaixo de outro produto (1 ou múltiplos itens)
+  const [positionModalData, setPositionModalData] = useState<{
+    products: Product[];
+  } | null>(null);
+  const [relativeTargetId, setRelativeTargetId] = useState<string>('');
+  const [relativeRelation, setRelativeRelation] = useState<'above' | 'below'>('above');
 
   // Busca se já existe uma fila customizada salva
   const savedCustomQueue = useMemo(() => {
@@ -336,6 +347,123 @@ export function TraditionalQueueSettings({
       next.splice(toIndex, 0, movedItem);
       return next;
     });
+    setHasUnsavedChanges(true);
+    setSaveSuccessMsg(false);
+  };
+
+  const modalMovingIds = useMemo(() => {
+    return positionModalData?.products.map((p) => p.id) || [];
+  }, [positionModalData]);
+
+  // Lista de outros produtos na fila para posicionamento relativo (exclui os produtos selecionados sendo movidos)
+  const otherQueueProducts = useMemo(() => {
+    if (!positionModalData) return [];
+    return currentQueueProductIds
+      .filter((id) => !modalMovingIds.includes(id))
+      .map((id) => {
+        const prod = products.find((p) => p.id === id);
+        return {
+          id,
+          name: prod?.name || `Produto ${id}`,
+          weight: prod?.weight,
+          originalQueuePos: currentQueueProductIds.indexOf(id) + 1,
+        };
+      });
+  }, [positionModalData, modalMovingIds, currentQueueProductIds, products]);
+
+  const relativeTargetProduct = useMemo(() => {
+    if (!relativeTargetId) return null;
+    return products.find((p) => p.id === relativeTargetId) || null;
+  }, [relativeTargetId, products]);
+
+  const calculatedRelativePosition = useMemo(() => {
+    if (!positionModalData || !relativeTargetId) return null;
+    const remaining = currentQueueProductIds.filter((id) => !modalMovingIds.includes(id));
+    const toIndex = remaining.indexOf(relativeTargetId);
+    if (toIndex === -1) return null;
+    const insertIndex = relativeRelation === 'above' ? toIndex : toIndex + 1;
+    return insertIndex + 1;
+  }, [positionModalData, modalMovingIds, relativeTargetId, relativeRelation, currentQueueProductIds]);
+
+  const handleOpenSinglePositionModal = (product: Product) => {
+    setPositionModalData({ products: [product] });
+    const currentIndex = currentQueueProductIds.indexOf(product.id);
+    const otherIds = currentQueueProductIds.filter((id) => id !== product.id);
+    if (otherIds.length > 0) {
+      const defaultTargetId = currentIndex > 0
+        ? currentQueueProductIds[currentIndex - 1]
+        : currentQueueProductIds[currentIndex + 1] || otherIds[0];
+      setRelativeTargetId(defaultTargetId);
+      setRelativeRelation(currentIndex > 0 ? 'above' : 'below');
+    } else {
+      setRelativeTargetId('');
+      setRelativeRelation('above');
+    }
+  };
+
+  const handleOpenBatchPositionModal = () => {
+    if (selectedQueueProductIds.length === 0) return;
+    const prods = currentQueueProductIds
+      .filter((id) => selectedQueueProductIds.includes(id))
+      .map((id) => products.find((p) => p.id === id))
+      .filter((p): p is Product => !!p);
+
+    if (prods.length === 0) return;
+
+    setPositionModalData({ products: prods });
+    const otherIds = currentQueueProductIds.filter((id) => !selectedQueueProductIds.includes(id));
+    if (otherIds.length > 0) {
+      setRelativeTargetId(otherIds[0]);
+      setRelativeRelation('above');
+    } else {
+      setRelativeTargetId('');
+      setRelativeRelation('above');
+    }
+  };
+
+  const handleConfirmMoveModal = () => {
+    if (!positionModalData || !relativeTargetId) return;
+    const idsToMove = positionModalData.products.map((p) => p.id);
+    setCurrentQueueProductIds((prev) => {
+      const orderedToMove = prev.filter((id) => idsToMove.includes(id));
+      const remaining = prev.filter((id) => !idsToMove.includes(id));
+      const toIndex = remaining.indexOf(relativeTargetId);
+      if (toIndex === -1) return prev;
+      const insertIndex = relativeRelation === 'above' ? toIndex : toIndex + 1;
+      const next = [...remaining];
+      next.splice(insertIndex, 0, ...orderedToMove);
+      return next;
+    });
+    setHasUnsavedChanges(true);
+    setSaveSuccessMsg(false);
+    setSelectedQueueProductIds([]);
+    setPositionModalData(null);
+  };
+
+  const handleToggleSelectQueueProduct = (id: string) => {
+    setSelectedQueueProductIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllVisibleQueue = () => {
+    const visibleIds = filteredQueueProducts.map((p) => p.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedQueueProductIds.includes(id));
+    if (allSelected) {
+      setSelectedQueueProductIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedQueueProductIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleClearQueueSelection = () => {
+    setSelectedQueueProductIds([]);
+  };
+
+  const handleBatchDeleteSelected = () => {
+    if (selectedQueueProductIds.length === 0) return;
+    setCurrentQueueProductIds((prev) => prev.filter((id) => !selectedQueueProductIds.includes(id)));
+    setSelectedQueueProductIds([]);
     setHasUnsavedChanges(true);
     setSaveSuccessMsg(false);
   };
@@ -655,22 +783,80 @@ export function TraditionalQueueSettings({
                 </span>
               </div>
               <p className="text-[11px] text-gray-500 mt-0.5 font-medium">
-                Esta é a ordem exata em que os itens serão auditados no modo de câmera sequencial. Arraste os produtos ou use as setas para reordenar a fila.
+                Esta é a ordem exata em que os itens serão auditados no modo de câmera sequencial. Arraste os produtos, use as setas ou clique no número da posição para reordenar a fila.
               </p>
             </div>
 
-            {/* Input de filtro dentro da fila */}
-            <div className="relative w-full sm:w-48">
-              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
-              <input
-                type="text"
-                placeholder="Filtrar na fila..."
-                value={queueSearchText}
-                onChange={(e) => setQueueSearchText(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-250 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-red-500"
-              />
+            {/* Input de filtro dentro da fila e botão selecionar todos */}
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                type="button"
+                onClick={handleSelectAllVisibleQueue}
+                className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer"
+                title="Selecionar ou desmarcar todos os produtos visíveis na fila"
+              >
+                {filteredQueueProducts.length > 0 && filteredQueueProducts.every((p) => selectedQueueProductIds.includes(p.id))
+                  ? 'Desmarcar Todos'
+                  : 'Selecionar Todos'}
+              </button>
+
+              <div className="relative w-full sm:w-44">
+                <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Filtrar na fila..."
+                  value={queueSearchText}
+                  onChange={(e) => setQueueSearchText(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 bg-white border border-gray-250 rounded-xl text-xs text-gray-800 placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-red-500"
+                />
+              </div>
             </div>
           </div>
+
+          {/* Barra de Ações em Lote para Itens Selecionados */}
+          {selectedQueueProductIds.length > 0 && (
+            <div className="p-3 bg-slate-900 text-white flex flex-wrap items-center justify-between gap-2.5 animate-fade-in border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold bg-[#D40511] px-2 py-0.5 rounded-full text-white font-mono">
+                  {selectedQueueProductIds.length}
+                </span>
+                <span className="text-xs font-medium text-slate-200">
+                  {selectedQueueProductIds.length === 1 ? 'produto selecionado' : 'produtos selecionados'}
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenBatchPositionModal}
+                  className="px-3 py-1.5 bg-white/15 hover:bg-white/25 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Reposicionar produtos selecionados acima ou abaixo de outro produto"
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5 text-red-400" />
+                  <span>Alterar Posição</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleBatchDeleteSelected}
+                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Remover produtos selecionados da fila"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Excluir Selecionados</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearQueueSelection}
+                  className="px-2 py-1.5 text-slate-400 hover:text-white rounded-lg text-xs transition cursor-pointer"
+                  title="Desmarcar todos"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Lista de Itens na Fila */}
           <div className="flex-1 p-3 sm:p-4 overflow-y-auto max-h-[620px] space-y-2">
@@ -692,6 +878,7 @@ export function TraditionalQueueSettings({
                 const isLast = realIndex === currentQueueProductIds.length - 1;
                 const isDragging = draggedProductId === product.id;
                 const isDragOver = dragOverProductId === product.id;
+                const isSelected = selectedQueueProductIds.includes(product.id);
 
                 return (
                   <div
@@ -726,26 +913,50 @@ export function TraditionalQueueSettings({
                       setDraggedProductId(null);
                       setDragOverProductId(null);
                     }}
-                    className={`p-3 bg-white rounded-xl transition-all flex items-center gap-2.5 sm:gap-3 group select-none cursor-grab active:cursor-grabbing ${
+                    className={`p-3 bg-white rounded-xl transition-all flex items-center gap-2 sm:gap-2.5 group select-none cursor-grab active:cursor-grabbing ${
                       isDragging
                         ? 'opacity-40 scale-[0.98] border-2 border-dashed border-[#D40511] bg-red-50/40 shadow-inner'
                         : isDragOver
                         ? 'border-2 border-[#D40511] bg-red-50/20 shadow-md ring-2 ring-red-400/20'
+                        : isSelected
+                        ? 'border-2 border-red-400 bg-red-50/30 shadow-xs'
                         : 'border border-gray-200 hover:border-gray-300 hover:shadow-2xs'
                     }`}
                   >
+                    {/* Checkbox de Seleção Múltipla */}
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => handleToggleSelectQueueProduct(product.id)}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onDragStart={(e) => e.stopPropagation()}
+                      className="w-4 h-4 rounded text-[#D40511] accent-[#D40511] focus:ring-[#D40511] border-gray-300 cursor-pointer shrink-0"
+                      title={isSelected ? "Desmarcar produto" : "Selecionar produto"}
+                    />
+
                     {/* Grip Handle para arrastar */}
                     <div
-                      className="text-gray-300 group-hover:text-gray-600 hover:text-gray-900 p-1 rounded transition shrink-0"
+                      className="text-gray-300 group-hover:text-gray-600 hover:text-gray-900 p-0.5 rounded transition shrink-0"
                       title="Arraste para reposicionar este produto na fila"
                     >
                       <GripVertical className="w-4 h-4" />
                     </div>
 
-                    {/* Posição na fila (#1, #2, etc.) */}
-                    <div className="w-8 h-8 rounded-lg bg-slate-100 border border-slate-200 text-slate-800 font-mono font-black text-xs flex items-center justify-center shrink-0">
-                      {realIndex + 1}
-                    </div>
+                    {/* Posição na fila (#1, #2, etc.) - Clicável para alterar posição */}
+                    <button
+                      type="button"
+                      draggable={false}
+                      onDragStart={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenSinglePositionModal(product);
+                      }}
+                      className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-red-50 active:scale-95 border border-slate-200 hover:border-red-300 text-slate-800 hover:text-[#D40511] font-mono font-black text-xs flex items-center justify-center shrink-0 transition-all cursor-pointer shadow-2xs hover:shadow-xs group/pos"
+                      title={`Posição atual: #${realIndex + 1}. Clique para posicionar acima ou abaixo de outro produto.`}
+                    >
+                      <span>{realIndex + 1}</span>
+                    </button>
 
                     {/* Imagem do Produto */}
                     <div className="w-12 h-12 rounded-lg bg-gray-50 border border-gray-150 p-1 flex items-center justify-center shrink-0 overflow-hidden">
@@ -1027,6 +1238,200 @@ export function TraditionalQueueSettings({
           </div>
         </div>
       </div>
+
+      {/* Modal Alterar Posição na Fila (Suporta 1 ou múltiplos itens selecionados) */}
+      {positionModalData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
+          onClick={() => setPositionModalData(null)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-5 border border-gray-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-150 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-red-50 text-[#D40511] rounded-xl border border-red-100">
+                  <ArrowUpDown className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-gray-900">
+                    {positionModalData.products.length === 1
+                      ? 'Alterar Posição na Fila'
+                      : `Alterar Posição de ${positionModalData.products.length} Itens`}
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    {positionModalData.products.length === 1
+                      ? 'Defina a nova ordem deste item na auditoria'
+                      : 'Mova os produtos selecionados em bloco para outra posição'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPositionModalData(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Produto(s) selecionado(s) */}
+            {positionModalData.products.length === 1 ? (
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl border border-gray-200/80">
+                <div className="w-12 h-12 rounded-xl bg-white border border-gray-200 p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                  {positionModalData.products[0].imageUrl ? (
+                    <img
+                      src={positionModalData.products[0].imageUrl}
+                      alt={positionModalData.products[0].name}
+                      className="w-full h-full object-contain pointer-events-none"
+                    />
+                  ) : (
+                    <div className="text-[9px] font-bold text-gray-400 uppercase select-none">Sem foto</div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-gray-900 truncate" title={positionModalData.products[0].name}>
+                    {positionModalData.products[0].name}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[11px] text-gray-500 font-mono">
+                      Posição atual: <strong className="text-gray-800 font-black">#{currentQueueProductIds.indexOf(positionModalData.products[0].id) + 1}</strong> de {currentQueueProductIds.length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-red-50/50 rounded-2xl border border-red-200/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-900">
+                    {positionModalData.products.length} produtos selecionados em bloco:
+                  </span>
+                  <span className="text-[10px] font-mono font-bold bg-[#D40511] text-white px-2 py-0.5 rounded-full">
+                    Sequência mantida
+                  </span>
+                </div>
+                <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                  {positionModalData.products.map((prod) => (
+                    <div
+                      key={prod.id}
+                      className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-gray-200 text-xs"
+                    >
+                      <span className="font-mono text-[10px] font-black text-gray-500 w-5 text-center shrink-0">
+                        #{currentQueueProductIds.indexOf(prod.id) + 1}
+                      </span>
+                      <span className="font-bold text-gray-800 truncate flex-1">{prod.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Escolha da Direção: Acima ou Abaixo */}
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700">
+                  {positionModalData.products.length === 1
+                    ? 'Posicionar este produto:'
+                    : 'Posicionar produtos selecionados:'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRelativeRelation('above')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      relativeRelation === 'above'
+                        ? 'bg-red-50 border-[#D40511] text-[#D40511] shadow-2xs ring-1 ring-red-400/30'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                    <span>Ficar Acima de</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRelativeRelation('below')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      relativeRelation === 'below'
+                        ? 'bg-red-50 border-[#D40511] text-[#D40511] shadow-2xs ring-1 ring-red-400/30'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                    <span>Ficar Abaixo de</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Seleção do Produto Alvo */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700">
+                  Do produto:
+                </label>
+                {otherQueueProducts.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    Não há outros produtos na fila para referência.
+                  </p>
+                ) : (
+                  <select
+                    value={relativeTargetId}
+                    onChange={(e) => setRelativeTargetId(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-semibold text-gray-800 focus:outline-hidden focus:ring-2 focus:ring-[#D40511]/30 focus:border-[#D40511] cursor-pointer"
+                  >
+                    {otherQueueProducts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        #{p.originalQueuePos} — {p.name} {p.weight ? `(${p.weight})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Prévia do Resultado */}
+              {calculatedRelativePosition && relativeTargetProduct && (
+                <div className="p-3 bg-red-50/70 border border-red-200/80 rounded-xl text-xs text-gray-700 flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-[#D40511] shrink-0 mt-0.5" />
+                  <span className="leading-snug">
+                    {positionModalData.products.length === 1 ? (
+                      <>
+                        O produto passará para a posição <strong className="text-gray-900 font-black">#{calculatedRelativePosition}</strong> de {currentQueueProductIds.length}, logo {relativeRelation === 'above' ? 'acima' : 'abaixo'} de <strong>"{relativeTargetProduct.name}"</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Os <strong className="text-gray-900 font-black">{positionModalData.products.length} produtos</strong> passarão para as posições <strong className="text-gray-900 font-black">#{calculatedRelativePosition}</strong> a <strong className="text-gray-900 font-black">#{calculatedRelativePosition + positionModalData.products.length - 1}</strong>, logo {relativeRelation === 'above' ? 'acima' : 'abaixo'} de <strong>"{relativeTargetProduct.name}"</strong>.
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Botões do Rodapé */}
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-gray-150">
+              <button
+                type="button"
+                onClick={() => setPositionModalData(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMoveModal}
+                disabled={!relativeTargetId}
+                className="px-4 py-2 bg-[#D40511] hover:bg-[#b0040e] disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>
+                  {calculatedRelativePosition
+                    ? `Confirmar Posição #${calculatedRelativePosition}`
+                    : 'Confirmar Reposicionamento'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Script SQL Supabase */}
       {showSqlModal && (

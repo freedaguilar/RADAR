@@ -24,6 +24,7 @@ import {
   Terminal,
   Loader2,
   GripVertical,
+  ArrowUpDown,
 } from "lucide-react";
 import {
   Product,
@@ -71,6 +72,16 @@ export function GuidedCampaignsSettings({
   const [formProductIds, setFormProductIds] = useState<string[]>([]);
   const [draggedProductIndex, setDraggedProductIndex] = useState<number | null>(null);
   const [dragOverProductIndex, setDragOverProductIndex] = useState<number | null>(null);
+
+  // Seleção múltipla de produtos na fila da campanha
+  const [selectedQueueProductIds, setSelectedQueueProductIds] = useState<string[]>([]);
+
+  // Modal para posicionar produto acima ou abaixo de outro produto (1 ou múltiplos itens)
+  const [positionModalData, setPositionModalData] = useState<{
+    products: Product[];
+  } | null>(null);
+  const [relativeTargetId, setRelativeTargetId] = useState<string>("");
+  const [relativeRelation, setRelativeRelation] = useState<"above" | "below">("above");
   const [formError, setFormError] = useState("");
   const [feedbackBanner, setFeedbackBanner] = useState<{
     type: "success" | "error";
@@ -216,6 +227,8 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
     setProdSearch("");
     setProdBrandFilter("todos");
     setProdCategoryFilter("todas");
+    setSelectedQueueProductIds([]);
+    setPositionModalData(null);
     setViewMode("create");
   };
 
@@ -232,6 +245,8 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
     setProdSearch("");
     setProdBrandFilter("todos");
     setProdCategoryFilter("todas");
+    setSelectedQueueProductIds([]);
+    setPositionModalData(null);
     setViewMode("edit");
   };
 
@@ -312,6 +327,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
         return [...prev, productId];
       }
     });
+    setSelectedQueueProductIds((prev) => prev.filter((id) => id !== productId));
   };
 
   // Reorder product up
@@ -347,6 +363,129 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
       next.splice(toIndex, 0, movedItem);
       return next;
     });
+  };
+
+  const modalMovingIds = useMemo(() => {
+    return positionModalData?.products.map((p) => p.id) || [];
+  }, [positionModalData]);
+
+  // Lista de outros produtos na fila da campanha para posicionamento relativo (exclui itens sendo movidos)
+  const otherCampaignProducts = useMemo(() => {
+    if (!positionModalData) return [];
+    return formProductIds
+      .filter((id) => !modalMovingIds.includes(id))
+      .map((id) => {
+        const prod = products.find((p) => p.id === id);
+        return {
+          id,
+          name: prod?.name || `Produto ${id}`,
+          weight: prod?.weight,
+          originalQueuePos: formProductIds.indexOf(id) + 1,
+        };
+      });
+  }, [positionModalData, modalMovingIds, formProductIds, products]);
+
+  const relativeTargetProduct = useMemo(() => {
+    if (!relativeTargetId) return null;
+    return products.find((p) => p.id === relativeTargetId) || null;
+  }, [relativeTargetId, products]);
+
+  const calculatedRelativePosition = useMemo(() => {
+    if (!positionModalData || !relativeTargetId) return null;
+    const remaining = formProductIds.filter((id) => !modalMovingIds.includes(id));
+    const toIndex = remaining.indexOf(relativeTargetId);
+    if (toIndex === -1) return null;
+    const insertIndex = relativeRelation === "above" ? toIndex : toIndex + 1;
+    return insertIndex + 1;
+  }, [positionModalData, modalMovingIds, relativeTargetId, relativeRelation, formProductIds]);
+
+  const handleOpenSinglePositionModal = (product: Product) => {
+    setPositionModalData({ products: [product] });
+    const currentIndex = formProductIds.indexOf(product.id);
+    const otherIds = formProductIds.filter((id) => id !== product.id);
+    if (otherIds.length > 0) {
+      const defaultTargetId = currentIndex > 0
+        ? formProductIds[currentIndex - 1]
+        : formProductIds[currentIndex + 1] || otherIds[0];
+      setRelativeTargetId(defaultTargetId);
+      setRelativeRelation(currentIndex > 0 ? "above" : "below");
+    } else {
+      setRelativeTargetId("");
+      setRelativeRelation("above");
+    }
+  };
+
+  const handleOpenBatchPositionModal = () => {
+    if (selectedQueueProductIds.length === 0) return;
+    const prods = formProductIds
+      .filter((id) => selectedQueueProductIds.includes(id))
+      .map((id) => products.find((p) => p.id === id))
+      .filter((p): p is Product => !!p);
+
+    if (prods.length === 0) return;
+
+    setPositionModalData({ products: prods });
+    const otherIds = formProductIds.filter((id) => !selectedQueueProductIds.includes(id));
+    if (otherIds.length > 0) {
+      setRelativeTargetId(otherIds[0]);
+      setRelativeRelation("above");
+    } else {
+      setRelativeTargetId("");
+      setRelativeRelation("above");
+    }
+  };
+
+  const handleConfirmMoveModal = () => {
+    if (!positionModalData || !relativeTargetId) return;
+    const idsToMove = positionModalData.products.map((p) => p.id);
+    setFormProductIds((prev) => {
+      const orderedToMove = prev.filter((id) => idsToMove.includes(id));
+      const remaining = prev.filter((id) => !idsToMove.includes(id));
+      const toIndex = remaining.indexOf(relativeTargetId);
+      if (toIndex === -1) return prev;
+      const insertIndex = relativeRelation === "above" ? toIndex : toIndex + 1;
+      const next = [...remaining];
+      next.splice(insertIndex, 0, ...orderedToMove);
+      return next;
+    });
+    const targetProd = products.find((p) => p.id === relativeTargetId);
+    const count = positionModalData.products.length;
+    showFeedback(
+      "success",
+      count === 1
+        ? `Produto posicionado ${relativeRelation === "above" ? "acima" : "abaixo"} de "${targetProd?.name || "produto"}".`
+        : `${count} produtos reposicionados ${relativeRelation === "above" ? "acima" : "abaixo"} de "${targetProd?.name || "produto"}".`
+    );
+    setSelectedQueueProductIds([]);
+    setPositionModalData(null);
+  };
+
+  const handleToggleSelectQueueProduct = (id: string) => {
+    setSelectedQueueProductIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllQueue = () => {
+    if (formProductIds.length === 0) return;
+    const allSelected = formProductIds.every((id) => selectedQueueProductIds.includes(id));
+    if (allSelected) {
+      setSelectedQueueProductIds([]);
+    } else {
+      setSelectedQueueProductIds([...formProductIds]);
+    }
+  };
+
+  const handleClearQueueSelection = () => {
+    setSelectedQueueProductIds([]);
+  };
+
+  const handleBatchDeleteSelected = () => {
+    if (selectedQueueProductIds.length === 0) return;
+    const count = selectedQueueProductIds.length;
+    setFormProductIds((prev) => prev.filter((id) => !selectedQueueProductIds.includes(id)));
+    setSelectedQueueProductIds([]);
+    showFeedback("success", `${count} ${count === 1 ? "produto removido" : "produtos removidos"} da fila.`);
   };
 
   // Select all visible filtered products
@@ -1199,14 +1338,73 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
 
               {/* RIGHT: Ordered Queue Preview (5 cols) */}
               <div className="lg:col-span-5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-700 font-sans">
-                    Ordem na Câmera Guiada ({selectedProductsList.length})
-                  </span>
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-gray-700 font-sans">
+                      Ordem na Câmera Guiada ({selectedProductsList.length})
+                    </span>
+                    {selectedProductsList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleSelectAllQueue}
+                        className="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-md text-[10px] font-bold transition cursor-pointer"
+                        title="Selecionar ou desmarcar todos os produtos da fila"
+                      >
+                        {selectedProductsList.length > 0 && formProductIds.every((id) => selectedQueueProductIds.includes(id))
+                          ? 'Desmarcar Todos'
+                          : 'Selecionar Todos'}
+                      </button>
+                    )}
+                  </div>
                   <span className="text-[10px] text-gray-400 font-mono">
-                    Arraste ou use ↑ ↓ para ordenar
+                    Arraste, use ↑ ↓ ou clique no nº
                   </span>
                 </div>
+
+                {/* Barra de Ações em Lote para Itens Selecionados */}
+                {selectedQueueProductIds.length > 0 && (
+                  <div className="p-2.5 bg-slate-900 text-white rounded-xl flex items-center justify-between gap-2 animate-fade-in shadow-md">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-xs font-bold bg-[#D40511] px-2 py-0.5 rounded-full text-white font-mono shrink-0">
+                        {selectedQueueProductIds.length}
+                      </span>
+                      <span className="text-xs font-medium text-slate-200 truncate">
+                        {selectedQueueProductIds.length === 1 ? 'item selecionado' : 'itens selecionados'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleOpenBatchPositionModal}
+                        className="px-2.5 py-1 bg-white/15 hover:bg-white/25 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        title="Reposicionar produtos selecionados acima ou abaixo de outro produto"
+                      >
+                        <ArrowUpDown className="w-3.5 h-3.5 text-red-400" />
+                        <span>Alterar Posição</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleBatchDeleteSelected}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        title="Remover produtos selecionados da fila"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Excluir</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleClearQueueSelection}
+                        className="p-1 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
+                        title="Desmarcar todos"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="border border-gray-200 rounded-xl overflow-hidden max-h-[380px] overflow-y-auto divide-y divide-gray-100 bg-gray-50">
                   {selectedProductsList.length === 0 ? (
@@ -1221,6 +1419,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                     selectedProductsList.map((p, index) => {
                       const isDragging = draggedProductIndex === index;
                       const isDragOver = dragOverProductIndex === index;
+                      const isSelected = selectedQueueProductIds.includes(p.id);
 
                       return (
                         <div
@@ -1255,15 +1454,28 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                             setDraggedProductIndex(null);
                             setDragOverProductIndex(null);
                           }}
-                          className={`p-2 bg-white flex items-center justify-between gap-2 transition-all select-none cursor-grab active:cursor-grabbing ${
+                          className={`p-2 bg-white flex items-center justify-between gap-1.5 sm:gap-2 transition-all select-none cursor-grab active:cursor-grabbing ${
                             isDragging
                               ? "opacity-40 scale-[0.98] border-2 border-dashed border-[#D40511] bg-red-50/40 shadow-inner"
                               : isDragOver
                               ? "border-2 border-[#D40511] bg-red-50/20 shadow-md ring-2 ring-red-400/20"
-                              : "hover:bg-gray-50"
+                              : isSelected
+                              ? "border-2 border-red-400 bg-red-50/35 shadow-2xs"
+                              : "hover:bg-gray-50 border border-gray-100"
                           }`}
                         >
                           <div className="flex items-center gap-1.5 min-w-0">
+                            {/* Checkbox de Seleção Múltipla */}
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => handleToggleSelectQueueProduct(p.id)}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onDragStart={(e) => e.stopPropagation()}
+                              className="w-3.5 h-3.5 rounded text-[#D40511] accent-[#D40511] focus:ring-[#D40511] border-gray-300 cursor-pointer shrink-0"
+                              title={isSelected ? "Desmarcar produto" : "Selecionar produto"}
+                            />
+
                             {/* Grip handle for dragging */}
                             <div
                               className="text-gray-400 hover:text-gray-700 p-0.5 rounded shrink-0 transition"
@@ -1272,10 +1484,21 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                               <GripVertical className="w-3.5 h-3.5" />
                             </div>
 
-                            {/* Position badge */}
-                            <span className="w-5 h-5 rounded-full bg-red-100 text-[#D40511] font-mono font-black text-[10px] flex items-center justify-center shrink-0">
+                            {/* Position badge - Clicável para alterar posição */}
+                            <button
+                              type="button"
+                              draggable={false}
+                              onDragStart={(e) => e.stopPropagation()}
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenSinglePositionModal(p);
+                              }}
+                              className="min-w-[22px] h-[22px] px-1 rounded-md bg-red-100 hover:bg-red-200 active:scale-95 text-[#D40511] font-mono font-black text-[11px] flex items-center justify-center shrink-0 transition-all cursor-pointer border border-red-200 hover:border-red-300 shadow-2xs hover:shadow-xs"
+                              title={`Posição atual: #${index + 1}. Clique para posicionar acima ou abaixo de outro produto.`}
+                            >
                               {index + 1}
-                            </span>
+                            </button>
 
                             <div className="w-7 h-7 rounded bg-gray-50 border border-gray-200 flex items-center justify-center shrink-0 overflow-hidden">
                               {p.imageUrl ? (
@@ -1370,6 +1593,200 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
             </div>
           </div>
         </form>
+      )}
+
+      {/* Modal Alterar Posição na Fila (1 ou múltiplos itens) */}
+      {positionModalData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in"
+          onClick={() => setPositionModalData(null)}
+        >
+          <div
+            className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 space-y-5 border border-gray-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-150 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-red-50 text-[#D40511] rounded-xl border border-red-100">
+                  <ArrowUpDown className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-gray-900 font-sans">
+                    {positionModalData.products.length === 1
+                      ? 'Alterar Posição na Fila'
+                      : `Alterar Posição de ${positionModalData.products.length} Itens`}
+                  </h3>
+                  <p className="text-[11px] text-gray-500">
+                    {positionModalData.products.length === 1
+                      ? 'Defina a nova ordem deste item na câmera guiada'
+                      : 'Mova os produtos selecionados em bloco para outra posição'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPositionModalData(null)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Produto(s) selecionado(s) */}
+            {positionModalData.products.length === 1 ? (
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-2xl border border-gray-200/80">
+                <div className="w-12 h-12 rounded-xl bg-white border border-gray-200 p-1 flex items-center justify-center shrink-0 overflow-hidden">
+                  {positionModalData.products[0].imageUrl ? (
+                    <img
+                      src={positionModalData.products[0].imageUrl}
+                      alt={positionModalData.products[0].name}
+                      className="w-full h-full object-contain pointer-events-none"
+                    />
+                  ) : (
+                    <Package className="w-5 h-5 text-gray-400" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-bold text-gray-900 truncate" title={positionModalData.products[0].name}>
+                    {positionModalData.products[0].name}
+                  </p>
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[11px] text-gray-500 font-mono">
+                      Posição atual: <strong className="text-gray-800 font-black">#{formProductIds.indexOf(positionModalData.products[0].id) + 1}</strong> de {formProductIds.length}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 bg-red-50/50 rounded-2xl border border-red-200/60 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-gray-900">
+                    {positionModalData.products.length} produtos selecionados em bloco:
+                  </span>
+                  <span className="text-[10px] font-mono font-bold bg-[#D40511] text-white px-2 py-0.5 rounded-full">
+                    Sequência mantida
+                  </span>
+                </div>
+                <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
+                  {positionModalData.products.map((prod) => (
+                    <div
+                      key={prod.id}
+                      className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-gray-200 text-xs"
+                    >
+                      <span className="font-mono text-[10px] font-black text-gray-500 w-5 text-center shrink-0">
+                        #{formProductIds.indexOf(prod.id) + 1}
+                      </span>
+                      <span className="font-bold text-gray-800 truncate flex-1">{prod.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Escolha da Direção: Acima ou Abaixo */}
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700 font-sans">
+                  {positionModalData.products.length === 1
+                    ? 'Posicionar este produto:'
+                    : 'Posicionar produtos selecionados:'}
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRelativeRelation('above')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      relativeRelation === 'above'
+                        ? 'bg-red-50 border-[#D40511] text-[#D40511] shadow-2xs ring-1 ring-red-400/30'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                    <span>Ficar Acima de</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRelativeRelation('below')}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                      relativeRelation === 'below'
+                        ? 'bg-red-50 border-[#D40511] text-[#D40511] shadow-2xs ring-1 ring-red-400/30'
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                    <span>Ficar Abaixo de</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Seleção do Produto Alvo */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-gray-700 font-sans">
+                  Do produto:
+                </label>
+                {otherCampaignProducts.length === 0 ? (
+                  <p className="text-xs text-gray-500 italic p-3 bg-gray-50 rounded-xl border border-gray-200">
+                    Não há outros produtos na fila para referência.
+                  </p>
+                ) : (
+                  <select
+                    value={relativeTargetId}
+                    onChange={(e) => setRelativeTargetId(e.target.value)}
+                    className="w-full px-3 py-2.5 bg-white border border-gray-300 rounded-xl text-xs font-semibold text-gray-800 focus:outline-hidden focus:ring-2 focus:ring-[#D40511]/30 focus:border-[#D40511] cursor-pointer"
+                  >
+                    {otherCampaignProducts.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        #{p.originalQueuePos} — {p.name} {p.weight ? `(${p.weight})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* Prévia do Resultado */}
+              {calculatedRelativePosition && relativeTargetProduct && (
+                <div className="p-3 bg-red-50/70 border border-red-200/80 rounded-xl text-xs text-gray-700 flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-[#D40511] shrink-0 mt-0.5" />
+                  <span className="leading-snug">
+                    {positionModalData.products.length === 1 ? (
+                      <>
+                        O produto passará para a posição <strong className="text-gray-900 font-black">#{calculatedRelativePosition}</strong> de {formProductIds.length}, logo {relativeRelation === 'above' ? 'acima' : 'abaixo'} de <strong>"{relativeTargetProduct.name}"</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Os <strong className="text-gray-900 font-black">{positionModalData.products.length} produtos</strong> passarão para as posições <strong className="text-gray-900 font-black">#{calculatedRelativePosition}</strong> a <strong className="text-gray-900 font-black">#{calculatedRelativePosition + positionModalData.products.length - 1}</strong>, logo {relativeRelation === 'above' ? 'acima' : 'abaixo'} de <strong>"{relativeTargetProduct.name}"</strong>.
+                      </>
+                    )}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Botões do Rodapé */}
+            <div className="pt-2 flex items-center justify-end gap-2 border-t border-gray-150">
+              <button
+                type="button"
+                onClick={() => setPositionModalData(null)}
+                className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMoveModal}
+                disabled={!relativeTargetId}
+                className="px-4 py-2 bg-[#D40511] hover:bg-[#b0040e] disabled:opacity-40 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm hover:shadow"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>
+                  {calculatedRelativePosition
+                    ? `Confirmar Posição #${calculatedRelativePosition}`
+                    : 'Confirmar Reposicionamento'}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* DELETE CONFIRMATION MODAL */}
