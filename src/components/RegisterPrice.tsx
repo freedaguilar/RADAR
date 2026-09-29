@@ -3716,15 +3716,19 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                               ? 'bg-emerald-600 hover:bg-emerald-700 ring-emerald-400/40'
                               : 'bg-[#D40511] hover:bg-[#b0040e]'
                           }`}
-                          title={keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto'}
+                          title={keepCurrentPrice ? 'Tirar Foto e Manter Preço' : 'Tirar Foto e Registrar Novo Preço'}
                         >
                           <div className="w-10 h-10 xs:w-11 xs:h-11 sm:w-14 sm:h-14 rounded-full border border-white/40 sm:border-2 flex items-center justify-center">
                             <Camera className="w-5 h-5 xs:w-5.5 xs:h-5.5 sm:w-6.5 sm:h-6.5 text-white drop-shadow" />
                           </div>
                         </button>
-                        {keepCurrentPrice && (
-                          <span className="absolute -bottom-1.5 sm:-bottom-2 bg-emerald-500 text-white font-black text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full border border-emerald-300 shadow uppercase tracking-wider">
+                        {keepCurrentPrice ? (
+                          <span className="absolute -bottom-1.5 sm:-bottom-2 bg-emerald-500 text-white font-black text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full border border-emerald-300 shadow uppercase tracking-wider whitespace-nowrap">
                             Manter
+                          </span>
+                        ) : (
+                          <span className="absolute -bottom-1.5 sm:-bottom-2 bg-red-600 text-white font-black text-[7.5px] xs:text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full border border-red-300 shadow uppercase tracking-wider whitespace-nowrap">
+                            Novo Preço
                           </span>
                         )}
                       </div>
