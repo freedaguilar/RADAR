@@ -161,6 +161,123 @@ export default function App() {
   const [productPageParams, setProductPageParams] = useState<any>(null);
   const [registerPageParams, setRegisterPageParams] = useState<any>(null);
 
+  // Parâmetros de pesquisa direta vindos de links externos (ex: SOMA https://soma.aquilas.tech/)
+  interface PendingExternalResearch {
+    rede?: string;
+    chainId?: string;
+    state?: string;
+    campaignId?: string;
+    origem?: string;
+  }
+
+  const [pendingExternalResearch, setPendingExternalResearch] = useState<PendingExternalResearch | null>(() => {
+    try {
+      if (typeof window === "undefined") return null;
+      const search = window.location.search;
+      if (search) {
+        const params = new URLSearchParams(search);
+        const rede = params.get("rede") || params.get("nome") || params.get("name") || "";
+        const chainId = params.get("chain_id") || params.get("chainId") || params.get("chain") || "";
+        const state = params.get("estado") || params.get("state") || params.get("uf") || "";
+        const campaignId = params.get("campanha_id") || params.get("campanha") || params.get("campaign_id") || params.get("campaign") || "";
+        const origem = params.get("origem") || params.get("source") || "";
+        const action = params.get("action") || "";
+
+        if (rede || chainId || action === "pesquisa") {
+          const pending: PendingExternalResearch = {
+            rede: rede ? decodeURIComponent(rede).trim() : undefined,
+            chainId: chainId ? decodeURIComponent(chainId).trim() : undefined,
+            state: state ? decodeURIComponent(state).trim() : undefined,
+            campaignId: campaignId ? decodeURIComponent(campaignId).trim() : undefined,
+            origem: origem || (search.includes("soma") ? "soma" : undefined),
+          };
+          sessionStorage.setItem("pricehub_pending_research", JSON.stringify(pending));
+          return pending;
+        }
+      }
+
+      const saved = sessionStorage.getItem("pricehub_pending_research");
+      if (saved) {
+        return JSON.parse(saved);
+      }
+    } catch (e) {
+      console.debug("Erro ao recuperar pendingExternalResearch:", e);
+    }
+    return null;
+  });
+
+  // Função para resolver a rede e navegar diretamente para a etapa 3 de registro de preços
+  const triggerDirectResearch = useCallback((pending: PendingExternalResearch, chainList: Chain[]) => {
+    if (!pending || (!pending.rede && !pending.chainId) || chainList.length === 0) return false;
+
+    // 1. Tentar por ID exato
+    let matched = chainList.find(c => pending.chainId && c.id.toLowerCase() === pending.chainId.toLowerCase());
+
+    // 2. Tentar por correspondência textual inteligente
+    if (!matched && pending.rede) {
+      const qNorm = pending.rede.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+      const qTokens = qNorm.split(/\s+/).filter(t => t.length >= 2);
+
+      let bestScore = 0;
+      for (const c of chainList) {
+        const cNorm = c.name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+        let score = 0;
+        if (cNorm === qNorm) {
+          score += 1000;
+        } else if (cNorm.includes(qNorm)) {
+          score += 500;
+        } else if (qNorm.includes(cNorm)) {
+          score += 300;
+        }
+        for (const qt of qTokens) {
+          if (cNorm.includes(qt)) score += 100;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          matched = c;
+        }
+      }
+    }
+
+    if (matched) {
+      // Determina estado adequado
+      const cStates = Array.isArray(matched.states) && matched.states.length > 0 
+        ? matched.states 
+        : (matched.state ? [matched.state] : ["Minas Gerais"]);
+
+      let targetState = cStates[0] || "Minas Gerais";
+      if (pending.state) {
+        const stateMatch = cStates.find(s => isStateMatch(s, pending.state!));
+        if (stateMatch) {
+          targetState = stateMatch;
+        } else {
+          targetState = pending.state;
+        }
+      }
+
+      setRegisterPageParams({
+        chainId: matched.id,
+        state: targetState,
+        skipToStep: 3,
+        campaignId: pending.campaignId,
+        origem: pending.origem || "soma",
+      });
+      setActiveTab("registrar");
+
+      // Limpar estado pendente e URL para não re-executar em navegações internas
+      setPendingExternalResearch(null);
+      try {
+        sessionStorage.removeItem("pricehub_pending_research");
+        if (typeof window !== "undefined" && window.location.search) {
+          window.history.replaceState({}, "", window.location.pathname);
+        }
+      } catch (e) {}
+
+      return true;
+    }
+    return false;
+  }, []);
+
   // Mobile menu visibility for structural safety
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -168,6 +285,13 @@ export default function App() {
   useEffect(() => {
     saveStateToLocalStorage(state);
   }, [state]);
+
+  // Se o usuário já estiver logado (ou após restaurar a sessão) e houver uma pesquisa externa pendente
+  useEffect(() => {
+    if (state.currentUser && pendingExternalResearch && state.chains.length > 0 && !isInitializing) {
+      triggerDirectResearch(pendingExternalResearch, state.chains);
+    }
+  }, [state.currentUser, pendingExternalResearch, state.chains, isInitializing, triggerDirectResearch]);
 
   // Session login
   const handleLoginSuccess = async (user: User) => {
@@ -181,10 +305,18 @@ export default function App() {
         currentUser: user,
       };
     });
-    if (user.isGuest) {
-      setActiveTab("registrar");
-    } else {
-      setActiveTab("dashboard");
+
+    let redirectedToResearch = false;
+    if (pendingExternalResearch && state.chains.length > 0) {
+      redirectedToResearch = triggerDirectResearch(pendingExternalResearch, state.chains);
+    }
+
+    if (!redirectedToResearch) {
+      if (user.isGuest) {
+        setActiveTab("registrar");
+      } else {
+        setActiveTab("dashboard");
+      }
     }
 
     // Refresh campaigns from Supabase immediately on login so guests and auditors have the freshest data
@@ -944,6 +1076,7 @@ export default function App() {
       <Login
         onLoginSuccess={handleLoginSuccess}
         availableUsers={state.users}
+        pendingResearch={pendingExternalResearch}
       />
     );
   }

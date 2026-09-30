@@ -272,7 +272,8 @@ function calculateChainStatus(
   records: RecordData[],
   campaigns: CampaignData[],
   estadoFiltro?: string,
-  diasLimite: number = 15
+  diasLimite: number = 15,
+  baseUrl: string = "https://pricehub.aquilas.tech"
 ) {
   // 1. Filtrar registros da rede (e por estado se solicitado)
   let chainRecords = records.filter((r) => r.chainId === chain.id);
@@ -337,6 +338,21 @@ function calculateChainStatus(
     mensagem = `Preços atualizados recentemente na rede '${chain.name}' (última pesquisa há ${diasSemAtualizacao} dia(s)). Fila tradicional regular e sem pesquisa guiada pendente.`;
   }
 
+  // 5. Construir Link Direto para o usuário do SOMA clicar e ir direto para a pesquisa
+  const linkParams = new URLSearchParams();
+  linkParams.set("rede", chain.name);
+  linkParams.set("chain_id", chain.id);
+  if (estadoFiltro) {
+    linkParams.set("estado", estadoFiltro);
+  } else if (chain.states && chain.states.length === 1) {
+    linkParams.set("estado", chain.states[0]);
+  }
+  if (activeCampaign) {
+    linkParams.set("campanha_id", activeCampaign.id);
+  }
+  linkParams.set("origem", "soma");
+  const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
+
   return {
     rede: chain.name,
     rede_id: chain.id,
@@ -356,6 +372,8 @@ function calculateChainStatus(
         }
       : null,
     precisa_pesquisa: precisaPesquisa,
+    link_pesquisa: linkPesquisa,
+    url_pesquisa_direta: linkPesquisa,
     motivo,
     mensagem,
     detalhes: {
@@ -445,6 +463,18 @@ export default async function statusRedeHandler(req: any, res: any) {
     const estadoQuery = (queryObj.estado || queryObj.state || queryObj.uf || "") as string;
     const diasLimite = Math.max(1, parseInt(String(queryObj.dias_limite || queryObj.dias || 15), 10) || 15);
 
+    // Determina o domínio base para o link de redirecionamento direto
+    const hostHeader = (req.headers["x-forwarded-host"] || req.headers["host"] || "") as string;
+    const protoHeader = (req.headers["x-forwarded-proto"] || "https") as string;
+    let baseUrl = "https://pricehub.aquilas.tech";
+    if (hostHeader) {
+      if (hostHeader.includes("localhost") || hostHeader.includes("127.0.0.1") || hostHeader.includes("run.app")) {
+        baseUrl = `${protoHeader}://${hostHeader}`;
+      } else if (hostHeader.includes("pricehub.aquilas.tech")) {
+        baseUrl = "https://pricehub.aquilas.tech";
+      }
+    }
+
     // 3. Carregar dados do PriceHub
     const { chains, records, campaigns } = await loadPriceHubData();
 
@@ -452,7 +482,7 @@ export default async function statusRedeHandler(req: any, res: any) {
     if (!redeQuery || !redeQuery.trim()) {
       const activeChains = chains.filter((c) => c.active !== false);
       const results = activeChains.map((c) =>
-        calculateChainStatus(c, records, campaigns, estadoQuery || undefined, diasLimite)
+        calculateChainStatus(c, records, campaigns, estadoQuery || undefined, diasLimite, baseUrl)
       );
 
       const totalComPesquisaPendente = results.filter((r) => r.precisa_pesquisa).length;
@@ -497,7 +527,8 @@ export default async function statusRedeHandler(req: any, res: any) {
       records,
       campaigns,
       estadoQuery || undefined,
-      diasLimite
+      diasLimite,
+      baseUrl
     );
 
     return res.status(200).json({

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, stripSessionMetaPrefix, getCleanObserverNotes, ResearchSessionMeta } from '../lib/textUtils';
-import { findCustomTraditionalQueue } from '../lib/traditionalQueue';
+import { findCustomTraditionalQueue, isStateMatch } from '../lib/traditionalQueue';
 import StateIconMap from './StateIconMap';
 
 // Summary data for the research completion screen
@@ -175,6 +175,8 @@ interface RegisterPriceProps {
     chainId?: string;
     state?: string;
     skipToStep?: number;
+    campaignId?: string;
+    origem?: string;
   } | null;
 }
 
@@ -198,9 +200,6 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
   // Prefill hook from pageParams
   useEffect(() => {
     if (pageParams) {
-      if (pageParams.state) {
-        setSelectedState(pageParams.state);
-      }
       if (pageParams.productId) {
         setSelectedProductId(pageParams.productId);
         const prod = products.find(p => p.id === pageParams.productId);
@@ -214,10 +213,17 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         const matchedChain = chains.find(c => c.id === pageParams.chainId);
         if (matchedChain) {
           const cStates = getChainStates(matchedChain);
-          if (cStates.length > 0 && !cStates.includes(selectedState)) {
+          if (pageParams.state) {
+            const matchedSt = cStates.find(s => isStateMatch(s, pageParams.state)) || pageParams.state;
+            setSelectedState(matchedSt);
+          } else if (cStates.length > 0 && (!selectedState || !cStates.includes(selectedState))) {
             setSelectedState(cStates[0]);
           }
+        } else if (pageParams.state) {
+          setSelectedState(pageParams.state);
         }
+      } else if (pageParams.state) {
+        setSelectedState(pageParams.state);
       }
       if (pageParams.skipToStep) {
         setStep(pageParams.skipToStep as any);
@@ -2998,6 +3004,25 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
           <div className="space-y-6" id="batch-workspace">
               {!useCamera && !isAnalyzingBatch ? (
                 <div className="space-y-6">
+                  {/* Banner de Origem SOMA */}
+                  {pageParams?.origem === "soma" && (
+                    <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-300 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="p-1.5 bg-emerald-600 text-white rounded-lg shrink-0">
+                          <CheckCircle2 className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-200 text-emerald-900 px-1.5 py-0.5 rounded border border-emerald-300">
+                            Origem: SOMA Merchandising
+                          </span>
+                          <p className="text-xs font-bold text-emerald-950 mt-0.5">
+                            Pesquisa iniciada via SOMA na rede {chains.find(c => c.id === selectedChainId)?.name || "selecionada"} ({selectedState})
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Banner de Pesquisa Guiada Ativa Liberada pela Gestão */}
                   {activeGuidedCampaign && (
                     <div className="p-3.5 bg-gradient-to-r from-amber-50 via-red-50/40 to-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">

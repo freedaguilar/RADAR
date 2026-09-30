@@ -21,9 +21,16 @@ import { INITIAL_USERS } from '../mockData';
 interface LoginProps {
   onLoginSuccess: (user: UserType) => void;
   availableUsers?: UserType[];
+  pendingResearch?: {
+    rede?: string;
+    chainId?: string;
+    state?: string;
+    campaignId?: string;
+    origem?: string;
+  } | null;
 }
 
-export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginProps) {
+export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS, pendingResearch }: LoginProps) {
   // Mode selection: 'guest' (name only, no password) or 'credentials' (corporate email + password)
   const [loginMode, setLoginMode] = useState<'guest' | 'credentials'>('guest');
 
@@ -219,6 +226,32 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
           className="bg-white rounded-3xl border border-[#E0E0E0] shadow-sm p-6 sm:p-8"
           id="login-card"
         >
+          {/* Banner de Redirecionamento Direto do SOMA */}
+          {pendingResearch && (pendingResearch.rede || pendingResearch.chainId) && (
+            <div className="mb-5 p-3.5 bg-gradient-to-r from-red-50 via-amber-50 to-red-50 border border-red-200/90 rounded-2xl flex items-start gap-3 shadow-2xs">
+              <div className="p-2 bg-[#D40511] text-white rounded-xl shrink-0 mt-0.5 shadow-xs">
+                <Camera className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-red-100 text-[#D40511] px-1.5 py-0.5 rounded border border-red-200">
+                    Redirecionamento SOMA
+                  </span>
+                  <span className="text-xs font-black text-gray-900 truncate">
+                    Pesquisa de Preço
+                  </span>
+                </div>
+                <p className="text-xs text-gray-700 mt-1 leading-relaxed">
+                  Você foi direcionado para auditar a rede <strong className="text-gray-950 font-bold">{pendingResearch.rede || pendingResearch.chainId}</strong>
+                  {pendingResearch.state ? ` em ${pendingResearch.state}` : ""}.
+                </p>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Basta entrar como <strong>Convidado</strong> (apenas seu nome) ou como <strong>Gestor</strong> para abrir a fila de preços imediatamente.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Mode Switcher Tabs */}
           <div className="flex bg-[#F5F5F5] p-1 rounded-2xl mb-6 border border-gray-200">
             <button
@@ -348,7 +381,11 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS }: LoginP
                     </>
                   ) : (
                     <>
-                      <span>{guestName.trim() ? `Entrar como ${guestName.trim()}` : 'Entrar como Convidado'}</span>
+                      <span>
+                        {guestName.trim()
+                          ? (pendingResearch?.rede ? `Entrar e Pesquisar em ${pendingResearch.rede}` : `Entrar como ${guestName.trim()}`)
+                          : (pendingResearch?.rede ? `Entrar e Pesquisar em ${pendingResearch.rede}` : 'Entrar como Convidado')}
+                      </span>
                       <ArrowRight className="w-4 h-4 text-amber-900" />
                     </>
                   )}

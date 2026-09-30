@@ -346,6 +346,52 @@ if data.get("precisa_pesquisa"):
               </div>
             </div>
           </div>
+
+          {/* Card Link Direto de Pesquisa para Merchandising */}
+          <div className="bg-gradient-to-br from-white to-red-50/30 border border-red-200/80 rounded-2xl p-5 shadow-xs space-y-3">
+            <div className="flex items-center gap-2 text-[#D40511]">
+              <ExternalLink className="w-4 h-4 shrink-0" />
+              <h3 className="text-sm font-bold text-gray-900">Link Direto de Pesquisa (SOMA ➜ PriceHub)</h3>
+            </div>
+            
+            <p className="text-xs text-gray-600 leading-relaxed">
+              O SOMA pode criar botões ou links diretos para que o promotor acesse a pesquisa daquela rede com um clique:
+            </p>
+
+            <div className="p-2.5 bg-slate-900 text-white rounded-xl text-xs font-mono break-all flex items-center justify-between gap-2">
+              <span className="text-emerald-400">
+                https://pricehub.aquilas.tech/?rede=SUPER%20ABC&estado=MG&origem=soma
+              </span>
+              <button
+                type="button"
+                onClick={() => handleCopyUrl("https://pricehub.aquilas.tech/?rede=SUPER%20ABC&estado=MG&origem=soma")}
+                className="p-1 hover:bg-slate-800 text-slate-300 rounded cursor-pointer shrink-0"
+                title="Copiar Link"
+              >
+                {urlCopied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+
+            <div className="p-3 bg-white/80 border border-red-100 rounded-xl text-[11px] text-gray-600 space-y-1.5">
+              <span className="font-bold text-gray-800 block text-xs">Comportamento Inteligente de Acesso:</span>
+              <p>
+                • <strong>Usuário já logado:</strong> Entra direto na <strong>Etapa 3</strong> (fila de produtos e câmera) com a rede e estado selecionados.
+              </p>
+              <p>
+                • <strong>Usuário não logado:</strong> O PriceHub exibe o aviso com o nome da rede. Assim que o usuário entrar como Convidado (apenas seu nome) ou Gestor, ele é <strong>imediatamente redirecionado para a pesquisa</strong> sem perder o destino!
+              </p>
+            </div>
+
+            <a
+              href={`${priceHubBaseUrl}/?rede=${encodeURIComponent(targetRedeQuery || "Hiper ABC")}&origem=soma`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 px-3 py-2 bg-[#D40511] hover:bg-red-700 text-white text-xs font-bold rounded-xl transition shadow-xs cursor-pointer"
+            >
+              <span>Testar Abertura Direta para {targetRedeQuery || "Hiper ABC"}</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
         </div>
 
         {/* Coluna 2: Console de Teste Interativo (7 cols) */}
