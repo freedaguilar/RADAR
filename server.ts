@@ -225,25 +225,18 @@ ${uniqueCorrections.map(corr => `- Quando identificar "${corr.detected_text}", o
     }
   });
 
-  // API endpoint para integração com o SOMA (https://soma.aquilas.tech/)
-  app.get("/api/v1/status-rede", async (req, res) => {
+  // API endpoints para integração com o SOMA (https://soma.aquilas.tech/)
+  const handleStatusRede = async (req: any, res: any) => {
     try {
       await statusRedeHandler(req, res);
     } catch (error: any) {
-      console.error("Erro no endpoint /api/v1/status-rede:", error);
+      console.error("Erro no endpoint status-rede:", error);
       res.status(500).json({ sucesso: false, erro: error.message || "Falha ao processar status da rede." });
     }
-  });
+  };
 
-  // Alias para conveniência
-  app.get("/api/status-rede", async (req, res) => {
-    try {
-      await statusRedeHandler(req, res);
-    } catch (error: any) {
-      console.error("Erro no endpoint /api/status-rede:", error);
-      res.status(500).json({ sucesso: false, erro: error.message || "Falha ao processar status da rede." });
-    }
-  });
+  app.all(["/api/v1/status-rede", "/api/v1/status-rede/*"], handleStatusRede);
+  app.all(["/api/status-rede", "/api/status-rede/*"], handleStatusRede);
 
   // Serve static UI assets or mount Vite dev middleware
   if (process.env.NODE_ENV !== "production") {
