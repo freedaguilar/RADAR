@@ -329,7 +329,9 @@ export const getInitialState = (): {
 } => {
   // Try loading from localStorage
   try {
-    const localStore = localStorage.getItem('radar_price_state');
+    const localStore = typeof window !== 'undefined' && typeof localStorage !== 'undefined'
+      ? localStorage.getItem('radar_price_state')
+      : null;
     if (localStore) {
       const parsed = JSON.parse(localStore);
       if (parsed.products && parsed.chains && parsed.records && parsed.users) {

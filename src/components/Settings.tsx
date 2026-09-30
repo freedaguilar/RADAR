@@ -21,12 +21,14 @@ import {
   EyeOff,
   Target,
   ListOrdered,
+  Globe,
 } from "lucide-react";
 import { Product, Chain, User, GuidedCampaign, PriceRecord, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
 import { normalizeString } from "../lib/textUtils";
 import { GuidedCampaignsSettings } from "./GuidedCampaignsSettings";
 import { TraditionalQueueSettings } from "./TraditionalQueueSettings";
+import { SomaApiIntegration } from "./SomaApiIntegration";
 
 function extractDominantColor(fileOrUrl: File | string): Promise<string> {
   return new Promise((resolve) => {
@@ -169,7 +171,7 @@ export function Settings({
   onResetCustomQueue = () => {},
 }: SettingsProps) {
   // Navigation tabs inside Settings
-  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns" | "traditional_queue">(
+  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns" | "traditional_queue" | "api_soma">(
     "products",
   );
 
@@ -854,6 +856,24 @@ export function Settings({
               activeTab === "users" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
             }`}>
               {users.length}
+            </span>
+          </button>
+
+          <button
+            id="settings-tab-api-soma"
+            onClick={() => setActiveTab("api_soma")}
+            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+              activeTab === "api_soma"
+                ? "bg-[#1A1A1A] text-white shadow-xs"
+                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+            }`}
+          >
+            <Globe className={`w-4 h-4 ${activeTab === "api_soma" ? "text-emerald-400" : "text-emerald-600"}`} />
+            <span>Integração SOMA (API)</span>
+            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+              activeTab === "api_soma" ? "bg-emerald-500 text-white" : "bg-emerald-100 text-emerald-800"
+            }`}>
+              v1 Ativa
             </span>
           </button>
         </div>
@@ -2041,6 +2061,13 @@ export function Settings({
                 onSaveCustomQueue={onSaveCustomQueue}
                 onResetCustomQueue={onResetCustomQueue}
               />
+            </div>
+          )}
+
+          {/* TAB 6: SOMA API INTEGRATION */}
+          {activeTab === "api_soma" && (
+            <div className="space-y-6" id="settings-tab-api-soma-panel">
+              <SomaApiIntegration chains={chains} />
             </div>
           )}
         </div>

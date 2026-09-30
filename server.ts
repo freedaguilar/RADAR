@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import cors from "cors";
 import exportExcelHandler from "./api/export-excel";
+import statusRedeHandler from "./api/status-rede";
 
 dotenv.config();
 
@@ -14,14 +15,14 @@ async function startServer() {
   const PORT = 3000;
 
   // [CORS] Configuração do Middleware de CORS colocado no topo absoluto do servidor
-  // Isso garante que requisições pré-vôo (OPTIONS preflight) vindas da Vercel sejam interceptadas e respondidas com sucesso imediatamente
+  // Isso garante que requisições pré-vôo (OPTIONS preflight) vindas do SOMA (https://soma.aquilas.tech/) e Vercel sejam interceptadas e respondidas imediatamente
   app.use(
     cors({
-      origin: true, // Espelha dinamicamente a origem da requisição para permitir qualquer domínio da Vercel (com suporte a credentials)
+      origin: true, // Espelha dinamicamente a origem da requisição para permitir qualquer domínio do SOMA ou Vercel
       credentials: true,
       methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
-      optionsSuccessStatus: 200, // Retorna status 200 para requisições OPTIONS pré-vôo (altamente compatível com navegadores)
+      allowedHeaders: ["Content-Type", "Authorization", "x-api-key", "api-key", "X-Requested-With", "Accept"],
+      optionsSuccessStatus: 200, // Retorna status 200 para requisições OPTIONS pré-vôo
     })
   );
 
@@ -221,6 +222,26 @@ ${uniqueCorrections.map(corr => `- Quando identificar "${corr.detected_text}", o
     } catch (error: any) {
       console.error("Erro no endpoint express de exportação:", error);
       res.status(500).json({ error: error.message || "Falha na geração do arquivo Excel." });
+    }
+  });
+
+  // API endpoint para integração com o SOMA (https://soma.aquilas.tech/)
+  app.get("/api/v1/status-rede", async (req, res) => {
+    try {
+      await statusRedeHandler(req, res);
+    } catch (error: any) {
+      console.error("Erro no endpoint /api/v1/status-rede:", error);
+      res.status(500).json({ sucesso: false, erro: error.message || "Falha ao processar status da rede." });
+    }
+  });
+
+  // Alias para conveniência
+  app.get("/api/status-rede", async (req, res) => {
+    try {
+      await statusRedeHandler(req, res);
+    } catch (error: any) {
+      console.error("Erro no endpoint /api/status-rede:", error);
+      res.status(500).json({ sucesso: false, erro: error.message || "Falha ao processar status da rede." });
     }
   });
 
