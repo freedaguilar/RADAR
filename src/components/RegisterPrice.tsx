@@ -2216,6 +2216,28 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  // Notificação para o container pai (ex: SOMA quando o PriceHub estiver rodando num iframe)
+  const notifyParentCameraState = (isOpen: boolean) => {
+    try {
+      if (typeof window !== 'undefined' && window.parent) {
+        window.parent.postMessage({ type: 'PRICEHUB_CAMERA', isOpen }, '*');
+      }
+    } catch (err) {
+      console.debug('Erro ao enviar postMessage PRICEHUB_CAMERA:', err);
+    }
+  };
+
+  useEffect(() => {
+    notifyParentCameraState(useCamera);
+  }, [useCamera]);
+
+  useEffect(() => {
+    return () => {
+      // Garante aviso de fechamento caso o componente seja desmontado com a câmera aberta
+      notifyParentCameraState(false);
+    };
+  }, []);
+
   // Dynamic viewport height tracking for mobile browsers with bottom navigation bars (e.g. Safari, Chrome Mobile)
   const [cameraViewportHeight, setCameraViewportHeight] = useState<number | null>(null);
   const [cameraViewportTop, setCameraViewportTop] = useState<number>(0);
@@ -2446,6 +2468,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
   const startCamera = async () => {
     setErrorMsg('');
     setUseCamera(true);
+    notifyParentCameraState(true);
 
     // Initialize guided queue with frequent products list if starting fresh
     if (guidedQueue.length === 0 && capturedProductIds.length === 0) {
@@ -2470,6 +2493,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         const fallbackUrl = `data:image/svg+xml;utf8,<svg viewBox="0 0 400 300" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="%23dfdfdf"/><text x="200" y="140" font-family="sans-serif" font-weight="bold" font-size="14" fill="%23D40511" text-anchor="middle">FOTO DE GÔNDOLA AUDITADA</text><text x="200" y="165" font-family="sans-serif" font-size="10" fill="%23555555" text-anchor="middle">Camera simulator fallback - PriceHub Mobile v1.4</text></svg>`;
         compressImage(fallbackUrl, 250000); // simulate 250KB photo
         setUseCamera(false);
+        notifyParentCameraState(false);
       }, 1000);
     }
   };
@@ -2505,6 +2529,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
       setCameraStream(null);
     }
     setUseCamera(false);
+    notifyParentCameraState(false);
   };
 
   useEffect(() => {
