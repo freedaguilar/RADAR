@@ -344,6 +344,16 @@ if data.get("precisa_pesquisa"):
                   </li>
                 </ul>
               </div>
+
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1.5 text-xs">
+                <span className="font-bold text-emerald-900 text-[11px] flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                  Vitrine de Últimos Preços Auditados (`ultimos_precos_coletados`)
+                </span>
+                <p className="text-[11px] text-emerald-800 leading-relaxed">
+                  A API agora retorna uma lista com os <strong>3 a 5 últimos produtos auditados</strong> nessa rede com nome, marca, foto, preço numérico e formatado (<code className="bg-emerald-100 px-1 py-0.5 rounded font-mono">preco_formatado: "R$ 3,19"</code>), data e dias desde a coleta.
+                </p>
+              </div>
             </div>
           </div>
 

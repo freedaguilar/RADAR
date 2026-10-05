@@ -94,13 +94,28 @@ interface ChainData {
   states?: string[];
 }
 
+interface ProductData {
+  id: string;
+  name: string;
+  brand?: string;
+  category?: string;
+  subcategory?: string;
+  weight?: string;
+  basePrice?: number;
+  isCompetitor?: boolean;
+  internalCode?: string;
+  imageUrl?: string;
+}
+
 interface RecordData {
   id: string;
   chainId: string;
+  productId?: string;
   price: number;
   date: string;
   state?: string;
   userName?: string;
+  notes?: string;
 }
 
 interface CampaignData {
@@ -113,24 +128,36 @@ interface CampaignData {
   notes?: string;
 }
 
+// Produtos padrão de contingência
+const FALLBACK_PRODUCTS: ProductData[] = [
+  { id: "prod-1", name: "Fermento em Pó Químico Oetker 100g", brand: "Dr. Oetker", category: "Fermentos", weight: "100g", basePrice: 4.80, isCompetitor: false, internalCode: "OET-1001" },
+  { id: "prod-2", name: "Gelatina sabor Morango Oetker 20g", brand: "Dr. Oetker", category: "Gelatinas", weight: "20g", basePrice: 1.89, isCompetitor: false, internalCode: "OET-2001" },
+  { id: "prod-3", name: "Pudim sabor Chocolate Oetker 40g", brand: "Dr. Oetker", category: "Sobremesas em Pó", weight: "40g", basePrice: 2.45, isCompetitor: false, internalCode: "OET-3001" },
+  { id: "prod-4", name: "Mistura para Bolo de Chocolate Oetker 400g", brand: "Dr. Oetker", category: "Misturas para Bolo", weight: "400g", basePrice: 6.90, isCompetitor: false, internalCode: "OET-4001" },
+  { id: "prod-6", name: "Granulado Chocolate Macio Mavalério 120g", brand: "Mavalério", category: "Confeitaria", weight: "120g", basePrice: 4.30, isCompetitor: false, internalCode: "MAV-6001" },
+];
+
 /**
- * Carrega redes, registros de preço e pesquisas guiadas do Supabase com fallback gracioso
+ * Carrega redes, produtos, registros de preço e pesquisas guiadas do Supabase com fallback gracioso
  */
 async function loadPriceHubData(): Promise<{
   chains: ChainData[];
+  products: ProductData[];
   records: RecordData[];
   campaigns: CampaignData[];
 }> {
   const supabase = getServerSupabaseClient();
   let chains: ChainData[] = [];
+  let products: ProductData[] = [];
   let records: RecordData[] = [];
   let campaigns: CampaignData[] = [];
 
   if (supabase) {
     try {
-      const [chainsRes, recordsRes, campaignsRes] = await Promise.all([
+      const [chainsRes, productsRes, recordsRes, campaignsRes] = await Promise.all([
         supabase.from("chains").select("id, name, active, state, states"),
-        supabase.from("price_records").select("id, chain_id, price, date, state, user_name").order("date", { ascending: false }),
+        supabase.from("products").select("id, name, brand, category, subcategory, weight, base_price, is_competitor, internal_code, image_url"),
+        supabase.from("price_records").select("id, chain_id, product_id, price, date, state, user_name, notes").order("date", { ascending: false }),
         supabase.from("guided_campaigns").select("id, title, chain_id, state, product_ids, active, notes"),
       ]);
 
@@ -154,14 +181,31 @@ async function loadPriceHubData(): Promise<{
         });
       }
 
+      if (productsRes.data && productsRes.data.length > 0) {
+        products = productsRes.data.map((p: any) => ({
+          id: String(p.id),
+          name: String(p.name),
+          brand: p.brand || undefined,
+          category: p.category || undefined,
+          subcategory: p.subcategory || undefined,
+          weight: p.weight || undefined,
+          basePrice: p.base_price ? Number(p.base_price) : undefined,
+          isCompetitor: Boolean(p.is_competitor === true || p.is_competitor === 1 || p.is_competitor === "true"),
+          internalCode: p.internal_code || undefined,
+          imageUrl: p.image_url || undefined,
+        }));
+      }
+
       if (recordsRes.data && recordsRes.data.length > 0) {
         records = recordsRes.data.map((r: any) => ({
           id: String(r.id),
           chainId: String(r.chain_id),
+          productId: r.product_id ? String(r.product_id) : undefined,
           price: Number(r.price),
           date: String(r.date),
           state: r.state || "Minas Gerais",
           userName: r.user_name || undefined,
+          notes: r.notes || undefined,
         }));
       }
 
@@ -196,12 +240,15 @@ async function loadPriceHubData(): Promise<{
     }
   }
 
-  // Fallback para dados base locais caso o banco esteja vazio ou inacessível
+  // Fallbacks locais
   if (chains.length === 0) {
     chains = FALLBACK_CHAINS;
   }
+  if (products.length === 0) {
+    products = FALLBACK_PRODUCTS;
+  }
 
-  return { chains, records, campaigns };
+  return { chains, products, records, campaigns };
 }
 
 /**
@@ -271,6 +318,7 @@ function calculateChainStatus(
   chain: ChainData,
   records: RecordData[],
   campaigns: CampaignData[],
+  products: ProductData[] = [],
   estadoFiltro?: string,
   diasLimite: number = 15,
   baseUrl: string = "https://pricehub.aquilas.tech"
@@ -353,6 +401,57 @@ function calculateChainStatus(
   linkParams.set("origem", "soma");
   const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
 
+  // 6. Vitrine dos últimos 3 a 5 produtos distintos coletados nesta rede
+  const seenProductKeys = new Set<string>();
+  const ultimosPrecosColetados: Array<{
+    produto_id?: string;
+    produto: string;
+    marca: string;
+    categoria?: string;
+    gramatura?: string;
+    codigo_interno?: string;
+    preco: number;
+    preco_formatado: string;
+    data_coleta: string;
+    dias_atras: number;
+    pesquisador?: string;
+    imagem_url?: string;
+    tipo: "propria" | "concorrente";
+  }> = [];
+
+  for (const r of chainRecords) {
+    if (ultimosPrecosColetados.length >= 5) break;
+    const prodKey = r.productId || r.notes || r.id;
+    if (seenProductKeys.has(prodKey)) continue;
+    seenProductKeys.add(prodKey);
+
+    const matchedProd = r.productId ? products.find((p) => p.id === r.productId) : null;
+    const prodName = matchedProd?.name || r.notes || "Produto Auditado";
+    const brandName = matchedProd?.brand || (!matchedProd?.isCompetitor ? "Dr. Oetker" : "Concorrente");
+    const isProp = matchedProd
+      ? !matchedProd.isCompetitor
+      : brandName.toLowerCase().includes("oetker") || brandName.toLowerCase().includes("mavalerio");
+
+    const recordDate = r.date ? new Date(r.date) : new Date();
+    const diffDays = Math.max(0, Math.floor((Date.now() - recordDate.getTime()) / (1000 * 60 * 60 * 24)));
+
+    ultimosPrecosColetados.push({
+      produto_id: r.productId || undefined,
+      produto: prodName,
+      marca: brandName,
+      categoria: matchedProd?.category || undefined,
+      gramatura: matchedProd?.weight || undefined,
+      codigo_interno: matchedProd?.internalCode || undefined,
+      preco: r.price,
+      preco_formatado: `R$ ${r.price.toFixed(2).replace(".", ",")}`,
+      data_coleta: recordDate.toISOString(),
+      dias_atras: diffDays,
+      pesquisador: r.userName || latestRecord?.userName || undefined,
+      imagem_url: matchedProd?.imageUrl || undefined,
+      tipo: isProp ? "propria" : "concorrente",
+    });
+  }
+
   return {
     rede: chain.name,
     rede_id: chain.id,
@@ -371,6 +470,8 @@ function calculateChainStatus(
           notas: activeCampaign.notes || null,
         }
       : null,
+    ultimos_precos_coletados: ultimosPrecosColetados,
+    total_produtos_vitrine: ultimosPrecosColetados.length,
     precisa_pesquisa: precisaPesquisa,
     link_pesquisa: linkPesquisa,
     url_pesquisa_direta: linkPesquisa,
@@ -476,13 +577,13 @@ export default async function statusRedeHandler(req: any, res: any) {
     }
 
     // 3. Carregar dados do PriceHub
-    const { chains, records, campaigns } = await loadPriceHubData();
+    const { chains, products, records, campaigns } = await loadPriceHubData();
 
     // 4. Caso a requisição não especifique a rede, retorna o status de todas as redes ativas
     if (!redeQuery || !redeQuery.trim()) {
       const activeChains = chains.filter((c) => c.active !== false);
       const results = activeChains.map((c) =>
-        calculateChainStatus(c, records, campaigns, estadoQuery || undefined, diasLimite, baseUrl)
+        calculateChainStatus(c, records, campaigns, products, estadoQuery || undefined, diasLimite, baseUrl)
       );
 
       const totalComPesquisaPendente = results.filter((r) => r.precisa_pesquisa).length;
@@ -526,6 +627,7 @@ export default async function statusRedeHandler(req: any, res: any) {
       matchedChain,
       records,
       campaigns,
+      products,
       estadoQuery || undefined,
       diasLimite,
       baseUrl
