@@ -481,58 +481,59 @@ function calculateChainStatus(
       });
     }
   } else {
-    // CENÁRIO B: Pesquisa atrasada, pendente ou campanha ativa -> Prioriza produtos com mais tempo sem auditoria / nunca auditados / campanha guiada
+    // CENÁRIO B: Pesquisa atrasada, pendente ou campanha ativa -> Mostra apenas produtos com pelo menos um registro de auditoria na rede, ordenados por maior tempo sem auditoria
     const candidateProducts: Array<{
       product: ProductData;
-      lastRec: RecordData | null;
+      lastRec: RecordData;
       diffDays: number;
-      isNeverAudited: boolean;
       isCampaignProd: boolean;
       isProprietary: boolean;
     }> = [];
 
     const activeCampaignIds = new Set(activeCampaign?.productIds || []);
 
-    for (const prod of products) {
-      const lastRec = lastRecordByProductId.get(prod.id) || null;
-      const isNeverAudited = !lastRec;
-      let diffDays = 0;
-      if (lastRec && lastRec.date) {
-        const rDate = new Date(lastRec.date);
-        diffDays = Math.max(0, Math.floor((Date.now() - rDate.getTime()) / (1000 * 60 * 60 * 24)));
-      } else {
-        diffDays = 99999; // Prioridade máxima
+    // Itera apenas sobre produtos que possuem pelo menos um registro de auditoria nesta rede
+    for (const [productId, lastRec] of lastRecordByProductId.entries()) {
+      let matchedProd = products.find((p) => p.id === productId);
+      if (!matchedProd) {
+        matchedProd = {
+          id: productId,
+          name: lastRec.notes || "Produto Auditado",
+          brand: "Dr. Oetker",
+          isCompetitor: false,
+        };
       }
 
-      const brandLower = (prod.brand || "").toLowerCase();
-      const isProprietary = !prod.isCompetitor || brandLower.includes("oetker") || brandLower.includes("mavalerio");
-      const isCampaignProd = activeCampaignIds.has(prod.id);
+      let diffDays = 0;
+      if (lastRec.date) {
+        const rDate = new Date(lastRec.date);
+        diffDays = Math.max(0, Math.floor((Date.now() - rDate.getTime()) / (1000 * 60 * 60 * 24)));
+      }
+
+      const brandLower = (matchedProd.brand || "").toLowerCase();
+      const isProprietary = !matchedProd.isCompetitor || brandLower.includes("oetker") || brandLower.includes("mavalerio");
+      const isCampaignProd = activeCampaignIds.has(productId);
 
       candidateProducts.push({
-        product: prod,
+        product: matchedProd,
         lastRec,
         diffDays,
-        isNeverAudited,
         isCampaignProd,
         isProprietary,
       });
     }
 
     // Ordenação inteligente:
-    // 1º: Produtos da campanha guiada ativa
+    // 1º: Produtos da campanha guiada ativa (que já foram auditados na rede)
     // 2º: Produtos de marca própria (Dr. Oetker / Mavalério)
-    // 3º: Produtos nunca auditados nesta rede
-    // 4º: Maior tempo sem auditoria (dias decorridos decrescente)
-    // 5º: Nome alfabético
+    // 3º: Maior tempo sem auditoria (dias decorridos em ordem decrescente)
+    // 4º: Nome alfabético
     candidateProducts.sort((a, b) => {
       if (a.isCampaignProd !== b.isCampaignProd) {
         return a.isCampaignProd ? -1 : 1;
       }
       if (a.isProprietary !== b.isProprietary) {
         return a.isProprietary ? -1 : 1;
-      }
-      if (a.isNeverAudited !== b.isNeverAudited) {
-        return a.isNeverAudited ? -1 : 1;
       }
       if (b.diffDays !== a.diffDays) {
         return b.diffDays - a.diffDays;
@@ -546,23 +547,12 @@ function calculateChainStatus(
       const prod = item.product;
       const lastRec = item.lastRec;
       const brandName = prod.brand || (item.isProprietary ? "Dr. Oetker" : "Concorrente");
-      const currentPrice = lastRec ? lastRec.price : (prod.basePrice || 0);
+      const currentPrice = lastRec.price;
 
-      let statusAuditoria: "campanha_guiada" | "nunca_auditado" | "desatualizado" = "desatualizado";
-      let statusDesc = "";
-
-      if (item.isCampaignProd) {
-        statusAuditoria = "campanha_guiada";
-        statusDesc = item.isNeverAudited
-          ? "Item prioritário na Campanha Guiada (nunca auditado)"
-          : `Item na Campanha Guiada (última coleta há ${item.diffDays} dias)`;
-      } else if (item.isNeverAudited) {
-        statusAuditoria = "nunca_auditado";
-        statusDesc = "Sem histórico de coleta nesta rede";
-      } else {
-        statusAuditoria = "desatualizado";
-        statusDesc = `Sem auditoria há ${item.diffDays} dias`;
-      }
+      let statusAuditoria: "campanha_guiada" | "desatualizado" = item.isCampaignProd ? "campanha_guiada" : "desatualizado";
+      let statusDesc = item.isCampaignProd
+        ? `Item na Campanha Guiada (última coleta há ${item.diffDays} dias)`
+        : `Sem auditoria há ${item.diffDays} dias`;
 
       produtosVitrine.push({
         produto_id: prod.id,
@@ -572,13 +562,13 @@ function calculateChainStatus(
         gramatura: prod.weight,
         codigo_interno: prod.internalCode,
         preco: currentPrice,
-        preco_formatado: currentPrice > 0 ? `R$ ${currentPrice.toFixed(2).replace(".", ",")}` : "Pendente de Coleta",
-        data_coleta: lastRec && lastRec.date ? new Date(lastRec.date).toISOString() : null,
-        dias_atras: item.isNeverAudited ? null : item.diffDays,
-        dias_sem_auditoria: item.isNeverAudited ? null : item.diffDays,
+        preco_formatado: `R$ ${currentPrice.toFixed(2).replace(".", ",")}`,
+        data_coleta: lastRec.date ? new Date(lastRec.date).toISOString() : null,
+        dias_atras: item.diffDays,
+        dias_sem_auditoria: item.diffDays,
         status_auditoria: statusAuditoria,
         status_descricao: statusDesc,
-        pesquisador: lastRec?.userName || undefined,
+        pesquisador: lastRec.userName || latestRecord?.userName || undefined,
         imagem_url: prod.imageUrl,
         tipo: item.isProprietary ? "propria" : "concorrente",
         em_campanha_guiada: item.isCampaignProd,
