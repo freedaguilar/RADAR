@@ -438,7 +438,7 @@ function calculateChainStatus(
     // CENÁRIO A: Pesquisa em dia -> Mantém os últimos produtos auditados (ordem decrescente de data)
     const seenProductKeys = new Set<string>();
     for (const r of chainRecords) {
-      if (produtosVitrine.length >= 5) break;
+      if (produtosVitrine.length >= 20) break;
       const prodKey = r.productId || r.notes || r.id;
       if (seenProductKeys.has(prodKey)) continue;
       seenProductKeys.add(prodKey);
@@ -541,7 +541,7 @@ function calculateChainStatus(
       return a.product.name.localeCompare(b.product.name);
     });
 
-    const topCandidates = candidateProducts.slice(0, 5);
+    const topCandidates = candidateProducts.slice(0, 20);
 
     for (const item of topCandidates) {
       const prod = item.product;
