@@ -401,9 +401,20 @@ function calculateChainStatus(
   linkParams.set("origem", "soma");
   const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
 
-  // 6. Vitrine dos últimos 3 a 5 produtos distintos coletados nesta rede
-  const seenProductKeys = new Set<string>();
-  const ultimosPrecosColetados: Array<{
+  // 6. Vitrine dinâmica de produtos:
+  // - Se a pesquisa estiver em dia: mostra os últimos produtos auditados recentemente.
+  // - Se a pesquisa estiver atrasada/pendente ou com campanha guiada: mostra os produtos com mais tempo sem auditoria (ou nunca auditados) e itens da campanha guiada.
+  
+  // Mapa de último registro por produto nesta rede
+  const lastRecordByProductId = new Map<string, RecordData>();
+  for (const r of chainRecords) {
+    if (r.productId && !lastRecordByProductId.has(r.productId)) {
+      lastRecordByProductId.set(r.productId, r);
+    }
+  }
+
+  const modoExibicaoProdutos = precisaPesquisa ? "mais_tempo_sem_auditoria" : "ultimos_auditados";
+  const produtosVitrine: Array<{
     produto_id?: string;
     produto: string;
     marca: string;
@@ -412,44 +423,167 @@ function calculateChainStatus(
     codigo_interno?: string;
     preco: number;
     preco_formatado: string;
-    data_coleta: string;
-    dias_atras: number;
+    data_coleta: string | null;
+    dias_atras: number | null;
+    dias_sem_auditoria: number | null;
+    status_auditoria: "em_dia" | "desatualizado" | "nunca_auditado" | "campanha_guiada";
+    status_descricao: string;
     pesquisador?: string;
     imagem_url?: string;
     tipo: "propria" | "concorrente";
+    em_campanha_guiada: boolean;
   }> = [];
 
-  for (const r of chainRecords) {
-    if (ultimosPrecosColetados.length >= 5) break;
-    const prodKey = r.productId || r.notes || r.id;
-    if (seenProductKeys.has(prodKey)) continue;
-    seenProductKeys.add(prodKey);
+  if (!precisaPesquisa) {
+    // CENÁRIO A: Pesquisa em dia -> Mantém os últimos produtos auditados (ordem decrescente de data)
+    const seenProductKeys = new Set<string>();
+    for (const r of chainRecords) {
+      if (produtosVitrine.length >= 5) break;
+      const prodKey = r.productId || r.notes || r.id;
+      if (seenProductKeys.has(prodKey)) continue;
+      seenProductKeys.add(prodKey);
 
-    const matchedProd = r.productId ? products.find((p) => p.id === r.productId) : null;
-    const prodName = matchedProd?.name || r.notes || "Produto Auditado";
-    const brandName = matchedProd?.brand || (!matchedProd?.isCompetitor ? "Dr. Oetker" : "Concorrente");
-    const isProp = matchedProd
-      ? !matchedProd.isCompetitor
-      : brandName.toLowerCase().includes("oetker") || brandName.toLowerCase().includes("mavalerio");
+      const matchedProd = r.productId ? products.find((p) => p.id === r.productId) : null;
+      const prodName = matchedProd?.name || r.notes || "Produto Auditado";
+      const brandName = matchedProd?.brand || (!matchedProd?.isCompetitor ? "Dr. Oetker" : "Concorrente");
+      const isProp = matchedProd
+        ? !matchedProd.isCompetitor
+        : brandName.toLowerCase().includes("oetker") || brandName.toLowerCase().includes("mavalerio");
 
-    const recordDate = r.date ? new Date(r.date) : new Date();
-    const diffDays = Math.max(0, Math.floor((Date.now() - recordDate.getTime()) / (1000 * 60 * 60 * 24)));
+      const recordDate = r.date ? new Date(r.date) : new Date();
+      const diffDays = Math.max(0, Math.floor((Date.now() - recordDate.getTime()) / (1000 * 60 * 60 * 24)));
+      const isCampaignProd = Boolean(activeCampaign?.productIds?.includes(r.productId || ""));
 
-    ultimosPrecosColetados.push({
-      produto_id: r.productId || undefined,
-      produto: prodName,
-      marca: brandName,
-      categoria: matchedProd?.category || undefined,
-      gramatura: matchedProd?.weight || undefined,
-      codigo_interno: matchedProd?.internalCode || undefined,
-      preco: r.price,
-      preco_formatado: `R$ ${r.price.toFixed(2).replace(".", ",")}`,
-      data_coleta: recordDate.toISOString(),
-      dias_atras: diffDays,
-      pesquisador: r.userName || latestRecord?.userName || undefined,
-      imagem_url: matchedProd?.imageUrl || undefined,
-      tipo: isProp ? "propria" : "concorrente",
+      const statusDesc = diffDays === 0
+        ? "Auditado hoje"
+        : diffDays === 1
+        ? "Auditado ontem"
+        : `Auditado há ${diffDays} dias`;
+
+      produtosVitrine.push({
+        produto_id: r.productId || undefined,
+        produto: prodName,
+        marca: brandName,
+        categoria: matchedProd?.category || undefined,
+        gramatura: matchedProd?.weight || undefined,
+        codigo_interno: matchedProd?.internalCode || undefined,
+        preco: r.price,
+        preco_formatado: `R$ ${r.price.toFixed(2).replace(".", ",")}`,
+        data_coleta: recordDate.toISOString(),
+        dias_atras: diffDays,
+        dias_sem_auditoria: diffDays,
+        status_auditoria: "em_dia",
+        status_descricao: statusDesc,
+        pesquisador: r.userName || latestRecord?.userName || undefined,
+        imagem_url: matchedProd?.imageUrl || undefined,
+        tipo: isProp ? "propria" : "concorrente",
+        em_campanha_guiada: isCampaignProd,
+      });
+    }
+  } else {
+    // CENÁRIO B: Pesquisa atrasada, pendente ou campanha ativa -> Prioriza produtos com mais tempo sem auditoria / nunca auditados / campanha guiada
+    const candidateProducts: Array<{
+      product: ProductData;
+      lastRec: RecordData | null;
+      diffDays: number;
+      isNeverAudited: boolean;
+      isCampaignProd: boolean;
+      isProprietary: boolean;
+    }> = [];
+
+    const activeCampaignIds = new Set(activeCampaign?.productIds || []);
+
+    for (const prod of products) {
+      const lastRec = lastRecordByProductId.get(prod.id) || null;
+      const isNeverAudited = !lastRec;
+      let diffDays = 0;
+      if (lastRec && lastRec.date) {
+        const rDate = new Date(lastRec.date);
+        diffDays = Math.max(0, Math.floor((Date.now() - rDate.getTime()) / (1000 * 60 * 60 * 24)));
+      } else {
+        diffDays = 99999; // Prioridade máxima
+      }
+
+      const brandLower = (prod.brand || "").toLowerCase();
+      const isProprietary = !prod.isCompetitor || brandLower.includes("oetker") || brandLower.includes("mavalerio");
+      const isCampaignProd = activeCampaignIds.has(prod.id);
+
+      candidateProducts.push({
+        product: prod,
+        lastRec,
+        diffDays,
+        isNeverAudited,
+        isCampaignProd,
+        isProprietary,
+      });
+    }
+
+    // Ordenação inteligente:
+    // 1º: Produtos da campanha guiada ativa
+    // 2º: Produtos de marca própria (Dr. Oetker / Mavalério)
+    // 3º: Produtos nunca auditados nesta rede
+    // 4º: Maior tempo sem auditoria (dias decorridos decrescente)
+    // 5º: Nome alfabético
+    candidateProducts.sort((a, b) => {
+      if (a.isCampaignProd !== b.isCampaignProd) {
+        return a.isCampaignProd ? -1 : 1;
+      }
+      if (a.isProprietary !== b.isProprietary) {
+        return a.isProprietary ? -1 : 1;
+      }
+      if (a.isNeverAudited !== b.isNeverAudited) {
+        return a.isNeverAudited ? -1 : 1;
+      }
+      if (b.diffDays !== a.diffDays) {
+        return b.diffDays - a.diffDays;
+      }
+      return a.product.name.localeCompare(b.product.name);
     });
+
+    const topCandidates = candidateProducts.slice(0, 5);
+
+    for (const item of topCandidates) {
+      const prod = item.product;
+      const lastRec = item.lastRec;
+      const brandName = prod.brand || (item.isProprietary ? "Dr. Oetker" : "Concorrente");
+      const currentPrice = lastRec ? lastRec.price : (prod.basePrice || 0);
+
+      let statusAuditoria: "campanha_guiada" | "nunca_auditado" | "desatualizado" = "desatualizado";
+      let statusDesc = "";
+
+      if (item.isCampaignProd) {
+        statusAuditoria = "campanha_guiada";
+        statusDesc = item.isNeverAudited
+          ? "Item prioritário na Campanha Guiada (nunca auditado)"
+          : `Item na Campanha Guiada (última coleta há ${item.diffDays} dias)`;
+      } else if (item.isNeverAudited) {
+        statusAuditoria = "nunca_auditado";
+        statusDesc = "Sem histórico de coleta nesta rede";
+      } else {
+        statusAuditoria = "desatualizado";
+        statusDesc = `Sem auditoria há ${item.diffDays} dias`;
+      }
+
+      produtosVitrine.push({
+        produto_id: prod.id,
+        produto: prod.name,
+        marca: brandName,
+        categoria: prod.category,
+        gramatura: prod.weight,
+        codigo_interno: prod.internalCode,
+        preco: currentPrice,
+        preco_formatado: currentPrice > 0 ? `R$ ${currentPrice.toFixed(2).replace(".", ",")}` : "Pendente de Coleta",
+        data_coleta: lastRec && lastRec.date ? new Date(lastRec.date).toISOString() : null,
+        dias_atras: item.isNeverAudited ? null : item.diffDays,
+        dias_sem_auditoria: item.isNeverAudited ? null : item.diffDays,
+        status_auditoria: statusAuditoria,
+        status_descricao: statusDesc,
+        pesquisador: lastRec?.userName || undefined,
+        imagem_url: prod.imageUrl,
+        tipo: item.isProprietary ? "propria" : "concorrente",
+        em_campanha_guiada: item.isCampaignProd,
+      });
+    }
   }
 
   return {
@@ -470,8 +604,10 @@ function calculateChainStatus(
           notas: activeCampaign.notes || null,
         }
       : null,
-    ultimos_precos_coletados: ultimosPrecosColetados,
-    total_produtos_vitrine: ultimosPrecosColetados.length,
+    modo_exibicao_produtos: modoExibicaoProdutos,
+    ultimos_precos_coletados: produtosVitrine,
+    produtos_vitrine: produtosVitrine,
+    total_produtos_vitrine: produtosVitrine.length,
     precisa_pesquisa: precisaPesquisa,
     link_pesquisa: linkPesquisa,
     url_pesquisa_direta: linkPesquisa,
