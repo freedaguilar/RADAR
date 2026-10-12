@@ -177,6 +177,9 @@ interface RegisterPriceProps {
     skipToStep?: number;
     campaignId?: string;
     origem?: string;
+    productIds?: string[];
+    modo?: string;
+    titulo?: string;
   } | null;
 }
 
@@ -556,6 +559,24 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
   const frequentProductsList = useMemo(() => {
     if (!products || products.length === 0) return [];
 
+    // -1. REGRA PRIORITÁRIA DE AUDITORIA PROGRAMADA EXTERNA (ex: acionada via SOMA para produtos recorrentes sem auditoria recente):
+    if (pageParams?.modo === "programada" && Array.isArray(pageParams.productIds) && pageParams.productIds.length > 0) {
+      const prodMap = new Map<string, Product>();
+      products.forEach((p) => prodMap.set(p.id, p));
+
+      const programmedProducts: Product[] = [];
+      for (const pId of pageParams.productIds) {
+        const p = prodMap.get(pId);
+        if (p) {
+          programmedProducts.push(p);
+        }
+      }
+
+      if (programmedProducts.length > 0) {
+        return programmedProducts;
+      }
+    }
+
     // 0. REGRA PRIORITÁRIA ABSOLUTA DE PESQUISA GUIADA ATIVA LIBERADA PELO GESTOR:
     // Se o gestor criou e ativou uma pesquisa guiada para esta rede e estado, a fila dos produtos
     // será EXCLUSIVAMENTE os produtos selecionados pelo gestor, na ordem exata definida pelo gestor!
@@ -723,6 +744,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     chainRecordCounts,
     mgChainRecordCounts,
     productRecordCounts,
+    pageParams,
   ]);
 
   const [guidedQueue, setGuidedQueue] = useState<Product[]>([]);
@@ -795,17 +817,33 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     setResearchStartTime(new Date().toISOString());
   }, [selectedChainId, selectedState]);
 
-  // Sincroniza e garante que a fila respeite a pesquisa guiada ativa ou restaure o padrão se desativada
+  // Sincroniza e garante que a fila respeite a auditoria programada ou pesquisa guiada ativa ou restaure o padrão se desativada
   const activeCampaignKey = activeGuidedCampaign
     ? `${activeGuidedCampaign.id}_${activeGuidedCampaign.active ? '1' : '0'}`
     : 'none';
   const lastActiveCampaignKeyRef = useRef<string>(activeCampaignKey);
 
+  const programmedQueueKey = pageParams?.modo === 'programada' && Array.isArray(pageParams.productIds)
+    ? pageParams.productIds.join(',')
+    : 'none';
+  const lastProgrammedQueueKeyRef = useRef<string>(programmedQueueKey);
+
   useEffect(() => {
     const campaignChanged = activeCampaignKey !== lastActiveCampaignKeyRef.current;
     lastActiveCampaignKeyRef.current = activeCampaignKey;
 
-    if (activeGuidedCampaign && activeGuidedCampaign.active) {
+    const programmedChanged = programmedQueueKey !== lastProgrammedQueueKeyRef.current;
+    lastProgrammedQueueKeyRef.current = programmedQueueKey;
+
+    if (pageParams?.modo === 'programada' && Array.isArray(pageParams.productIds) && pageParams.productIds.length > 0) {
+      // Quando é acionada uma auditoria programada (ex: vinda do SOMA)
+      if (programmedChanged || (capturedProductIds.length === 0 && outOfStockProductIds.length === 0)) {
+        const pendingProgrammed = frequentProductsList.filter(
+          (p) => !registeredProductIdsSet.has(p.id) && !outOfStockProductIds.includes(p.id)
+        );
+        setGuidedQueue(pendingProgrammed.length > 0 ? pendingProgrammed : frequentProductsList);
+      }
+    } else if (activeGuidedCampaign && activeGuidedCampaign.active) {
       // Quando a pesquisa guiada é ativada ou muda de campanha, ou na inicialização (nenhuma captura ainda realizada):
       if (campaignChanged || (capturedProductIds.length === 0 && outOfStockProductIds.length === 0)) {
         setGuidedQueue(() => {
@@ -826,6 +864,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     }
   }, [
     activeCampaignKey,
+    programmedQueueKey,
     selectedChainId,
     selectedState,
   ]);
@@ -3048,6 +3087,30 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                     </div>
                   )}
 
+                  {/* Banner de Auditoria Programada (ex: disparada pelo SOMA) */}
+                  {pageParams?.modo === "programada" && pageParams?.productIds && pageParams.productIds.length > 0 && (
+                    <div className="p-3.5 bg-gradient-to-r from-blue-50 via-indigo-50/50 to-blue-50 border border-blue-300 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-blue-600 text-white rounded-xl shrink-0 shadow-xs">
+                          <Target className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-200 text-blue-900 px-2 py-0.5 rounded-md border border-blue-300">
+                              Auditoria Programada (SOMA)
+                            </span>
+                            <span className="text-xs font-black text-gray-900 truncate">
+                              Itens Recorrentes sem Auditoria Recente
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-gray-600 mt-1">
+                            Fila filtrada exclusivamente para os <strong>{frequentProductsList.length} produtos recorrentes</strong> que estão há mais de 15 dias sem coleta nesta rede.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Banner de Pesquisa Guiada Ativa Liberada pela Gestão */}
                   {activeGuidedCampaign && (
                     <div className="p-3.5 bg-gradient-to-r from-amber-50 via-red-50/40 to-amber-50 border border-amber-300 rounded-2xl flex items-center justify-between gap-3 shadow-2xs">
@@ -3454,6 +3517,11 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                               <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-emerald-300 font-mono flex items-center gap-1 bg-emerald-950/70 px-2 py-0.5 rounded-full border border-emerald-400/50">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-400" />
                                 CORRIGIR REGISTRO
+                              </span>
+                            ) : pageParams?.modo === "programada" ? (
+                              <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-blue-300 font-mono flex items-center gap-1">
+                                <Target className="w-3 h-3 text-blue-400" />
+                                AUDITORIA PROGRAMADA ({frequentProductsList.length > 0 ? Math.min(capturedProductIds.length + 1, frequentProductsList.length) : 1}/{frequentProductsList.length})
                               </span>
                             ) : activeGuidedCampaign ? (
                               <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-wider text-amber-300 font-mono flex items-center gap-1">

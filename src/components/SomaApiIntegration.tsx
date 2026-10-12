@@ -625,7 +625,9 @@ if data.get("precisa_pesquisa"):
 
                     <div
                       className={`p-3 rounded-xl border flex flex-col justify-between ${
-                        testResponse.precisa_pesquisa
+                        testResponse.tipo_auditoria === "programada"
+                          ? "bg-blue-50/70 border-blue-200 text-blue-950"
+                          : testResponse.precisa_pesquisa
                           ? "bg-amber-50/70 border-amber-200 text-amber-950"
                           : "bg-emerald-50/70 border-emerald-200 text-emerald-900"
                       }`}
@@ -635,12 +637,55 @@ if data.get("precisa_pesquisa"):
                       </span>
                       <div className="mt-1 flex items-center gap-1.5 font-black text-sm">
                         <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-                        <span>{testResponse.precisa_pesquisa ? "Auditar no PDV" : "Fila em Dia"}</span>
+                        <span>
+                          {testResponse.tipo_auditoria === "programada"
+                            ? "Auditoria Programada"
+                            : testResponse.precisa_pesquisa
+                            ? "Auditar no PDV"
+                            : "Fila em Dia"}
+                        </span>
                       </div>
                       <span className="text-[11px] opacity-80 mt-1">
-                        {testResponse.precisa_pesquisa ? "Pesquisa prioritária" : "Não urgente"}
+                        {testResponse.tipo_auditoria === "programada"
+                          ? `${testResponse.auditoria_programada?.total_produtos || 0} produtos recorrentes > 15d`
+                          : testResponse.precisa_pesquisa
+                          ? "Pesquisa prioritária"
+                          : "Não urgente"}
                       </span>
                     </div>
+                  </div>
+                )}
+
+                {/* Bloco de Ação / Botão do SOMA que vai para o PriceHub */}
+                {testResponse.link_pesquisa && (
+                  <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] font-mono font-bold uppercase tracking-wider bg-blue-200 text-blue-900 px-2 py-0.5 rounded border border-blue-300">
+                          {testResponse.tipo_auditoria === "programada" ? "Botão SOMA: Auditoria Programada" : "Botão SOMA: Link de Pesquisa"}
+                        </span>
+                        {testResponse.auditoria_programada?.ativa && (
+                          <span className="text-[10px] font-bold text-blue-700 bg-white/80 px-1.5 py-0.5 rounded border border-blue-200">
+                            {testResponse.auditoria_programada.total_produtos} itens programados
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-500 font-medium">
+                          (Exibe 20 produtos na vitrine)
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-blue-900 mt-1 font-mono truncate max-w-md">
+                        {testResponse.link_pesquisa}
+                      </p>
+                    </div>
+                    <a
+                      href={testResponse.link_pesquisa}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer justify-center"
+                    >
+                      <span>{testResponse.tipo_auditoria === "programada" ? "Testar Auditoria Programada" : "Abrir no PriceHub"}</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
                   </div>
                 )}
 
@@ -653,6 +698,59 @@ if data.get("precisa_pesquisa"):
                       <p className="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
                         {testResponse.mensagem}
                       </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Vitrine de Produtos Retornados (20 itens) */}
+                {Array.isArray(testResponse.produtos_vitrine) && testResponse.produtos_vitrine.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-gray-700">
+                        Vitrine de Produtos Retornados ({testResponse.produtos_vitrine.length} produtos):
+                      </span>
+                      <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                        modo: {testResponse.modo_exibicao_produtos}
+                      </span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100 text-xs bg-white">
+                      {testResponse.produtos_vitrine.map((prod: any, idx: number) => (
+                        <div key={idx} className="p-2.5 flex items-center justify-between gap-3 hover:bg-gray-50/80 transition">
+                          <div className="min-w-0 flex items-center gap-2">
+                            <span className="text-[10px] font-mono font-bold text-gray-400 w-5 shrink-0">
+                              #{idx + 1}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="font-bold text-gray-900 truncate">
+                                {prod.produto}
+                              </p>
+                              <div className="flex items-center gap-1.5 flex-wrap text-[10px] text-gray-500 mt-0.5">
+                                <span>{prod.marca}</span>
+                                {prod.categoria && <span>• {prod.categoria}</span>}
+                                {prod.total_registros_rede !== undefined && (
+                                  <span className="font-mono font-semibold text-slate-700">
+                                    • {prod.total_registros_rede} {prod.total_registros_rede === 1 ? 'coleta' : 'coletas'} na rede
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="font-mono font-bold text-gray-900 block">
+                              {prod.preco_formatado || `R$ ${prod.preco?.toFixed(2)}`}
+                            </span>
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full inline-block mt-0.5 ${
+                                prod.status_auditoria === "desatualizado"
+                                  ? "bg-rose-100 text-rose-800"
+                                  : "bg-emerald-100 text-emerald-800"
+                              }`}
+                            >
+                              {prod.status_descricao}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}

@@ -168,6 +168,9 @@ export default function App() {
     state?: string;
     campaignId?: string;
     origem?: string;
+    productIds?: string[];
+    modo?: string;
+    titulo?: string;
   }
 
   const [pendingExternalResearch, setPendingExternalResearch] = useState<PendingExternalResearch | null>(() => {
@@ -182,6 +185,13 @@ export default function App() {
         const campaignId = params.get("campanha_id") || params.get("campanha") || params.get("campaign_id") || params.get("campaign") || "";
         const origem = params.get("origem") || params.get("source") || "";
         const action = params.get("action") || "";
+        const productIdsRaw = params.get("produtos_ids") || params.get("product_ids") || params.get("produtos") || "";
+        const modo = params.get("modo") || params.get("tipo") || "";
+        const titulo = params.get("titulo") || "";
+
+        const productIds = productIdsRaw
+          ? productIdsRaw.split(",").map((id) => id.trim()).filter(Boolean)
+          : undefined;
 
         if (rede || chainId || action === "pesquisa") {
           const pending: PendingExternalResearch = {
@@ -190,6 +200,9 @@ export default function App() {
             state: state ? decodeURIComponent(state).trim() : undefined,
             campaignId: campaignId ? decodeURIComponent(campaignId).trim() : undefined,
             origem: origem || (search.includes("soma") ? "soma" : undefined),
+            productIds: productIds && productIds.length > 0 ? productIds : undefined,
+            modo: modo || (productIds && productIds.length > 0 ? "programada" : undefined),
+            titulo: titulo ? decodeURIComponent(titulo).trim() : undefined,
           };
           sessionStorage.setItem("pricehub_pending_research", JSON.stringify(pending));
           return pending;
@@ -261,6 +274,9 @@ export default function App() {
         skipToStep: 3,
         campaignId: pending.campaignId,
         origem: pending.origem || "soma",
+        productIds: pending.productIds,
+        modo: pending.modo,
+        titulo: pending.titulo,
       });
       setActiveTab("registrar");
 

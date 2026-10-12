@@ -358,53 +358,9 @@ function calculateChainStatus(
   const activeCampaign = activeCampaigns[0] || null;
   const possuiPesquisaGuiadaAtiva = !!activeCampaign;
 
-  // 3. Critério de necessidade de pesquisa
+  // 3. Critério de necessidade de pesquisa geral
   const precisaPesquisa = !precosAtualizados || possuiPesquisaGuiadaAtiva;
 
-  // 4. Motivo e mensagem amigável e explicativa
-  let motivo: "em_dia" | "precos_desatualizados" | "pesquisa_guiada_ativa" | "pesquisa_guiada_ativa_e_precos_desatualizados" | "sem_historico" = "em_dia";
-  let mensagem = "";
-
-  if (possuiPesquisaGuiadaAtiva && !precosAtualizados) {
-    motivo = "pesquisa_guiada_ativa_e_precos_desatualizados";
-    mensagem = diasSemAtualizacao !== null
-      ? `A rede '${chain.name}' possui pesquisa guiada ativa ('${activeCampaign.title}') e está há ${diasSemAtualizacao} dias sem atualização de preços (limite: ${diasLimite} dias). Prioridade alta para auditoria de preços.`
-      : `A rede '${chain.name}' possui pesquisa guiada ativa ('${activeCampaign.title}') e ainda não possui histórico recente de preços. Auditoria prioritária.`;
-  } else if (possuiPesquisaGuiadaAtiva && precosAtualizados) {
-    motivo = "pesquisa_guiada_ativa";
-    mensagem = `A rede '${chain.name}' possui pesquisa guiada ativa ('${activeCampaign.title}'). Embora os preços gerais estejam atualizados, recomenda-se auditar a lista guiada nesta visita.`;
-  } else if (!precosAtualizados) {
-    if (diasSemAtualizacao !== null) {
-      motivo = "precos_desatualizados";
-      mensagem = `Preços pendentes de conferência: última coleta realizada há ${diasSemAtualizacao} dias na rede '${chain.name}' (tolerância máxima: ${diasLimite} dias).`;
-    } else {
-      motivo = "sem_historico";
-      mensagem = `Nenhuma coleta de preços recente registrada para a rede '${chain.name}'. É necessário realizar a pesquisa de preços.`;
-    }
-  } else {
-    motivo = "em_dia";
-    mensagem = `Preços atualizados recentemente na rede '${chain.name}' (última pesquisa há ${diasSemAtualizacao} dia(s)). Fila tradicional regular e sem pesquisa guiada pendente.`;
-  }
-
-  // 5. Construir Link Direto para o usuário do SOMA clicar e ir direto para a pesquisa
-  const linkParams = new URLSearchParams();
-  linkParams.set("rede", chain.name);
-  linkParams.set("chain_id", chain.id);
-  if (estadoFiltro) {
-    linkParams.set("estado", estadoFiltro);
-  } else if (chain.states && chain.states.length === 1) {
-    linkParams.set("estado", chain.states[0]);
-  }
-  if (activeCampaign) {
-    linkParams.set("campanha_id", activeCampaign.id);
-  }
-  linkParams.set("origem", "soma");
-  const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
-
-  // 6. Vitrine dinâmica de produtos:
-  // - Se a pesquisa estiver em dia: mostra os últimos produtos auditados recentemente.
-  // - Se a pesquisa estiver atrasada/pendente ou com campanha guiada: mostra os produtos com mais tempo sem auditoria (ou nunca auditados) e itens da campanha guiada.
-  
   // Mapa de último registro por produto nesta rede e contagem de coletas na rede
   const lastRecordByProductId = new Map<string, RecordData>();
   const recordsCountByProductId = new Map<string, number>();
@@ -418,42 +374,19 @@ function calculateChainStatus(
     }
   }
 
-  const modoExibicaoProdutos = precisaPesquisa ? "mais_tempo_sem_auditoria" : "recorrentes_sem_auditoria_15d";
-  const produtosVitrine: Array<{
-    produto_id?: string;
-    produto: string;
-    marca: string;
-    categoria?: string;
-    gramatura?: string;
-    codigo_interno?: string;
-    preco: number;
-    preco_formatado: string;
-    data_coleta: string | null;
-    dias_atras: number | null;
-    dias_sem_auditoria: number | null;
-    total_registros_rede?: number;
-    status_auditoria: "em_dia" | "desatualizado" | "nunca_auditado" | "campanha_guiada";
-    status_descricao: string;
-    pesquisador?: string;
-    imagem_url?: string;
-    tipo: "propria" | "concorrente";
-    em_campanha_guiada: boolean;
+  // Candidatos para Cenário A (Rede em dia): itens com pelo menos 3 registros na rede e > 15 dias sem auditoria
+  const overdueRecurringCandidates: Array<{
+    product: ProductData;
+    lastRec: RecordData;
+    diffDays: number;
+    recordsCount: number;
+    isCampaignProd: boolean;
+    isProprietary: boolean;
   }> = [];
 
+  const activeCampaignIds = new Set(activeCampaign?.productIds || []);
+
   if (!precisaPesquisa) {
-    // CENÁRIO A: Rede em dia -> Ao invés de mostrar os últimos produtos auditados,
-    // mostra itens que têm pelo menos três registros na rede, mas estão há mais de 15 dias sem auditoria
-    const candidateProducts: Array<{
-      product: ProductData;
-      lastRec: RecordData;
-      diffDays: number;
-      recordsCount: number;
-      isCampaignProd: boolean;
-      isProprietary: boolean;
-    }> = [];
-
-    const activeCampaignIds = new Set(activeCampaign?.productIds || []);
-
     for (const [prodKey, lastRec] of lastRecordByProductId.entries()) {
       const recordsCount = recordsCountByProductId.get(prodKey) || 0;
 
@@ -483,7 +416,7 @@ function calculateChainStatus(
       const isProprietary = !matchedProd.isCompetitor || brandLower.includes("oetker") || brandLower.includes("mavalerio");
       const isCampaignProd = activeCampaignIds.has(matchedProd.id);
 
-      candidateProducts.push({
+      overdueRecurringCandidates.push({
         product: matchedProd,
         lastRec,
         diffDays,
@@ -494,11 +427,11 @@ function calculateChainStatus(
     }
 
     // Ordenação inteligente:
-    // 1º: Produtos de marca própria (Dr. Oetker / Mavalério)
-    // 2º: Maior tempo sem auditoria (dias decorridos em ordem decrescente)
-    // 3º: Maior número de registros históricos na rede (frequência)
+    // 1º: Marca própria
+    // 2º: Maior tempo sem auditoria (diffDays desc)
+    // 3º: Frequência histórica na rede (recordsCount desc)
     // 4º: Nome alfabético
-    candidateProducts.sort((a, b) => {
+    overdueRecurringCandidates.sort((a, b) => {
       if (a.isProprietary !== b.isProprietary) {
         return a.isProprietary ? -1 : 1;
       }
@@ -510,9 +443,103 @@ function calculateChainStatus(
       }
       return a.product.name.localeCompare(b.product.name);
     });
+  }
 
-    const topCandidates = candidateProducts.slice(0, 20);
+  const possuiProdutosProgramados = !precisaPesquisa && overdueRecurringCandidates.length > 0;
 
+  // 4. Motivo e mensagem amigável e explicativa
+  let motivo: "em_dia" | "em_dia_com_itens_pendentes" | "precos_desatualizados" | "pesquisa_guiada_ativa" | "pesquisa_guiada_ativa_e_precos_desatualizados" | "sem_historico" = "em_dia";
+  let mensagem = "";
+
+  if (possuiPesquisaGuiadaAtiva && !precosAtualizados) {
+    motivo = "pesquisa_guiada_ativa_e_precos_desatualizados";
+    mensagem = diasSemAtualizacao !== null
+      ? `A rede '${chain.name}' possui pesquisa guiada ativa ('${activeCampaign.title}') e está há ${diasSemAtualizacao} dias sem atualização de preços (limite: ${diasLimite} dias). Prioridade alta para auditoria de preços.`
+      : `A rede '${chain.name}' possui pesquisa guiada ativa ('${activeCampaign.title}') e ainda não possui histórico recente de preços. Auditoria prioritária.`;
+  } else if (possuiPesquisaGuiadaAtiva && precosAtualizados) {
+    motivo = "pesquisa_guiada_ativa";
+    mensagem = `A rede '${chain.name}' possui pesquisa guiada ativa ('${activeCampaign.title}'). Embora os preços gerais estejam atualizados, recomenda-se auditar a lista guiada nesta visita.`;
+  } else if (!precosAtualizados) {
+    if (diasSemAtualizacao !== null) {
+      motivo = "precos_desatualizados";
+      mensagem = `Preços pendentes de conferência: última coleta realizada há ${diasSemAtualizacao} dias na rede '${chain.name}' (tolerância máxima: ${diasLimite} dias).`;
+    } else {
+      motivo = "sem_historico";
+      mensagem = `Nenhuma coleta de preços recente registrada para a rede '${chain.name}'. É necessário realizar a pesquisa de preços.`;
+    }
+  } else if (possuiProdutosProgramados) {
+    motivo = "em_dia_com_itens_pendentes";
+    const count = overdueRecurringCandidates.length;
+    mensagem = `Rede em dia (última pesquisa há ${diasSemAtualizacao} dia(s)), porém identificamos ${count} produto(s) recorrente(s) (com 3+ coletas) sem auditoria há mais de 15 dias. O link do SOMA direciona para auditoria programada exclusiva com esses itens. Exibindo 20 produtos (completada com os últimos auditados).`;
+  } else {
+    motivo = "em_dia";
+    mensagem = `Preços atualizados recentemente na rede '${chain.name}' (última pesquisa há ${diasSemAtualizacao} dia(s)). Todos os itens recorrentes auditados recentemente. Exibindo os últimos produtos auditados na rede.`;
+  }
+
+  // 5. Construir Link Direto para o usuário do SOMA clicar e ir direto para o PriceHub
+  const linkParams = new URLSearchParams();
+  linkParams.set("rede", chain.name);
+  linkParams.set("chain_id", chain.id);
+  if (estadoFiltro) {
+    linkParams.set("estado", estadoFiltro);
+  } else if (chain.states && chain.states.length === 1) {
+    linkParams.set("estado", chain.states[0]);
+  }
+
+  if (possuiProdutosProgramados) {
+    // Quando a rede está em dia mas possui produtos na condição (3+ coletas e > 15 dias sem auditoria),
+    // o link direciona para uma auditoria programada somente com os produtos nessa condição
+    linkParams.set("modo", "programada");
+    linkParams.set("tipo", "programada");
+    linkParams.set("produtos_ids", overdueRecurringCandidates.map((p) => p.product.id).join(","));
+    linkParams.set("titulo", `Auditoria Programada (${overdueRecurringCandidates.length} itens recorrentes)`);
+  } else if (activeCampaign) {
+    linkParams.set("campanha_id", activeCampaign.id);
+  }
+  linkParams.set("origem", "soma");
+  const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
+
+  // 6. Vitrine dinâmica de produtos (20 produtos)
+  let modoExibicaoProdutos = "ultimos_auditados";
+  if (precisaPesquisa) {
+    modoExibicaoProdutos = "mais_tempo_sem_auditoria";
+  } else {
+    if (overdueRecurringCandidates.length >= 20) {
+      modoExibicaoProdutos = "recorrentes_sem_auditoria_15d";
+    } else if (overdueRecurringCandidates.length > 0) {
+      modoExibicaoProdutos = "recorrentes_sem_auditoria_15d_completado_com_recentes";
+    } else {
+      modoExibicaoProdutos = "ultimos_auditados";
+    }
+  }
+
+  const produtosVitrine: Array<{
+    produto_id?: string;
+    produto: string;
+    marca: string;
+    categoria?: string;
+    gramatura?: string;
+    codigo_interno?: string;
+    preco: number;
+    preco_formatado: string;
+    data_coleta: string | null;
+    dias_atras: number | null;
+    dias_sem_auditoria: number | null;
+    total_registros_rede?: number;
+    status_auditoria: "em_dia" | "desatualizado" | "nunca_auditado" | "campanha_guiada";
+    status_descricao: string;
+    pesquisador?: string;
+    imagem_url?: string;
+    tipo: "propria" | "concorrente";
+    em_campanha_guiada: boolean;
+  }> = [];
+
+  if (!precisaPesquisa) {
+    // CENÁRIO A: Rede em dia
+    const includedProdIds = new Set<string>();
+
+    // 1. Inclui produtos que atendem à condição (>= 3 coletas e > 15 dias sem auditoria), até 20
+    const topCandidates = overdueRecurringCandidates.slice(0, 20);
     for (const item of topCandidates) {
       const prod = item.product;
       const lastRec = item.lastRec;
@@ -539,9 +566,76 @@ function calculateChainStatus(
         tipo: item.isProprietary ? "propria" : "concorrente",
         em_campanha_guiada: item.isCampaignProd,
       });
+
+      includedProdIds.add(prod.id);
+      if (lastRec.productId) includedProdIds.add(lastRec.productId);
+    }
+
+    // 2. Se houver menos de 20 produtos (ou 0), completa até 20 com os últimos produtos auditados na rede (como era antes)
+    if (produtosVitrine.length < 20) {
+      for (const rec of chainRecords) {
+        if (produtosVitrine.length >= 20) break;
+        const prodKey = rec.productId || rec.notes || rec.id;
+        if (!prodKey) continue;
+
+        let matchedProd = products.find((p) => p.id === prodKey || (rec.productId && p.id === rec.productId));
+        if (!matchedProd) {
+          matchedProd = {
+            id: rec.productId || prodKey,
+            name: rec.notes || "Produto Auditado",
+            brand: "Dr. Oetker",
+            isCompetitor: false,
+          };
+        }
+
+        if (includedProdIds.has(matchedProd.id) || (rec.productId && includedProdIds.has(rec.productId))) {
+          continue;
+        }
+
+        includedProdIds.add(matchedProd.id);
+        if (rec.productId) includedProdIds.add(rec.productId);
+
+        let diffDays = 0;
+        if (rec.date) {
+          const rDate = new Date(rec.date);
+          diffDays = Math.max(0, Math.floor((Date.now() - rDate.getTime()) / (1000 * 60 * 60 * 24)));
+        }
+
+        const brandLower = (matchedProd.brand || "").toLowerCase();
+        const isProprietary = !matchedProd.isCompetitor || brandLower.includes("oetker") || brandLower.includes("mavalerio");
+        const countInChain = recordsCountByProductId.get(prodKey) || (rec.productId ? recordsCountByProductId.get(rec.productId) : 1) || 1;
+        const currentPrice = rec.price;
+
+        const statusDesc = diffDays === 0
+          ? `Auditado hoje (${countInChain} ${countInChain === 1 ? 'coleta' : 'coletas'})`
+          : diffDays === 1
+          ? `Auditado ontem (${countInChain} ${countInChain === 1 ? 'coleta' : 'coletas'})`
+          : `Auditado recentemente há ${diffDays} dias (${countInChain} ${countInChain === 1 ? 'coleta' : 'coletas'})`;
+
+        produtosVitrine.push({
+          produto_id: matchedProd.id,
+          produto: matchedProd.name,
+          marca: matchedProd.brand || (isProprietary ? "Dr. Oetker" : "Concorrente"),
+          categoria: matchedProd.category,
+          gramatura: matchedProd.weight,
+          codigo_interno: matchedProd.internalCode,
+          preco: currentPrice,
+          preco_formatado: `R$ ${currentPrice.toFixed(2).replace(".", ",")}`,
+          data_coleta: rec.date ? new Date(rec.date).toISOString() : null,
+          dias_atras: diffDays,
+          dias_sem_auditoria: diffDays,
+          total_registros_rede: countInChain,
+          status_auditoria: "em_dia",
+          status_descricao: statusDesc,
+          pesquisador: rec.userName || latestRecord?.userName || undefined,
+          imagem_url: matchedProd.imageUrl,
+          tipo: isProprietary ? "propria" : "concorrente",
+          em_campanha_guiada: activeCampaignIds.has(matchedProd.id),
+        });
+      }
     }
   } else {
-    // CENÁRIO B: Pesquisa atrasada, pendente ou campanha ativa -> Mostra apenas produtos com pelo menos um registro de auditoria na rede, ordenados por maior tempo sem auditoria
+    // CENÁRIO B: Pesquisa atrasada, pendente ou campanha ativa -> Mostra produtos com pelo menos um registro de auditoria na rede, ordenados por maior tempo sem auditoria
     const candidateProducts: Array<{
       product: ProductData;
       lastRec: RecordData;
@@ -549,8 +643,6 @@ function calculateChainStatus(
       isCampaignProd: boolean;
       isProprietary: boolean;
     }> = [];
-
-    const activeCampaignIds = new Set(activeCampaign?.productIds || []);
 
     // Itera apenas sobre produtos que possuem pelo menos um registro de auditoria nesta rede
     for (const [productId, lastRec] of lastRecordByProductId.entries()) {
@@ -659,6 +751,16 @@ function calculateChainStatus(
     produtos_vitrine: produtosVitrine,
     total_produtos_vitrine: produtosVitrine.length,
     precisa_pesquisa: precisaPesquisa,
+    tipo_auditoria: possuiProdutosProgramados ? "programada" : (activeCampaign ? "guiada" : "padrao"),
+    auditoria_programada: possuiProdutosProgramados
+      ? {
+          ativa: true,
+          titulo: `Auditoria Programada (${overdueRecurringCandidates.length} itens recorrentes)`,
+          motivo: "itens_recorrentes_sem_auditoria_15d",
+          total_produtos: overdueRecurringCandidates.length,
+          produtos_ids: overdueRecurringCandidates.map((p) => p.product.id),
+        }
+      : null,
     link_pesquisa: linkPesquisa,
     url_pesquisa_direta: linkPesquisa,
     motivo,
