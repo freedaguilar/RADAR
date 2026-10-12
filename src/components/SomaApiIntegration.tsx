@@ -716,10 +716,25 @@ if data.get("precisa_pesquisa"):
                           </p>
                         )}
                       </div>
-                      <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded shrink-0 self-start sm:self-auto">
-                        modo: {testResponse.modo_exibicao_produtos}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap shrink-0 self-start sm:self-auto">
+                        <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                          testResponse.exibir_aleatorio_no_card
+                            ? "bg-purple-50 text-purple-700 border-purple-200"
+                            : "bg-blue-50 text-blue-700 border-blue-200"
+                        }`}>
+                          Card SOMA: {testResponse.modo_exibicao_card === "aleatorio" ? "Sorteio Aleatório (4 itens)" : "Top 4 Ordenados (sem aleatorizar)"}
+                        </span>
+                        <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                          modo: {testResponse.modo_exibicao_produtos}
+                        </span>
+                      </div>
                     </div>
+                    {testResponse.card_exibicao?.instrucao && (
+                      <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-700 flex items-center gap-1.5">
+                        <Sparkles className="w-3 h-3 text-amber-500 shrink-0" />
+                        <span><strong>Regra do Card no SOMA:</strong> {testResponse.card_exibicao.instrucao}</span>
+                      </div>
+                    )}
                     <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-xl divide-y divide-gray-100 text-xs bg-white">
                       {testResponse.produtos_vitrine.map((prod: any, idx: number) => (
                         <div key={idx} className="p-2.5 flex items-center justify-between gap-3 hover:bg-gray-50/80 transition">

@@ -513,7 +513,7 @@ function calculateChainStatus(
       subtituloVitrine = `Rede em dia, mas com ${overdueRecurringCandidates.length} itens recorrentes sem auditoria há mais de 15 dias (completados até 20 com os últimos auditados)`;
     } else {
       cenario = "em_dia_sem_itens_pendentes";
-      textoBotaoAcao = "Registrar preços faltantes";
+      textoBotaoAcao = "Realizar pesquisa de preço";
       tituloVitrine = "Últimos Preços Auditados";
       subtituloVitrine = "Rede em dia. Todos os itens recorrentes auditados recentemente. Exibindo os últimos produtos auditados";
     }
@@ -701,19 +701,19 @@ function calculateChainStatus(
     }
 
     // Ordenação inteligente:
-    // 1º: Produtos da campanha guiada ativa (que já foram auditados na rede)
-    // 2º: Produtos de marca própria (Dr. Oetker / Mavalério)
-    // 3º: Maior tempo sem auditoria (dias decorridos em ordem decrescente)
+    // 1º: Produtos da campanha guiada ativa (se houver campanha ativa nesta rede)
+    // 2º: Maior tempo sem auditoria (dias decorridos em ordem decrescente: do mais tempo sem auditoria para o mais recente)
+    // 3º: Produtos de marca própria (Dr. Oetker / Mavalério) em caso de empate nos dias
     // 4º: Nome alfabético
     candidateProducts.sort((a, b) => {
       if (a.isCampaignProd !== b.isCampaignProd) {
         return a.isCampaignProd ? -1 : 1;
       }
-      if (a.isProprietary !== b.isProprietary) {
-        return a.isProprietary ? -1 : 1;
-      }
       if (b.diffDays !== a.diffDays) {
         return b.diffDays - a.diffDays;
+      }
+      if (a.isProprietary !== b.isProprietary) {
+        return a.isProprietary ? -1 : 1;
       }
       return a.product.name.localeCompare(b.product.name);
     });
@@ -753,6 +753,8 @@ function calculateChainStatus(
     }
   }
 
+  const isCardAleatorio = cenario === "em_dia_sem_itens_pendentes";
+
   return {
     rede: chain.name,
     rede_id: chain.id,
@@ -776,6 +778,16 @@ function calculateChainStatus(
     texto_botao_acao: textoBotaoAcao,
     titulo_vitrine_produtos: tituloVitrine,
     subtitulo_vitrine_produtos: subtituloVitrine,
+    modo_exibicao_card: isCardAleatorio ? "aleatorio" : "ordenado_tempo_sem_auditoria",
+    exibir_aleatorio_no_card: isCardAleatorio,
+    card_exibicao: {
+      modo: isCardAleatorio ? "aleatorio" : "ordenado",
+      ordem: isCardAleatorio ? "aleatorio" : "do_mais_tempo_sem_auditoria_ao_mais_recente",
+      quantidade_itens_card: 4,
+      instrucao: isCardAleatorio
+        ? "Sortear 4 produtos aleatórios entre os 20 produtos retornados"
+        : "Pegar os primeiros 4 produtos da lista (produtos_vitrine.slice(0, 4)) sem aleatorizar",
+    },
     botao_acao: {
       texto: textoBotaoAcao,
       link: linkPesquisa,
