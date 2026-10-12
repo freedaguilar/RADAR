@@ -683,7 +683,7 @@ if data.get("precisa_pesquisa"):
                       rel="noreferrer"
                       className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-xs cursor-pointer justify-center"
                     >
-                      <span>{testResponse.tipo_auditoria === "programada" ? "Testar Auditoria Programada" : "Abrir no PriceHub"}</span>
+                      <span>{testResponse.texto_botao_acao || (testResponse.tipo_auditoria === "programada" ? "Registrar preços faltantes" : "Realizar pesquisa de preço")}</span>
                       <ExternalLink className="w-3.5 h-3.5" />
                     </a>
                   </div>
@@ -705,11 +705,18 @@ if data.get("precisa_pesquisa"):
                 {/* Vitrine de Produtos Retornados (20 itens) */}
                 {Array.isArray(testResponse.produtos_vitrine) && testResponse.produtos_vitrine.length > 0 && (
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="font-bold text-gray-700">
-                        Vitrine de Produtos Retornados ({testResponse.produtos_vitrine.length} produtos):
-                      </span>
-                      <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
+                      <div>
+                        <span className="font-bold text-gray-800">
+                          {testResponse.titulo_vitrine_produtos || "Vitrine de Produtos"} ({testResponse.produtos_vitrine.length} produtos):
+                        </span>
+                        {testResponse.subtitulo_vitrine_produtos && (
+                          <p className="text-[11px] text-gray-500 font-normal">
+                            {testResponse.subtitulo_vitrine_produtos}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-[10px] font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded shrink-0 self-start sm:self-auto">
                         modo: {testResponse.modo_exibicao_produtos}
                       </span>
                     </div>

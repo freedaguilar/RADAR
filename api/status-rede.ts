@@ -499,7 +499,32 @@ function calculateChainStatus(
   linkParams.set("origem", "soma");
   const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
 
-  // 6. Vitrine dinâmica de produtos (20 produtos)
+  // 6. Título da vitrine, texto do botão de ação e cenário para o projeto SOMA
+  let cenario: "pesquisa_pendente" | "em_dia_com_itens_pendentes" | "em_dia_sem_itens_pendentes" = "pesquisa_pendente";
+  let textoBotaoAcao = "Realizar pesquisa de preço";
+  let tituloVitrine = "Produtos com Mais Tempo sem Auditoria";
+  let subtituloVitrine = "Exibindo os produtos com maior tempo desde a última coleta nesta rede";
+
+  if (!precisaPesquisa) {
+    if (possuiProdutosProgramados) {
+      cenario = "em_dia_com_itens_pendentes";
+      textoBotaoAcao = "Registrar preços faltantes";
+      tituloVitrine = "Itens Recorrentes sem Auditoria (>15 dias)";
+      subtituloVitrine = `Rede em dia, mas com ${overdueRecurringCandidates.length} itens recorrentes sem auditoria há mais de 15 dias (completados até 20 com os últimos auditados)`;
+    } else {
+      cenario = "em_dia_sem_itens_pendentes";
+      textoBotaoAcao = "Registrar preços faltantes";
+      tituloVitrine = "Últimos Preços Auditados";
+      subtituloVitrine = "Rede em dia. Todos os itens recorrentes auditados recentemente. Exibindo os últimos produtos auditados";
+    }
+  } else {
+    cenario = "pesquisa_pendente";
+    textoBotaoAcao = "Realizar pesquisa de preço";
+    tituloVitrine = activeCampaign ? `Itens da Pesquisa Guiada: ${activeCampaign.title}` : "Produtos com Mais Tempo sem Auditoria";
+    subtituloVitrine = activeCampaign ? "Prioridade de auditoria para campanha guiada ativa" : "Exibindo produtos que já foram auditados na rede, ordenados pelos mais desatualizados";
+  }
+
+  // 7. Vitrine dinâmica de produtos (20 produtos)
   let modoExibicaoProdutos = "ultimos_auditados";
   if (precisaPesquisa) {
     modoExibicaoProdutos = "mais_tempo_sem_auditoria";
@@ -747,6 +772,15 @@ function calculateChainStatus(
         }
       : null,
     modo_exibicao_produtos: modoExibicaoProdutos,
+    cenario: cenario,
+    texto_botao_acao: textoBotaoAcao,
+    titulo_vitrine_produtos: tituloVitrine,
+    subtitulo_vitrine_produtos: subtituloVitrine,
+    botao_acao: {
+      texto: textoBotaoAcao,
+      link: linkPesquisa,
+      tipo: possuiProdutosProgramados ? "programada" : (activeCampaign ? "guiada" : "padrao"),
+    },
     ultimos_precos_coletados: produtosVitrine,
     produtos_vitrine: produtosVitrine,
     total_produtos_vitrine: produtosVitrine.length,
