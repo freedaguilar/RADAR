@@ -4571,10 +4571,10 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                   Integrado ao SOMA
                 </div>
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
-                  Pesquisa Registrada! Voltar ao SOMA?
+                  Voltar ao SOMA?
                 </h3>
                 <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                  Os dados coletados na rede <strong className="text-slate-800">{completionData?.chainName || 'pesquisada'}</strong> foram gravados com sucesso no PriceHub. Clique abaixo para fechar o iframe e retornar ao perfil da loja no SOMA.
+                  Os dados coletados na rede <strong className="text-slate-800">{completionData?.chainName || 'pesquisada'}</strong> foram gravados com sucesso no PriceHub. Clique no botão abaixo para retornar a página da loja no SOMA.
                 </p>
               </div>
 
