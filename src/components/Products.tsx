@@ -637,6 +637,22 @@ export function Products({
     setCurrentPage(1);
   }, [searchTerm, selectedCategory, selectedSubcategory, selectedChainId, selectedState, selectedWeight, selectedBrandFilters, sortBy]);
 
+  // Rolagem para o topo ao trocar de visualização, selecionar produto ou trocar de página na listagem
+  useEffect(() => {
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+
+      const mainEl = document.getElementById('app-main-content') || document.getElementById('app-main-content-guest');
+      if (mainEl) {
+        mainEl.scrollTop = 0;
+      }
+    } catch (e) {
+      console.debug('Erro ao resetar scroll de produtos:', e);
+    }
+  }, [activeView, selectedProductId, currentPage]);
+
   // Audit Photo Modal / Lightbox inside Product Detail
   const [selectedRecord, setSelectedRecord] = useState<PriceRecord | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);

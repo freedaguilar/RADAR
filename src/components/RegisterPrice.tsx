@@ -200,6 +200,22 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     return 1;
   });
   const [completionData, setCompletionData] = useState<CompletionSummary | null>(null);
+
+  // Garante que o scroll volte ao topo ao avançar ou voltar nas etapas de pesquisa
+  useEffect(() => {
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+
+      const mainEl = document.getElementById('app-main-content') || document.getElementById('app-main-content-guest');
+      if (mainEl) {
+        mainEl.scrollTop = 0;
+      }
+    } catch (e) {
+      console.debug('Erro ao resetar scroll de etapa:', e);
+    }
+  }, [step]);
   const [selectedState, setSelectedState] = useState<string>(() => {
     return pageParams?.state || '';
   });

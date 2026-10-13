@@ -1041,6 +1041,30 @@ export default function App() {
     [state.currentUser],
   );
 
+  // Reset de rolagem para o topo ao alterar a aba ativa ou navegação de página
+  useEffect(() => {
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+
+      const scrollTargets = [
+        document.getElementById("app-main-content"),
+        document.getElementById("app-main-content-guest"),
+        document.getElementById("app-viewport"),
+        document.getElementById("app-viewport-guest"),
+      ];
+
+      scrollTargets.forEach((el) => {
+        if (el) {
+          el.scrollTop = 0;
+        }
+      });
+    } catch (e) {
+      console.debug("Erro ao resetar scroll:", e);
+    }
+  }, [activeTab, productPageParams, registerPageParams, selectedAuditRecordId]);
+
   // Pull to refresh pull gesture state hooks & touch engine handlers (mobile/tablet only)
   const [pullY, setPullY] = useState(0);
   const [isPulling, setIsPulling] = useState(false);
