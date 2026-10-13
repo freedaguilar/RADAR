@@ -392,8 +392,47 @@ export const saveStateToLocalStorage = (state: {
   customTraditionalQueues?: CustomTraditionalQueue[];
 }) => {
   try {
-    localStorage.setItem('radar_price_state', JSON.stringify(state));
+    // Para evitar QuotaExceededError no localStorage (limite de ~5MB):
+    // 1. Manter no máximo os últimos 150 registros mais recentes em cache local offline
+    // 2. Não persistir strings longas de data:image/svg+xml ou base64 no localStorage
+    const trimmedRecords = (state.records || [])
+      .slice(-150)
+      .map((r) => {
+        if (r.imageUrl && (r.imageUrl.startsWith('data:') || r.imageUrl.length > 500)) {
+          return { ...r, imageUrl: undefined };
+        }
+        return r;
+      });
+
+    const stateToSave = {
+      currentUser: state.currentUser,
+      guidedCampaigns: state.guidedCampaigns || [],
+      customTraditionalQueues: state.customTraditionalQueues || [],
+      // Salvar apenas metadados essenciais se o banco Supabase estiver conectado
+      products: state.products || [],
+      chains: state.chains || [],
+      records: trimmedRecords,
+      users: (state.users || []).map(u => ({
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        active: u.active
+      }))
+    };
+
+    localStorage.setItem('radar_price_state', JSON.stringify(stateToSave));
   } catch (e) {
-    console.error('Falha ao salvar no local storage', e);
+    // Se ainda assim estourar a cota (ex: outros dados no mesmo domínio), tenta salvar apenas o usuário e configurações essenciais
+    try {
+      const minimalState = {
+        currentUser: state.currentUser,
+        guidedCampaigns: state.guidedCampaigns || [],
+        customTraditionalQueues: state.customTraditionalQueues || []
+      };
+      localStorage.setItem('radar_price_state', JSON.stringify(minimalState));
+    } catch (innerError) {
+      console.warn('Armazenamento local desativado ou cota esgotada:', innerError);
+    }
   }
 };
