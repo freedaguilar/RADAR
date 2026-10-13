@@ -114,7 +114,17 @@ const compressSingleImagePromise = (base64Str: string, originalBytes: number): P
 };
 
 // Visual premium logo generator corresponding to Dashboard.tsx RetailerLogo
-function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md" | "lg" }) {
+function RetailerLogo({ chain, size = "md" }: { chain?: Chain | null; size?: "sm" | "md" | "lg" }) {
+  const sizeClasses = size === "sm" ? "w-6 h-6 text-[9px] font-bold rounded" : size === "md" ? "w-10 h-10 text-sm font-black rounded-lg" : "w-16 h-16 text-xl font-black rounded-xl";
+
+  if (!chain || !chain.name) {
+    return (
+      <div className={`overflow-hidden border border-gray-200 shrink-0 bg-slate-100 text-slate-500 flex items-center justify-center font-bold ${sizeClasses}`}>
+        ?
+      </div>
+    );
+  }
+
   const getInitialsAndColors = (name: string) => {
     const uppercase = name.toUpperCase();
     if (uppercase.includes("CARREFOUR")) return { text: "C", bg: "bg-blue-600", border: "border-blue-700/50", textCol: "text-white" };
@@ -140,7 +150,6 @@ function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md"
   };
 
   const { text, bg, border, textCol } = getInitialsAndColors(chain.name);
-  const sizeClasses = size === "sm" ? "w-6 h-6 text-[9px] font-bold rounded" : size === "md" ? "w-10 h-10 text-sm font-black rounded-lg" : "w-16 h-16 text-xl font-black rounded-xl";
 
   if (chain.logoUrl) {
     return (
@@ -185,22 +194,27 @@ interface RegisterPriceProps {
 
 export function RegisterPrice({ products, chains, records = [], guidedCampaigns = [], customTraditionalQueues = [], onSaveRecord, onUpdateRecord, onDeleteRecord, currentUser, onNavigate, onLogout, pageParams }: RegisterPriceProps) {
   // Navigation Steps: 1 (Estado) | 2 (Rede) | 3 (Foto) | 4 (Confirmação) | 5 (Página de Conclusão)
-  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(() => {
+    if (pageParams?.skipToStep) return pageParams.skipToStep as any;
+    return 1;
+  });
   const [completionData, setCompletionData] = useState<CompletionSummary | null>(null);
-  const [selectedState, setSelectedState] = useState<string>('');
+  const [selectedState, setSelectedState] = useState<string>(() => {
+    return pageParams?.state || '';
+  });
 
   // Duplication warning confirm
   const [showDuplicateConfirm, setShowDuplicateConfirm] = useState(false);
 
   // Inputs
-  const [selectedProductId, setSelectedProductId] = useState('');
-  const [selectedChainId, setSelectedChainId] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState(() => pageParams?.productId || '');
+  const [selectedChainId, setSelectedChainId] = useState(() => pageParams?.chainId || '');
   const [price, setPrice] = useState('0,00');
   const [notes, setNotes] = useState('');
   const [productSearch, setProductSearch] = useState('');
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
 
-  // Prefill hook from pageParams
+  // Prefill hook from pageParams quando atualizado dinamicamente
   useEffect(() => {
     if (pageParams) {
       if (pageParams.productId) {
@@ -3057,8 +3071,8 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
             </div>
             {selectedChainId && (
               <div className="sm:flex items-center gap-2 bg-slate-50 border border-slate-100/50 px-3 py-1.5 rounded-xl text-xs font-bold text-slate-700 self-start sm:self-auto shrink-0 max-w-full truncate">
-                <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
-                <span className="truncate max-w-[120px]">{chains.find(c => c.id === selectedChainId)?.name}</span>
+                <RetailerLogo chain={chains.find(c => c.id === selectedChainId)} size="sm" />
+                <span className="truncate max-w-[120px]">{chains.find(c => c.id === selectedChainId)?.name || pageParams?.titulo || "Rede Selecionada"}</span>
                 <span className="text-[10px] text-slate-400 font-normal">({selectedState})</span>
               </div>
             )}
@@ -3445,7 +3459,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                         </button>
                         {selectedChainId && (
                           <div className="flex items-center gap-2 bg-white/10 backdrop-blur-md border border-white/15 px-2.5 py-1 rounded-full text-xs font-bold text-white min-w-0 truncate">
-                            <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                            <RetailerLogo chain={chains.find(c => c.id === selectedChainId)} size="sm" />
                             <span className="truncate max-w-[110px] sm:max-w-[170px]">
                               {chains.find(c => c.id === selectedChainId)?.name}
                             </span>
@@ -3949,7 +3963,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
             </div>
             {selectedChainId && (
               <div className="flex items-center gap-2 bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-700 self-start sm:self-auto shrink-0 max-w-full truncate">
-                <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                <RetailerLogo chain={chains.find(c => c.id === selectedChainId)} size="sm" />
                 <span className="truncate max-w-[120px] font-bold">{chains.find(c => c.id === selectedChainId)?.name}</span>
                 <span className="text-[10px] text-slate-400 font-normal">({selectedState})</span>
               </div>
@@ -4446,7 +4460,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
               <div className="bg-white p-3.5 rounded-xl border border-slate-200/80 flex items-center gap-3">
                 <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
                   {completionData?.chainId && chains.find(c => c.id === completionData.chainId) ? (
-                    <RetailerLogo chain={chains.find(c => c.id === completionData.chainId)!} size="sm" />
+                    <RetailerLogo chain={chains.find(c => c.id === completionData.chainId)} size="sm" />
                   ) : (
                     <Store className="w-5 h-5 text-slate-600" />
                   )}
@@ -4656,7 +4670,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                   <span className="text-[10px] font-medium text-slate-400 leading-none">{selectedProduct?.weight || ''}</span>
                   <span className="inline-flex items-center gap-1 text-[10px] text-slate-600 rounded bg-slate-100 px-1 py-0.5 leading-none">
                     {chains.find(c => c.id === selectedChainId) && (
-                      <RetailerLogo chain={chains.find(c => c.id === selectedChainId)!} size="sm" />
+                      <RetailerLogo chain={chains.find(c => c.id === selectedChainId)} size="sm" />
                     )}
                     <span className="truncate max-w-[80px] font-bold font-sans">{chains.find(c => c.id === selectedChainId)?.name}</span>
                   </span>

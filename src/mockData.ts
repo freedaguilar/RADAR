@@ -334,7 +334,14 @@ export const getInitialState = (): {
       : null;
     if (localStore) {
       const parsed = JSON.parse(localStore);
-      if (parsed.products && parsed.chains && parsed.records && parsed.users) {
+      // Valida se o usuário salvo é um objeto válido
+      const hasValidUserObj = parsed.currentUser && 
+                              typeof parsed.currentUser === 'object' && 
+                              typeof parsed.currentUser.id === 'string' && 
+                              typeof parsed.currentUser.name === 'string';
+      const restoredUser: User | null = hasValidUserObj ? parsed.currentUser : null;
+
+      if (Array.isArray(parsed.products) && Array.isArray(parsed.chains) && Array.isArray(parsed.records) && Array.isArray(parsed.users)) {
         // Ensure chains have normalized states array and state string
         const normalizedChains = (parsed.chains as Chain[]).map((c) => {
           const statesList = getChainStates(c);
@@ -344,19 +351,28 @@ export const getInitialState = (): {
             states: statesList,
           };
         });
-
-        // Check if current user is valid of type User
-        const hasValidUserObj = parsed.currentUser && 
-                                typeof parsed.currentUser === 'object' && 
-                                typeof parsed.currentUser.id === 'string' && 
-                                typeof parsed.currentUser.name === 'string';
         
         return {
           products: parsed.products,
           chains: normalizedChains,
           records: parsed.records,
           users: parsed.users,
-          currentUser: hasValidUserObj ? parsed.currentUser : null,
+          currentUser: restoredUser,
+          guidedCampaigns: Array.isArray(parsed.guidedCampaigns) && parsed.guidedCampaigns.length > 0
+            ? parsed.guidedCampaigns
+            : INITIAL_GUIDED_CAMPAIGNS,
+          customTraditionalQueues: Array.isArray(parsed.customTraditionalQueues)
+            ? parsed.customTraditionalQueues
+            : []
+        };
+      } else if (restoredUser) {
+        // Se apenas a sessão do usuário ou configurações essenciais estavam salvas
+        return {
+          products: INITIAL_PRODUCTS,
+          chains: INITIAL_CHAINS,
+          records: generateMockHistory(),
+          users: INITIAL_USERS,
+          currentUser: restoredUser,
           guidedCampaigns: Array.isArray(parsed.guidedCampaigns) && parsed.guidedCampaigns.length > 0
             ? parsed.guidedCampaigns
             : INITIAL_GUIDED_CAMPAIGNS,
@@ -367,7 +383,7 @@ export const getInitialState = (): {
       }
     }
   } catch (e) {
-    console.error('Falha ao restaurar do local storage', e);
+    console.debug('Falha ao restaurar do local storage:', e);
   }
 
   // Fallback to initial
@@ -392,47 +408,74 @@ export const saveStateToLocalStorage = (state: {
   customTraditionalQueues?: CustomTraditionalQueue[];
 }) => {
   try {
-    // Para evitar QuotaExceededError no localStorage (limite de ~5MB):
-    // 1. Manter no máximo os últimos 150 registros mais recentes em cache local offline
-    // 2. Não persistir strings longas de data:image/svg+xml ou base64 no localStorage
+    // Para evitar QuotaExceededError no localStorage (limite do navegador de ~5MB):
+    // 1. Manter no máximo os últimos 40 registros sem imagens no cache offline
+    // 2. Não persistir URLs longas ou imagens em base64 no cache
     const trimmedRecords = (state.records || [])
-      .slice(-150)
-      .map((r) => {
-        if (r.imageUrl && (r.imageUrl.startsWith('data:') || r.imageUrl.length > 500)) {
-          return { ...r, imageUrl: undefined };
-        }
-        return r;
-      });
+      .slice(-40)
+      .map((r) => ({
+        id: r.id,
+        productId: r.productId,
+        chainId: r.chainId,
+        price: r.price,
+        date: r.date,
+        userName: r.userName,
+        userEmail: r.userEmail,
+        state: r.state,
+        notes: r.notes,
+      }));
+
+    const cleanProducts = (state.products || []).slice(0, 100).map((p) => ({
+      id: p.id,
+      name: p.name,
+      category: p.category,
+      subcategory: p.subcategory,
+      weight: p.weight,
+      active: p.active,
+      basePrice: p.basePrice,
+      isCompetitor: p.isCompetitor,
+      brand: p.brand,
+      internalCode: p.internalCode,
+    }));
+
+    const cleanChains = (state.chains || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      logoColor: c.logoColor,
+      active: c.active,
+      state: c.state,
+      states: c.states,
+    }));
 
     const stateToSave = {
       currentUser: state.currentUser,
       guidedCampaigns: state.guidedCampaigns || [],
       customTraditionalQueues: state.customTraditionalQueues || [],
-      // Salvar apenas metadados essenciais se o banco Supabase estiver conectado
-      products: state.products || [],
-      chains: state.chains || [],
+      products: cleanProducts,
+      chains: cleanChains,
       records: trimmedRecords,
-      users: (state.users || []).map(u => ({
+      users: (state.users || []).map((u) => ({
         id: u.id,
         name: u.name,
         email: u.email,
         role: u.role,
-        active: u.active
-      }))
+        active: u.active,
+        isGuest: u.isGuest,
+      })),
     };
 
     localStorage.setItem('radar_price_state', JSON.stringify(stateToSave));
   } catch (e) {
-    // Se ainda assim estourar a cota (ex: outros dados no mesmo domínio), tenta salvar apenas o usuário e configurações essenciais
     try {
+      // Se ainda assim o domínio estiver com cota apertada, salva estritamente a sessão e configurações
       const minimalState = {
         currentUser: state.currentUser,
         guidedCampaigns: state.guidedCampaigns || [],
-        customTraditionalQueues: state.customTraditionalQueues || []
+        customTraditionalQueues: state.customTraditionalQueues || [],
       };
       localStorage.setItem('radar_price_state', JSON.stringify(minimalState));
     } catch (innerError) {
-      console.warn('Armazenamento local desativado ou cota esgotada:', innerError);
+      console.debug('Armazenamento local em quota limitada:', innerError);
     }
   }
 };

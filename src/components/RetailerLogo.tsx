@@ -5,9 +5,28 @@ export function RetailerLogo({
   chain,
   size = 'md',
 }: {
-  chain: Chain;
+  chain?: Chain | null;
   size?: 'sm' | 'md' | 'lg' | 'xl';
 }) {
+  const sizeClasses =
+    size === 'sm'
+      ? 'w-5 h-5 text-[8px] font-bold rounded'
+      : size === 'lg'
+      ? 'w-11 h-11 text-base font-black rounded-xl'
+      : size === 'xl'
+      ? 'w-14 h-14 text-lg font-black rounded-2xl'
+      : 'w-7 h-7 text-xs font-black rounded-lg';
+
+  if (!chain || !chain.name) {
+    return (
+      <div
+        className={`overflow-hidden border border-gray-200 shrink-0 bg-slate-100 text-slate-500 flex items-center justify-center font-bold ${sizeClasses}`}
+      >
+        ?
+      </div>
+    );
+  }
+
   const getInitialsAndColors = (name: string) => {
     const uppercase = name.toUpperCase();
     if (uppercase.includes('CARREFOUR'))
@@ -49,14 +68,6 @@ export function RetailerLogo({
   };
 
   const { text, bg, border, textCol } = getInitialsAndColors(chain.name);
-  const sizeClasses =
-    size === 'sm'
-      ? 'w-5 h-5 text-[8px] font-bold rounded'
-      : size === 'lg'
-      ? 'w-11 h-11 text-base font-black rounded-xl'
-      : size === 'xl'
-      ? 'w-14 h-14 text-lg font-black rounded-2xl'
-      : 'w-7 h-7 text-xs font-black rounded-lg';
 
   if (chain.logoUrl) {
     return (

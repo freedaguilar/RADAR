@@ -109,102 +109,6 @@ export default function App() {
     return loaded;
   });
 
-  useEffect(() => {
-    async function loadData() {
-      if (isConfigured) {
-        try {
-          const data = await fetchAll();
-          if (data && data.users.length > 0) {
-            setState((prev) => ({
-              ...prev,
-              products: data.products,
-              chains: data.chains,
-              records: data.records,
-              users: data.users,
-              guidedCampaigns:
-                Array.isArray(data.guidedCampaigns)
-                  ? data.guidedCampaigns
-                  : prev.guidedCampaigns || [],
-              customTraditionalQueues:
-                Array.isArray(data.customTraditionalQueues)
-                  ? data.customTraditionalQueues
-                  : prev.customTraditionalQueues || [],
-            }));
-          } else if (data && data.users.length === 0) {
-            // Seed database with mock data if it's completely empty
-            const initialData = getInitialState();
-
-            // Just populate users directly to supabase so they can login
-            // Optional: you can seed products and chains here too
-            if (initialData.users.length > 0) {
-              const usersToInsert = initialData.users.map((u) => ({
-                id: u.id,
-                name: u.name,
-                email: u.email,
-                role: u.role,
-                active: u.active,
-                avatar_url: u.avatarUrl,
-                password: u.password || '123',
-              }));
-              await supabase.from("app_users").insert(usersToInsert);
-
-              // Seed chains
-              if (initialData.chains.length > 0) {
-                const chainsToInsert = initialData.chains.map((c) => {
-                  const sList = c.states && c.states.length > 0 ? c.states : [c.state || 'Minas Gerais'];
-                  return {
-                    id: c.id,
-                    name: c.name,
-                    logo_color: c.logoColor,
-                    logo_url: c.logoUrl,
-                    active: c.active,
-                    state: sList.join(', '),
-                  };
-                });
-                await supabase.from("chains").insert(chainsToInsert);
-              }
-
-              // Seed products
-              if (initialData.products.length > 0) {
-                const productsToInsert = initialData.products.map((p) => ({
-                  id: p.id,
-                  name: p.name,
-                  category: p.category,
-                  subcategory: p.subcategory,
-                  weight: p.weight,
-                  image_url: p.imageUrl,
-                  active: p.active,
-                  base_price: p.basePrice,
-                  is_competitor: p.isCompetitor,
-                  brand: p.brand,
-                  internal_code: p.internalCode || null,
-                }));
-                await supabase.from("products").insert(productsToInsert);
-              }
-
-              // Refresh after seeding
-              const seededData = await fetchAll();
-              if (seededData) {
-                setState((prev) => ({
-                  ...prev,
-                  products: seededData.products,
-                  chains: seededData.chains,
-                  records: seededData.records,
-                  users: seededData.users,
-                }));
-              }
-            }
-          }
-        } catch (error) {
-          console.error("Failed to load generic data from Supabase", error);
-        }
-      }
-      setIsInitializing(false);
-    }
-
-    loadData();
-  }, [isConfigured]);
-
   // UI Navigation state
   const [activeTab, setActiveTab] = useState<
     "dashboard" | "produtos" | "registrar" | "auditoria" | "settings"
@@ -358,6 +262,147 @@ export default function App() {
     return false;
   }, []);
 
+  useEffect(() => {
+    async function loadData() {
+      if (isConfigured) {
+        try {
+          const data = await fetchAll();
+          if (data && data.users.length > 0) {
+            let activeUser = state.currentUser;
+
+            // Se não veio usuário na URL nem no estado local, verifica a sessão do Supabase Auth
+            const hasExternalUserInUrl =
+              typeof window !== "undefined" &&
+              Boolean(
+                new URLSearchParams(window.location.search).get("usuario") ||
+                new URLSearchParams(window.location.search).get("user") ||
+                new URLSearchParams(window.location.search).get("nome_usuario") ||
+                new URLSearchParams(window.location.search).get("guest") ||
+                new URLSearchParams(window.location.search).get("guest_name") ||
+                new URLSearchParams(window.location.search).get("pesquisador")
+              );
+
+            if (!hasExternalUserInUrl && !activeUser) {
+              try {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.user?.email) {
+                  const { data: profile } = await supabase
+                    .from("app_users")
+                    .select("*")
+                    .eq("email", session.user.email)
+                    .maybeSingle();
+
+                  if (profile) {
+                    activeUser = {
+                      id: profile.id,
+                      name: profile.name,
+                      email: profile.email,
+                      role: profile.role,
+                      active: profile.active,
+                      avatarUrl: profile.avatar_url,
+                    };
+                  }
+                }
+              } catch (authErr) {
+                console.debug("Session check error in loadData:", authErr);
+              }
+            }
+
+            // Tenta disparar a pesquisa pendente do SOMA DIRETO contra as redes reais do Supabase
+            if (pendingExternalResearch && activeUser && data.chains.length > 0) {
+              triggerDirectResearch(pendingExternalResearch, data.chains);
+            }
+
+            setState((prev) => ({
+              ...prev,
+              products: data.products,
+              chains: data.chains,
+              records: data.records,
+              users: data.users,
+              currentUser: activeUser || prev.currentUser,
+              guidedCampaigns:
+                Array.isArray(data.guidedCampaigns)
+                  ? data.guidedCampaigns
+                  : prev.guidedCampaigns || [],
+              customTraditionalQueues:
+                Array.isArray(data.customTraditionalQueues)
+                  ? data.customTraditionalQueues
+                  : prev.customTraditionalQueues || [],
+            }));
+          } else if (data && data.users.length === 0) {
+            // Seed database with mock data if it's completely empty
+            const initialData = getInitialState();
+
+            if (initialData.users.length > 0) {
+              const usersToInsert = initialData.users.map((u) => ({
+                id: u.id,
+                name: u.name,
+                email: u.email,
+                role: u.role,
+                active: u.active,
+                avatar_url: u.avatarUrl,
+                password: u.password || '123',
+              }));
+              await supabase.from("app_users").insert(usersToInsert);
+
+              if (initialData.chains.length > 0) {
+                const chainsToInsert = initialData.chains.map((c) => {
+                  const sList = c.states && c.states.length > 0 ? c.states : [c.state || 'Minas Gerais'];
+                  return {
+                    id: c.id,
+                    name: c.name,
+                    logo_color: c.logoColor,
+                    logo_url: c.logoUrl,
+                    active: c.active,
+                    state: sList.join(', '),
+                  };
+                });
+                await supabase.from("chains").insert(chainsToInsert);
+              }
+
+              if (initialData.products.length > 0) {
+                const productsToInsert = initialData.products.map((p) => ({
+                  id: p.id,
+                  name: p.name,
+                  category: p.category,
+                  subcategory: p.subcategory,
+                  weight: p.weight,
+                  image_url: p.imageUrl,
+                  active: p.active,
+                  base_price: p.basePrice,
+                  is_competitor: p.isCompetitor,
+                  brand: p.brand,
+                  internal_code: p.internalCode || null,
+                }));
+                await supabase.from("products").insert(productsToInsert);
+              }
+
+              const seededData = await fetchAll();
+              if (seededData) {
+                if (pendingExternalResearch && state.currentUser && seededData.chains.length > 0) {
+                  triggerDirectResearch(pendingExternalResearch, seededData.chains);
+                }
+
+                setState((prev) => ({
+                  ...prev,
+                  products: seededData.products,
+                  chains: seededData.chains,
+                  records: seededData.records,
+                  users: seededData.users,
+                }));
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Failed to load generic data from Supabase", error);
+        }
+      }
+      setIsInitializing(false);
+    }
+
+    loadData();
+  }, [isConfigured, triggerDirectResearch]);
+
   // Mobile menu visibility for structural safety
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -415,60 +460,7 @@ export default function App() {
     }
   };
 
-  // Session check on load
-  useEffect(() => {
-    async function checkSession() {
-      try {
-        // Se a requisição veio com usuário no link (ex: SOMA), não sobrescreve com sessão antiga em cache
-        const hasExternalUser =
-          typeof window !== "undefined" &&
-          Boolean(
-            new URLSearchParams(window.location.search).get("usuario") ||
-            new URLSearchParams(window.location.search).get("user") ||
-            new URLSearchParams(window.location.search).get("nome_usuario") ||
-            new URLSearchParams(window.location.search).get("guest") ||
-            new URLSearchParams(window.location.search).get("guest_name") ||
-            new URLSearchParams(window.location.search).get("pesquisador")
-          );
 
-        if (!hasExternalUser) {
-          const { data: { session } } = await supabase.auth.getSession();
-          
-          if (session?.user?.email) {
-            // Fetch profile
-            const { data: profile } = await supabase
-              .from('app_users')
-              .select('*')
-              .eq('email', session.user.email)
-              .maybeSingle();
-            
-            if (profile) {
-              setState(prev => ({
-                ...prev,
-                currentUser: {
-                  id: profile.id,
-                  name: profile.name,
-                  email: profile.email,
-                  role: profile.role,
-                  active: profile.active,
-                  avatarUrl: profile.avatar_url,
-                }
-              }));
-            }
-          }
-        }
-      } catch (err) {
-        console.debug("Session check exception caught:", err);
-      } finally {
-        setIsInitializing(false);
-      }
-    }
-    
-    // Only check session if it's the very first load and not already initialized
-    if (isInitializing) {
-      checkSession();
-    }
-  }, []);
 
   // Logout confirmation modal state
   const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
