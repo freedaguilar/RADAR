@@ -3915,7 +3915,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                         title="Revisar lote de fotos capturadas"
                       >
                         {batchItems.length > 0 && (
-                          <span className="absolute -top-1 -right-1 sm:-top-1.5 sm:-right-1.5 bg-emerald-500 text-white font-mono text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center border-2 border-black shadow">
+                          <span className="absolute -top-1 -right-1 sm:-top-1.5 sm:-right-1.5 bg-emerald-500 text-white font-mono text-[9px] sm:text-[10px] font-black w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center border-2 border-white shadow">
                             {batchItems.length}
                           </span>
                         )}
@@ -4444,7 +4444,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
 
       {/* STEP 5 — Página de Conclusão de Pesquisa */}
       {step === 5 && (
-        <div className="bg-white rounded-3xl border border-slate-150 shadow-xs p-6 sm:p-10 space-y-8 animate-fade-in" id="step-5-completion-page">
+        <div className="bg-white rounded-2xl border border-slate-100 shadow-xs p-8 space-y-6 animate-fade-in" id="step-5-completion-page">
           {/* Header de Conclusão */}
           <div className="text-center space-y-3.5 max-w-md mx-auto">
             <div className="mx-auto w-16 h-16 bg-emerald-100 text-emerald-600 rounded-3xl flex items-center justify-center shadow-xs border border-emerald-200">
@@ -4567,14 +4567,12 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
           {completionData?.origem === 'soma' || pageParams?.origem === 'soma' || (currentUser?.isGuest && (pageParams?.origem === 'soma' || completionData?.isGuest)) ? (
             <div className="bg-gradient-to-br from-[#D40511]/5 via-amber-50/30 to-[#D40511]/5 rounded-2xl border border-red-200 p-6 sm:p-8 text-center space-y-4" id="soma-return-prompt-card">
               <div className="space-y-1.5 max-w-sm mx-auto">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-red-100 text-[#D40511] font-mono text-[10px] font-bold uppercase tracking-wider mb-1">
-                  Integrado ao SOMA
-                </div>
+                
                 <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
                   Voltar ao SOMA?
                 </h3>
                 <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                  Os dados coletados na rede <strong className="text-slate-800">{completionData?.chainName || 'pesquisada'}</strong> foram gravados com sucesso no PriceHub. Clique no botão abaixo para retornar a página da loja no SOMA.
+                  Os dados coletados na rede <strong className="text-slate-800">{completionData?.chainName || 'pesquisada'}</strong> foram gravados com sucesso no PriceHub. Toque no botão abaixo para retornar a página da loja em que você está.
                 </p>
               </div>
 
