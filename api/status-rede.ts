@@ -510,7 +510,7 @@ function calculateChainStatus(
       cenario = "em_dia_com_itens_pendentes";
       textoBotaoAcao = "Registrar preços faltantes";
       tituloVitrine = "Itens Recorrentes sem Auditoria (>15 dias)";
-      subtituloVitrine = `Rede em dia, mas com ${overdueRecurringCandidates.length} itens recorrentes sem auditoria há mais de 15 dias (completados até 20 com os últimos auditados)`;
+      subtituloVitrine = `Rede em dia, mas com ${overdueRecurringCandidates.length} itens recorrentes sem auditoria há mais de 15 dias (completados até 100 com os últimos auditados)`;
     } else {
       cenario = "em_dia_sem_itens_pendentes";
       textoBotaoAcao = "Realizar pesquisa de preço";
@@ -524,12 +524,12 @@ function calculateChainStatus(
     subtituloVitrine = activeCampaign ? "Prioridade de auditoria para campanha guiada ativa" : "Exibindo produtos que já foram auditados na rede, ordenados pelos mais desatualizados";
   }
 
-  // 7. Vitrine dinâmica de produtos (20 produtos)
+  // 7. Vitrine dinâmica de produtos (até 100 produtos)
   let modoExibicaoProdutos = "ultimos_auditados";
   if (precisaPesquisa) {
     modoExibicaoProdutos = "mais_tempo_sem_auditoria";
   } else {
-    if (overdueRecurringCandidates.length >= 20) {
+    if (overdueRecurringCandidates.length >= 100) {
       modoExibicaoProdutos = "recorrentes_sem_auditoria_15d";
     } else if (overdueRecurringCandidates.length > 0) {
       modoExibicaoProdutos = "recorrentes_sem_auditoria_15d_completado_com_recentes";
@@ -563,8 +563,8 @@ function calculateChainStatus(
     // CENÁRIO A: Rede em dia
     const includedProdIds = new Set<string>();
 
-    // 1. Inclui produtos que atendem à condição (>= 3 coletas e > 15 dias sem auditoria), até 20
-    const topCandidates = overdueRecurringCandidates.slice(0, 20);
+    // 1. Inclui produtos que atendem à condição (>= 3 coletas e > 15 dias sem auditoria), até 100
+    const topCandidates = overdueRecurringCandidates.slice(0, 100);
     for (const item of topCandidates) {
       const prod = item.product;
       const lastRec = item.lastRec;
@@ -596,10 +596,10 @@ function calculateChainStatus(
       if (lastRec.productId) includedProdIds.add(lastRec.productId);
     }
 
-    // 2. Se houver menos de 20 produtos (ou 0), completa até 20 com os últimos produtos auditados na rede (como era antes)
-    if (produtosVitrine.length < 20) {
+    // 2. Se houver menos de 100 produtos (ou 0), completa até 100 com os últimos produtos auditados na rede (como era antes)
+    if (produtosVitrine.length < 100) {
       for (const rec of chainRecords) {
-        if (produtosVitrine.length >= 20) break;
+        if (produtosVitrine.length >= 100) break;
         const prodKey = rec.productId || rec.notes || rec.id;
         if (!prodKey) continue;
 
@@ -718,7 +718,7 @@ function calculateChainStatus(
       return a.product.name.localeCompare(b.product.name);
     });
 
-    const topCandidates = candidateProducts.slice(0, 20);
+    const topCandidates = candidateProducts.slice(0, 100);
 
     for (const item of topCandidates) {
       const prod = item.product;
@@ -784,9 +784,13 @@ function calculateChainStatus(
       modo: isCardAleatorio ? "aleatorio" : "ordenado",
       ordem: isCardAleatorio ? "aleatorio" : "do_mais_tempo_sem_auditoria_ao_mais_recente",
       quantidade_itens_card: 4,
+      total_itens_retornados: produtosVitrine.length,
+      tem_mais_itens: produtosVitrine.length > 4,
+      quantidade_itens_modal: Math.max(0, produtosVitrine.length - 4),
+      texto_botao_modal: "Ver todos os produtos pendentes",
       instrucao: isCardAleatorio
-        ? "Sortear 4 produtos aleatórios entre os 20 produtos retornados"
-        : "Pegar os primeiros 4 produtos da lista (produtos_vitrine.slice(0, 4)) sem aleatorizar",
+        ? "Sortear 4 produtos aleatórios entre os produtos retornados na API (até 100 itens)"
+        : "Pegar os primeiros 4 produtos da lista (produtos_vitrine.slice(0, 4)) sem aleatorizar. O botão de abrir modal (acima da ação principal) exibe todos os itens",
     },
     botao_acao: {
       texto: textoBotaoAcao,
