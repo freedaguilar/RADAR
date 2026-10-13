@@ -2313,12 +2313,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     };
   }, []);
 
-  // Quando a tela de conclusão de pesquisa é alcançada (Etapa 5), notifica o SOMA imediatamente
-  useEffect(() => {
-    if (step === 5 && completionData) {
-      notifyParentFinishResearch(completionData);
-    }
-  }, [step, completionData]);
+
 
   // Dynamic viewport height tracking for mobile browsers with bottom navigation bars (e.g. Safari, Chrome Mobile)
   const [cameraViewportHeight, setCameraViewportHeight] = useState<number | null>(null);
