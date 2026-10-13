@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered, Target } from 'lucide-react';
+import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered, Target, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
@@ -18,6 +18,7 @@ interface CompletionSummary {
   researcherName: string;
   isPromotor: boolean;
   isGuest: boolean;
+  origem?: string;
 }
 
 // Batch analysis list item structure
@@ -2069,6 +2070,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         researcherName: currentUser?.name || 'Pesquisador',
         isPromotor: currentUser?.role === 'promotor',
         isGuest,
+        origem: pageParams?.origem || (currentUser?.isGuest ? 'soma' : undefined),
       });
 
       setSuccessMsg(false);
@@ -2280,6 +2282,26 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
     }
   };
 
+  // Notificação de conclusão de pesquisa para o SOMA fechar o iframe e voltar ao perfil da loja
+  const notifyParentFinishResearch = (data?: CompletionSummary | null) => {
+    try {
+      if (typeof window !== 'undefined' && window.parent) {
+        window.parent.postMessage({
+          type: 'PRICEHUB_FINISH_RESEARCH',
+          action: 'close_iframe',
+          rede: data?.chainName || chains.find(c => c.id === selectedChainId)?.name || pageParams?.titulo,
+          chainId: data?.chainId || selectedChainId,
+          state: data?.state || selectedState,
+          itemsCount: data?.itemsCount || 0,
+          user: data?.researcherName || currentUser?.name,
+          timestamp: new Date().toISOString(),
+        }, '*');
+      }
+    } catch (err) {
+      console.debug('Erro ao enviar postMessage PRICEHUB_FINISH_RESEARCH:', err);
+    }
+  };
+
   useEffect(() => {
     notifyParentCameraState(useCamera);
   }, [useCamera]);
@@ -2290,6 +2312,13 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
       notifyParentCameraState(false);
     };
   }, []);
+
+  // Quando a tela de conclusão de pesquisa é alcançada (Etapa 5), notifica o SOMA imediatamente
+  useEffect(() => {
+    if (step === 5 && completionData) {
+      notifyParentFinishResearch(completionData);
+    }
+  }, [step, completionData]);
 
   // Dynamic viewport height tracking for mobile browsers with bottom navigation bars (e.g. Safari, Chrome Mobile)
   const [cameraViewportHeight, setCameraViewportHeight] = useState<number | null>(null);
@@ -2722,6 +2751,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         researcherName: currentUser?.name || 'Pesquisador',
         isPromotor: currentUser?.role === 'promotor',
         isGuest,
+        origem: pageParams?.origem || (currentUser?.isGuest ? 'soma' : undefined),
       });
 
       // Show success feedback and clear form
@@ -4538,41 +4568,82 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
             </div>
           </div>
 
-          {/* Seção de Pergunta no Final */}
-          <div className="bg-slate-50/90 rounded-2xl border border-slate-200 p-6 sm:p-8 text-center space-y-4" id="another-research-prompt-card">
-            <div className="space-y-1.5 max-w-sm mx-auto">
-              <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
-                Deseja realizar outra pesquisa?
-              </h3>
-              <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                {completionData?.isGuest
-                  ? 'Você pode iniciar uma nova pesquisa em outra rede ou concluir sua sessão.'
-                  : 'Você pode iniciar uma nova auditoria em outra rede ou navegar para consultar a lista de produtos.'}
-              </p>
-            </div>
+          {/* Seção de Pergunta / Ação no Final (Exclusivo para SOMA vs Usuário nativo PriceHub) */}
+          {completionData?.origem === 'soma' || pageParams?.origem === 'soma' || (currentUser?.isGuest && (pageParams?.origem === 'soma' || completionData?.isGuest)) ? (
+            <div className="bg-gradient-to-br from-[#D40511]/5 via-amber-50/30 to-[#D40511]/5 rounded-2xl border border-red-200 p-6 sm:p-8 text-center space-y-4" id="soma-return-prompt-card">
+              <div className="space-y-1.5 max-w-sm mx-auto">
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-red-100 text-[#D40511] font-mono text-[10px] font-bold uppercase tracking-wider mb-1">
+                  Integrado ao SOMA
+                </div>
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+                  Pesquisa Registrada! Voltar ao SOMA?
+                </h3>
+                <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                  Os dados coletados na rede <strong className="text-slate-800">{completionData?.chainName || 'pesquisada'}</strong> foram gravados com sucesso no PriceHub. Clique abaixo para fechar o iframe e retornar ao perfil da loja no SOMA.
+                </p>
+              </div>
 
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 max-w-md mx-auto">
-              <button
-                type="button"
-                id="btn-start-another-research"
-                onClick={handleStartNewResearch}
-                className="w-full sm:flex-1 py-3.5 px-5 bg-[#D40511] hover:bg-[#b0040e] active:scale-[0.98] text-white rounded-xl text-xs sm:text-sm font-bold transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Sim, iniciar outra pesquisa</span>
-              </button>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 max-w-md mx-auto">
+                <button
+                  type="button"
+                  id="btn-return-to-soma"
+                  onClick={() => {
+                    notifyParentFinishResearch(completionData);
+                    handleFinishAndNavigateAway();
+                  }}
+                  className="w-full sm:flex-1 py-3.5 px-5 bg-[#D40511] hover:bg-[#b0040e] active:scale-[0.98] text-white rounded-xl text-xs sm:text-sm font-extrabold transition shadow-md flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Voltar ao SOMA</span>
+                </button>
 
-              <button
-                type="button"
-                id="btn-finish-go-to-products"
-                onClick={handleFinishAndNavigateAway}
-                className="w-full sm:flex-1 py-3.5 px-5 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-700 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold transition shadow-2xs flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <ArrowRight className="w-4 h-4" />
-                <span>{completionData?.isGuest ? 'Não, finalizar' : 'Não, ver produtos'}</span>
-              </button>
+                <button
+                  type="button"
+                  id="btn-start-another-research-soma"
+                  onClick={handleStartNewResearch}
+                  className="w-full sm:flex-1 py-3.5 px-5 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-700 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold transition shadow-2xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Outra Pesquisa</span>
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="bg-slate-50/90 rounded-2xl border border-slate-200 p-6 sm:p-8 text-center space-y-4" id="another-research-prompt-card">
+              <div className="space-y-1.5 max-w-sm mx-auto">
+                <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+                  Deseja realizar outra pesquisa?
+                </h3>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                  {completionData?.isGuest
+                    ? 'Você pode iniciar uma nova pesquisa em outra rede ou concluir sua sessão.'
+                    : 'Você pode iniciar uma nova auditoria em outra rede ou navegar para consultar a lista de produtos.'}
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2 max-w-md mx-auto">
+                <button
+                  type="button"
+                  id="btn-start-another-research"
+                  onClick={handleStartNewResearch}
+                  className="w-full sm:flex-1 py-3.5 px-5 bg-[#D40511] hover:bg-[#b0040e] active:scale-[0.98] text-white rounded-xl text-xs sm:text-sm font-bold transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  <span>Sim, iniciar outra pesquisa</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="btn-finish-go-to-products"
+                  onClick={handleFinishAndNavigateAway}
+                  className="w-full sm:flex-1 py-3.5 px-5 bg-white hover:bg-slate-100 active:scale-[0.98] text-slate-700 border border-slate-200 rounded-xl text-xs sm:text-sm font-bold transition shadow-2xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  <span>{completionData?.isGuest ? 'Não, finalizar' : 'Não, ver produtos'}</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

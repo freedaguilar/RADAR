@@ -43,7 +43,7 @@ export function SomaApiIntegration({ chains }: SomaApiIntegrationProps) {
   const [testStatusCode, setTestStatusCode] = useState<number | null>(null);
   const [testLatencyMs, setTestLatencyMs] = useState<number | null>(null);
   const [jsonCopied, setJsonCopied] = useState(false);
-  const [activeCodeTab, setActiveCodeTab] = useState<"fetch" | "curl" | "python">("fetch");
+  const [activeCodeTab, setActiveCodeTab] = useState<"fetch" | "curl" | "python" | "iframe">("fetch");
 
   const priceHubBaseUrl = "https://pricehub.aquilas.tech";
   const somaBaseUrl = "https://soma.aquilas.tech";
@@ -179,6 +179,22 @@ data = response.json()
 
 if data.get("precisa_pesquisa"):
     print(f"Alerta SOMA: {data.get('mensagem')}")
+`;
+
+  const sampleIframeCode = `// No frontend do SOMA (https://soma.aquilas.tech/):
+// Escuta a mensagem enviada pelo PriceHub ao concluir a pesquisa no iframe
+window.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "PRICEHUB_FINISH_RESEARCH") {
+    console.log("Pesquisa finalizada no PriceHub:", event.data);
+    
+    // 1. Fechar o modal/container que contém o iframe do PriceHub no SOMA
+    fecharModalPriceHub();
+
+    // 2. Navegar para a página de perfil da loja no SOMA
+    const rede = event.data.rede || "${targetRedeQuery || 'SUPER ABC'}";
+    router.push(\`/lojas/perfil?rede=\${encodeURIComponent(rede)}\`);
+  }
+});
 `;
 
   return (
@@ -819,7 +835,7 @@ if data.get("precisa_pesquisa"):
             </div>
           </div>
 
-          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl">
+          <div className="flex items-center gap-1 bg-gray-100 p-1 rounded-xl flex-wrap">
             <button
               type="button"
               onClick={() => setActiveCodeTab("fetch")}
@@ -828,6 +844,15 @@ if data.get("precisa_pesquisa"):
               }`}
             >
               JavaScript / Fetch
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveCodeTab("iframe")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                activeCodeTab === "iframe" ? "bg-white text-[#D40511] font-black shadow-2xs" : "text-gray-600 hover:text-gray-900"
+              }`}
+            >
+              Iframe / postMessage (Fechar)
             </button>
             <button
               type="button"
@@ -854,6 +879,8 @@ if data.get("precisa_pesquisa"):
           <pre className="p-4 bg-slate-950 text-emerald-400 rounded-2xl text-xs font-mono overflow-x-auto leading-relaxed border border-slate-800 select-all">
             {activeCodeTab === "fetch"
               ? sampleFetchCode
+              : activeCodeTab === "iframe"
+              ? sampleIframeCode
               : activeCodeTab === "curl"
               ? sampleCurlCode
               : samplePythonCode}
@@ -864,6 +891,8 @@ if data.get("precisa_pesquisa"):
               const code =
                 activeCodeTab === "fetch"
                   ? sampleFetchCode
+                  : activeCodeTab === "iframe"
+                  ? sampleIframeCode
                   : activeCodeTab === "curl"
                   ? sampleCurlCode
                   : samplePythonCode;
