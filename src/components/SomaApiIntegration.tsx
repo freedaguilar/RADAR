@@ -335,6 +335,10 @@ if data.get("precisa_pesquisa"):
                     <span className="block text-gray-500 mt-0.5">Nome da rede (ex: "Super ABC", "Carrefour") ou ID (ex: "chain-1").</span>
                   </li>
                   <li>
+                    <code className="text-red-700 bg-red-50 px-1 py-0.5 rounded font-mono font-bold">usuario</code> (opcional - Zero Login):
+                    <span className="block text-gray-500 mt-0.5">Nome do usuário do SOMA (ex: "Jesse Aguilar"). Ao ser informado, o PriceHub efetua <strong>login automático como Convidado</strong>, dispensando a tela de login.</span>
+                  </li>
+                  <li>
                     <code className="text-red-700 bg-red-50 px-1 py-0.5 rounded font-mono font-bold">dias_limite</code> (opcional, padrão 15):
                     <span className="block text-gray-500 mt-0.5">Tolerância de dias sem pesquisa. Caso passe desse limite, retorna `precos_atualizados: false`.</span>
                   </li>
@@ -348,10 +352,10 @@ if data.get("precisa_pesquisa"):
               <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl space-y-1.5 text-xs">
                 <span className="font-bold text-emerald-900 text-[11px] flex items-center gap-1.5">
                   <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                  Vitrine de Últimos Preços Auditados (`ultimos_precos_coletados`)
+                  Vitrine de Produtos Auditados (`produtos_vitrine` / até 100 itens)
                 </span>
                 <p className="text-[11px] text-emerald-800 leading-relaxed">
-                  A API agora retorna uma lista com os <strong>3 a 5 últimos produtos auditados</strong> nessa rede com nome, marca, foto, preço numérico e formatado (<code className="bg-emerald-100 px-1 py-0.5 rounded font-mono">preco_formatado: "R$ 3,19"</code>), data e dias desde a coleta.
+                  A API retorna até <strong>100 produtos</strong> com metadados para o modal de pendências do SOMA, incluindo preço formatado, dias sem auditoria e links com auto-login do pesquisador.
                 </p>
               </div>
             </div>
@@ -365,16 +369,16 @@ if data.get("precisa_pesquisa"):
             </div>
             
             <p className="text-xs text-gray-600 leading-relaxed">
-              O SOMA pode criar botões ou links diretos para que o promotor acesse a pesquisa daquela rede com um clique:
+              O SOMA pode criar botões ou links diretos com o nome do usuário para entrar sem login:
             </p>
 
             <div className="p-2.5 bg-slate-900 text-white rounded-xl text-xs font-mono break-all flex items-center justify-between gap-2">
               <span className="text-emerald-400">
-                https://pricehub.aquilas.tech/?rede=SUPER%20ABC&estado=MG&origem=soma
+                https://pricehub.aquilas.tech/?rede=SUPER%20ABC&estado=MG&origem=soma&usuario=Jesse%20Aguilar
               </span>
               <button
                 type="button"
-                onClick={() => handleCopyUrl("https://pricehub.aquilas.tech/?rede=SUPER%20ABC&estado=MG&origem=soma")}
+                onClick={() => handleCopyUrl("https://pricehub.aquilas.tech/?rede=SUPER%20ABC&estado=MG&origem=soma&usuario=Jesse%20Aguilar")}
                 className="p-1 hover:bg-slate-800 text-slate-300 rounded cursor-pointer shrink-0"
                 title="Copiar Link"
               >
@@ -383,12 +387,12 @@ if data.get("precisa_pesquisa"):
             </div>
 
             <div className="p-3 bg-white/80 border border-red-100 rounded-xl text-[11px] text-gray-600 space-y-1.5">
-              <span className="font-bold text-gray-800 block text-xs">Comportamento Inteligente de Acesso:</span>
+              <span className="font-bold text-gray-800 block text-xs">Zero-Login & Autenticação Transparente:</span>
               <p>
-                • <strong>Usuário já logado:</strong> Entra direto na <strong>Etapa 3</strong> (fila de produtos e câmera) com a rede e estado selecionados.
+                • <strong>Com parâmetro `usuario`:</strong> O PriceHub cria automaticamente a sessão de Convidado com o nome do usuário e abre <strong>direto na Etapa 3 (câmera)</strong> sem que o usuário veja a tela de login!
               </p>
               <p>
-                • <strong>Usuário não logado:</strong> O PriceHub exibe o aviso com o nome da rede. Assim que o usuário entrar como Convidado (apenas seu nome) ou Gestor, ele é <strong>imediatamente redirecionado para a pesquisa</strong> sem perder o destino!
+                • <strong>Sem parâmetro `usuario`:</strong> Se já estiver logado, entra direto; se não estiver, exibe a tela de login preservando a rede de destino.
               </p>
             </div>
 

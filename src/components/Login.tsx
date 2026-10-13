@@ -27,6 +27,7 @@ interface LoginProps {
     state?: string;
     campaignId?: string;
     origem?: string;
+    usuario?: string;
   } | null;
 }
 
@@ -42,7 +43,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS, pendingR
   const [isCredLoading, setIsCredLoading] = useState(false);
 
   // Guest mode states
-  const [guestName, setGuestName] = useState('');
+  const [guestName, setGuestName] = useState(pendingResearch?.usuario || '');
   const [guestError, setGuestError] = useState('');
   const [isGuestLoading, setIsGuestLoading] = useState(false);
 

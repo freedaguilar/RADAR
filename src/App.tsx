@@ -28,6 +28,51 @@ import { RegisterPrice } from "./components/RegisterPrice";
 import { Audit } from "./components/Audit";
 import { Settings } from "./components/Settings";
 
+// Extrai e cria perfil de convidado imediato a partir de parâmetro de URL (ex: acessado direto do SOMA)
+function extractExternalUserFromUrl(): User | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const search = window.location.search;
+    if (!search) return null;
+    const params = new URLSearchParams(search);
+    const rawUser =
+      params.get("usuario") ||
+      params.get("user") ||
+      params.get("nome_usuario") ||
+      params.get("guest") ||
+      params.get("guest_name") ||
+      params.get("pesquisador");
+
+    if (rawUser && rawUser.trim().length >= 2) {
+      const cleanName = decodeURIComponent(rawUser).trim();
+      const parts = cleanName.split(/\s+/).filter(Boolean);
+      const initials =
+        parts.length === 1
+          ? parts[0].substring(0, 2).toUpperCase()
+          : `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+
+      const normalizedSlug = cleanName
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]/g, ".");
+
+      return {
+        id: `guest-${normalizedSlug || "visitante"}-${Date.now()}`,
+        name: cleanName,
+        email: `${normalizedSlug || "visitante"}.convidado@radar.com`,
+        role: "vendedor",
+        active: true,
+        avatarUrl: initials,
+        isGuest: true,
+      };
+    }
+  } catch (e) {
+    console.debug("Erro ao extrair usuário externo da URL:", e);
+  }
+  return null;
+}
+
 export default function App() {
   const handleCampaignsRealtimeUpdate = useCallback((freshCampaigns: GuidedCampaign[]) => {
     setState((prev) => ({
@@ -49,9 +94,18 @@ export default function App() {
   );
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Global app state
+  // Global app state com detecção imediata de login via link externo (Zero-Login / Auto-Login Convidado)
   const [state, setState] = useState<AppState>(() => {
     const loaded = getInitialState();
+    const externalUser = extractExternalUserFromUrl();
+    if (externalUser) {
+      const updated: AppState = {
+        ...loaded,
+        currentUser: externalUser,
+      };
+      saveStateToLocalStorage(updated);
+      return updated;
+    }
     return loaded;
   });
 
@@ -171,6 +225,7 @@ export default function App() {
     productIds?: string[];
     modo?: string;
     titulo?: string;
+    usuario?: string;
   }
 
   const [pendingExternalResearch, setPendingExternalResearch] = useState<PendingExternalResearch | null>(() => {
@@ -188,12 +243,20 @@ export default function App() {
         const productIdsRaw = params.get("produtos_ids") || params.get("product_ids") || params.get("produtos") || "";
         const modo = params.get("modo") || params.get("tipo") || "";
         const titulo = params.get("titulo") || "";
+        const usuario =
+          params.get("usuario") ||
+          params.get("user") ||
+          params.get("nome_usuario") ||
+          params.get("guest") ||
+          params.get("guest_name") ||
+          params.get("pesquisador") ||
+          "";
 
         const productIds = productIdsRaw
           ? productIdsRaw.split(",").map((id) => id.trim()).filter(Boolean)
           : undefined;
 
-        if (rede || chainId || action === "pesquisa") {
+        if (rede || chainId || action === "pesquisa" || usuario) {
           const pending: PendingExternalResearch = {
             rede: rede ? decodeURIComponent(rede).trim() : undefined,
             chainId: chainId ? decodeURIComponent(chainId).trim() : undefined,
@@ -203,6 +266,7 @@ export default function App() {
             productIds: productIds && productIds.length > 0 ? productIds : undefined,
             modo: modo || (productIds && productIds.length > 0 ? "programada" : undefined),
             titulo: titulo ? decodeURIComponent(titulo).trim() : undefined,
+            usuario: usuario ? decodeURIComponent(usuario).trim() : undefined,
           };
           sessionStorage.setItem("pricehub_pending_research", JSON.stringify(pending));
           return pending;
@@ -355,28 +419,42 @@ export default function App() {
   useEffect(() => {
     async function checkSession() {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user?.email) {
-          // Fetch profile
-          const { data: profile } = await supabase
-            .from('app_users')
-            .select('*')
-            .eq('email', session.user.email)
-            .maybeSingle();
+        // Se a requisição veio com usuário no link (ex: SOMA), não sobrescreve com sessão antiga em cache
+        const hasExternalUser =
+          typeof window !== "undefined" &&
+          Boolean(
+            new URLSearchParams(window.location.search).get("usuario") ||
+            new URLSearchParams(window.location.search).get("user") ||
+            new URLSearchParams(window.location.search).get("nome_usuario") ||
+            new URLSearchParams(window.location.search).get("guest") ||
+            new URLSearchParams(window.location.search).get("guest_name") ||
+            new URLSearchParams(window.location.search).get("pesquisador")
+          );
+
+        if (!hasExternalUser) {
+          const { data: { session } } = await supabase.auth.getSession();
           
-          if (profile) {
-            setState(prev => ({
-              ...prev,
-              currentUser: {
-                id: profile.id,
-                name: profile.name,
-                email: profile.email,
-                role: profile.role,
-                active: profile.active,
-                avatarUrl: profile.avatar_url,
-              }
-            }));
+          if (session?.user?.email) {
+            // Fetch profile
+            const { data: profile } = await supabase
+              .from('app_users')
+              .select('*')
+              .eq('email', session.user.email)
+              .maybeSingle();
+            
+            if (profile) {
+              setState(prev => ({
+                ...prev,
+                currentUser: {
+                  id: profile.id,
+                  name: profile.name,
+                  email: profile.email,
+                  role: profile.role,
+                  active: profile.active,
+                  avatarUrl: profile.avatar_url,
+                }
+              }));
+            }
           }
         }
       } catch (err) {
@@ -1074,20 +1152,35 @@ export default function App() {
     }).length;
   }, [state.records]);
 
+  // Se ainda estiver inicializando dados essenciais do sistema, exibe splash screen profissional
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F5] flex items-center justify-center font-sans">
+        <div className="flex flex-col items-center text-center p-6 max-w-sm">
+          <div className="w-16 h-16 rounded-2xl bg-white shadow-sm border border-gray-100 p-2 overflow-hidden mb-4">
+            <img
+              src="https://i.imgur.com/TGgcoZg.png"
+              alt="PriceHub Logo"
+              className="w-full h-full object-contain"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          <Loader2 className="w-8 h-8 text-[#D40511] animate-spin mb-3" />
+          <p className="text-base font-bold text-gray-800">
+            {state.currentUser ? `Olá, ${state.currentUser.name}!` : "Carregando dados..."}
+          </p>
+          <p className="text-xs text-gray-500 font-medium mt-1">
+            {pendingExternalResearch?.rede
+              ? `Preparando auditoria para a rede ${pendingExternalResearch.rede}...`
+              : "Sincronizando dados com o PriceHub..."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   // Guard routing: if no active profile, force Login screen
   if (!state.currentUser) {
-    if (isInitializing) {
-      return (
-        <div className="min-h-screen bg-[#F5F5F5] flex items-center justify-center font-sans">
-          <div className="flex flex-col items-center">
-            <Loader2 className="w-8 h-8 text-[#D40511] animate-spin mb-4" />
-            <p className="text-sm text-gray-500 font-medium">
-              Carregando dados...
-            </p>
-          </div>
-        </div>
-      );
-    }
     return (
       <Login
         onLoginSuccess={handleLoginSuccess}

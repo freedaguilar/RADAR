@@ -321,7 +321,8 @@ function calculateChainStatus(
   products: ProductData[] = [],
   estadoFiltro?: string,
   diasLimite: number = 15,
-  baseUrl: string = "https://pricehub.aquilas.tech"
+  baseUrl: string = "https://pricehub.aquilas.tech",
+  usuarioNome?: string
 ) {
   // 1. Filtrar registros da rede (e por estado se solicitado)
   let chainRecords = records.filter((r) => r.chainId === chain.id);
@@ -497,6 +498,9 @@ function calculateChainStatus(
     linkParams.set("campanha_id", activeCampaign.id);
   }
   linkParams.set("origem", "soma");
+  if (usuarioNome && usuarioNome.trim()) {
+    linkParams.set("usuario", usuarioNome.trim());
+  }
   const linkPesquisa = `${baseUrl}/?${linkParams.toString()}`;
 
   // 6. Título da vitrine, texto do botão de ação e cenário para o projeto SOMA
@@ -901,6 +905,7 @@ export default async function statusRedeHandler(req: any, res: any) {
     const redeQuery = (queryObj.rede || queryObj.nome || queryObj.name || queryObj.chainId || "") as string;
     const estadoQuery = (queryObj.estado || queryObj.state || queryObj.uf || "") as string;
     const diasLimite = Math.max(1, parseInt(String(queryObj.dias_limite || queryObj.dias || 15), 10) || 15);
+    const usuarioQuery = (queryObj.usuario || queryObj.user || queryObj.nome_usuario || queryObj.guest || queryObj.pesquisador || "") as string;
 
     // Determina o domínio base para o link de redirecionamento direto
     const hostHeader = (req.headers["x-forwarded-host"] || req.headers["host"] || "") as string;
@@ -921,7 +926,7 @@ export default async function statusRedeHandler(req: any, res: any) {
     if (!redeQuery || !redeQuery.trim()) {
       const activeChains = chains.filter((c) => c.active !== false);
       const results = activeChains.map((c) =>
-        calculateChainStatus(c, records, campaigns, products, estadoQuery || undefined, diasLimite, baseUrl)
+        calculateChainStatus(c, records, campaigns, products, estadoQuery || undefined, diasLimite, baseUrl, usuarioQuery || undefined)
       );
 
       const totalComPesquisaPendente = results.filter((r) => r.precisa_pesquisa).length;
@@ -968,7 +973,8 @@ export default async function statusRedeHandler(req: any, res: any) {
       products,
       estadoQuery || undefined,
       diasLimite,
-      baseUrl
+      baseUrl,
+      usuarioQuery || undefined
     );
 
     return res.status(200).json({
