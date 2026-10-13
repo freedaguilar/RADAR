@@ -4584,7 +4584,6 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                   id="btn-return-to-soma"
                   onClick={() => {
                     notifyParentFinishResearch(completionData);
-                    handleFinishAndNavigateAway();
                   }}
                   className="w-full sm:flex-1 py-3.5 px-5 bg-[#D40511] hover:bg-[#b0040e] active:scale-[0.98] text-white rounded-xl text-xs sm:text-sm font-extrabold transition shadow-md flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider"
                 >
