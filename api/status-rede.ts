@@ -585,7 +585,7 @@ function calculateChainStatus(
         dias_sem_auditoria: item.diffDays,
         total_registros_rede: item.recordsCount,
         status_auditoria: "desatualizado",
-        status_descricao: `Sem auditoria há ${item.diffDays} dias (${item.recordsCount} coletas na rede)`,
+        status_descricao: `${item.diffDays} dias sem auditoria`,
         pesquisador: lastRec.userName || latestRecord?.userName || undefined,
         imagem_url: prod.imageUrl,
         tipo: item.isProprietary ? "propria" : "concorrente",
@@ -632,10 +632,10 @@ function calculateChainStatus(
         const currentPrice = rec.price;
 
         const statusDesc = diffDays === 0
-          ? `Auditado hoje (${countInChain} ${countInChain === 1 ? 'coleta' : 'coletas'})`
+          ? `Auditado hoje`
           : diffDays === 1
-          ? `Auditado ontem (${countInChain} ${countInChain === 1 ? 'coleta' : 'coletas'})`
-          : `Auditado recentemente há ${diffDays} dias (${countInChain} ${countInChain === 1 ? 'coleta' : 'coletas'})`;
+          ? `Auditado ontem`
+          : `Auditado há ${diffDays} dias`;
 
         produtosVitrine.push({
           produto_id: matchedProd.id,
@@ -729,7 +729,7 @@ function calculateChainStatus(
       let statusAuditoria: "campanha_guiada" | "desatualizado" = item.isCampaignProd ? "campanha_guiada" : "desatualizado";
       let statusDesc = item.isCampaignProd
         ? `Item na Campanha Guiada (última coleta há ${item.diffDays} dias)`
-        : `Sem auditoria há ${item.diffDays} dias`;
+        : `${item.diffDays} dias sem auditoria`;
 
       produtosVitrine.push({
         produto_id: prod.id,
