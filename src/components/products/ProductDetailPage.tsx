@@ -31,7 +31,7 @@ import {
   Maximize2,
   Info,
 } from 'lucide-react';
-import { Product, Chain, PriceRecord, User, RESEARCH_STATES, getChainStates } from '../../types';
+import { Product, Chain, PriceRecord, User, RESEARCH_STATES, getChainStates, isDeveloperRole } from '../../types';
 import { normalizeString } from '../../lib/textUtils';
 
 interface ProductDetailPageProps {
@@ -522,7 +522,7 @@ export function ProductDetailPage({
               )}
             </button>
 
-            {onEditProduct && currentUser?.role === 'gestor' && (
+            {onEditProduct && isDeveloperRole(currentUser?.role) && (
               <button
                 type="button"
                 onClick={() => onEditProduct(product)}

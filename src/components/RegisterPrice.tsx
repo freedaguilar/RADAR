@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Camera, Image, CheckCircle2, AlertTriangle, Sparkles, Sliders, RefreshCw, XCircle, Loader2, Eye, ChevronRight, Trash2, Plus, Info, Layers, Check, FastForward, RotateCcw, Package, PackageX, ChevronsRight, Tag, AlertCircle, Store, MapPin, Clock, Calendar, ArrowRight, ArrowLeft, UserCheck, ClipboardCheck, ListOrdered, Target, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from '../types';
+import { Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates, isDeveloperRole } from '../types';
 import { supabase, uploadToSupabaseStorage, recordAiCorrection } from '../lib/supabase';
 import { normalizeString, searchAndRankProducts, safeParseJSON, serializePendingMeta, parsePriceRecordMeta, serializeSessionMeta, stripSessionMetaPrefix, getCleanObserverNotes, ResearchSessionMeta } from '../lib/textUtils';
 import { findCustomTraditionalQueue, isStateMatch } from '../lib/traditionalQueue';
@@ -1054,7 +1054,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         date: todayStr,
         imageUrl: finalImageUrl || '',
         notes: finalNotes,
-        userName: currentUser?.name || 'Vendedor Autônomo',
+        userName: currentUser?.name || 'Usuário',
         userEmail: currentUser?.email || 'vendas@radar.com',
         state: selectedState,
       };
@@ -1137,7 +1137,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         date: todayStr,
         imageUrl: finalImageUrl || '',
         notes: finalNotes,
-        userName: currentUser?.name || 'Vendedor Autônomo',
+        userName: currentUser?.name || 'Usuário',
         userEmail: currentUser?.email || 'vendas@radar.com',
         state: selectedState,
       };
@@ -1545,7 +1545,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
               date: todayStr,
               imageUrl: updatedItem.imageUrl || '',
               notes: finalNotes,
-              userName: currentUser?.name || 'Vendedor Autônomo',
+              userName: currentUser?.name || 'Usuário',
               userEmail: currentUser?.email || 'vendas@radar.com',
               state: updatedItem.state || selectedState,
             };
@@ -1655,7 +1655,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
             date: todayStr,
             imageUrl: finalImageUrl || '',
             notes: finalNotes,
-            userName: currentUser?.name || 'Vendedor Autônomo',
+            userName: currentUser?.name || 'Usuário',
             userEmail: currentUser?.email || 'vendas@radar.com',
             state: selectedState,
           };
@@ -1788,7 +1788,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         date: todayStr,
         imageUrl: finalImageUrl || '',
         notes: finalNotes,
-        userName: currentUser?.name || 'Vendedor Autônomo',
+        userName: currentUser?.name || 'Usuário',
         userEmail: currentUser?.email || 'vendas@radar.com',
         state: selectedState,
       };
@@ -2004,7 +2004,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
             date: todayStr,
             imageUrl: item.imageUrl || '',
             notes: serializedNotes || undefined,
-            userName: currentUser?.name || 'Vendedor Autônomo',
+            userName: currentUser?.name || 'Usuário',
             userEmail: currentUser?.email || 'vendas@radar.com',
             state: item.state || selectedState,
           };
@@ -2024,7 +2024,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
             date: todayStr,
             imageUrl: finalImageUrl || undefined,
             notes: serializedNotes || undefined,
-            userName: currentUser?.name || 'Vendedor Autônomo',
+            userName: currentUser?.name || 'Usuário',
             userEmail: currentUser?.email || 'vendas@radar.com',
             state: item.state || selectedState,
           };
@@ -2157,7 +2157,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                 date: now.toISOString().split('T')[0],
                 imageUrl: item.imageUrl || '',
                 notes: updatedNotes,
-                userName: currentUser?.name || 'Vendedor Autônomo',
+                userName: currentUser?.name || 'Usuário',
                 userEmail: currentUser?.email || 'vendas@radar.com',
                 state: item.state || selectedState,
               });
@@ -2722,7 +2722,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
         date: todayStr,
         imageUrl: finalImageUrl,
         notes: finalNotes || undefined,
-        userName: currentUser?.name || 'Vendedor Autônomo',
+        userName: currentUser?.name || 'Usuário',
         userEmail: currentUser?.email || 'vendas@radar.com'
       };
 
@@ -2870,7 +2870,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
               Consolidamos <strong>{savedLaterCount} produto(s)</strong> pesquisados com sucesso. Os preços e fotos foram registrados no sistema.
               {currentUser?.isGuest && (
                 <span className="block mt-1 text-emerald-950 font-bold">
-                  Seus registros foram enviados e estão disponíveis para auditoria na conta de um gestor.
+                  Seus registros foram enviados e estão disponíveis para auditoria na conta de um desenvolvedor.
                 </span>
               )}
             </p>
@@ -3192,7 +3192,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                           </p>
                         </div>
                       </div>
-                      {currentUser?.role === 'gestor' && onNavigate && (
+                      {isDeveloperRole(currentUser?.role) && onNavigate && (
                         <button
                           type="button"
                           onClick={() => onNavigate('settings')}
@@ -4564,7 +4564,7 @@ export function RegisterPrice({ products, chains, records = [], guidedCampaigns 
                   {completionData?.isGuest ? (
                     <>
                       Pesquisa finalizada por <strong className="text-slate-800">{completionData?.researcherName || 'Pesquisador'}</strong>. 
-                      Os dados foram gravados e serão auditados por um gestor posteriormente.
+                      Os dados foram gravados e serão auditados por um desenvolvedor posteriormente.
                     </>
                   ) : (
                     <>

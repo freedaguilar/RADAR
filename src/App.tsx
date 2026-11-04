@@ -13,7 +13,7 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue } from "./types";
+import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, getRoleDisplayName, isDeveloperRole } from "./types";
 import { getInitialState, saveStateToLocalStorage } from "./mockData";
 import { useSupabaseSync } from "./lib/useSupabaseSync";
 import { supabase } from "./lib/supabase";
@@ -994,9 +994,9 @@ export default function App() {
     }
   }, [state.currentUser?.isGuest, activeTab]);
 
-  // Redireciona usuários não-gestores caso tentem acessar a aba de auditoria
+  // Redireciona usuários não-desenvolvedores caso tentem acessar a aba de auditoria
   useEffect(() => {
-    if (state.currentUser && state.currentUser.role !== "gestor" && activeTab === "auditoria") {
+    if (state.currentUser && !isDeveloperRole(state.currentUser.role) && activeTab === "auditoria") {
       setActiveTab("dashboard");
     }
   }, [state.currentUser, activeTab]);
@@ -1016,7 +1016,7 @@ export default function App() {
       }
 
       if (page === "auditoria") {
-        if (state.currentUser?.role !== "gestor") return;
+        if (!isDeveloperRole(state.currentUser?.role)) return;
         setActiveTab("auditoria");
         if (params && params.recordId) {
           setSelectedAuditRecordId(params.recordId);
@@ -1212,9 +1212,9 @@ export default function App() {
   }
 
   const isGuest = Boolean(state.currentUser?.isGuest);
-  const isGestor = state.currentUser?.role === "gestor";
+  const isGestor = isDeveloperRole(state.currentUser?.role);
 
-  // Menu items are strictly exclusive to registered managers/gestores (and allowed staff), hidden completely for guests
+  // Menu items are strictly exclusive to registered developers (and allowed staff), hidden completely for guests
   const menuItems = isGuest
     ? []
     : [
@@ -1224,7 +1224,7 @@ export default function App() {
         { id: "auditoria", label: "Auditoria", icon: FileCheck2 },
         { id: "settings", label: "Configurações", icon: SettingsIcon },
       ].filter((item) => {
-        // Auditoria: estritamente exclusiva para gestores (oculta para promotor, vendedor e outros)
+        // Auditoria: estritamente exclusiva para desenvolvedores (oculta para promotores, usuários e convidados)
         if (item.id === "auditoria" && !isGestor) {
           return false;
         }
@@ -1283,14 +1283,10 @@ export default function App() {
                   <p className="text-xs font-bold text-slate-900 truncate">
                     {state.currentUser.name}
                   </p>
-                  <p className="text-[10px] text-slate-500 font-medium capitalize truncate">
+                  <p className="text-[10px] text-slate-500 font-medium truncate">
                     {state.currentUser.isGuest
                       ? "Acesso Convidado"
-                      : state.currentUser.role === "gestor"
-                      ? "Gestor / Administrador"
-                      : state.currentUser.role === "promotor"
-                      ? "Promotor"
-                      : "Vendedor / Campo"}
+                      : getRoleDisplayName(state.currentUser.role)}
                   </p>
                 </div>
               </div>
@@ -1549,12 +1545,8 @@ export default function App() {
                       {state.currentUser.name}
                     </p>
                   </div>
-                  <p className="text-[10px] text-gray-500 truncate lowercase">
-                    {state.currentUser.role === "gestor"
-                      ? "Gestor/Administrador"
-                      : state.currentUser.role === "promotor"
-                      ? "Promotor"
-                      : "Vendedor / Campo"}
+                  <p className="text-[10px] text-gray-500 truncate">
+                    {getRoleDisplayName(state.currentUser.role)}
                   </p>
                 </div>
               </div>

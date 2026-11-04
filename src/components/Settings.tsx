@@ -24,7 +24,7 @@ import {
   User as UserIcon,
   Lock,
 } from "lucide-react";
-import { Product, Chain, User, GuidedCampaign, PriceRecord, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
+import { Product, Chain, User, GuidedCampaign, PriceRecord, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates, getRoleDisplayName, isDeveloperRole } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
 import { normalizeString } from "../lib/textUtils";
 import { GuidedCampaignsSettings } from "./GuidedCampaignsSettings";
@@ -171,9 +171,9 @@ export function Settings({
   onSaveCustomQueue = () => {},
   onResetCustomQueue = () => {},
 }: SettingsProps) {
-  const isGestor = currentUser?.role === "gestor";
+  const isGestor = isDeveloperRole(currentUser?.role);
 
-  // Navigation tabs inside Settings: gestores have full access; non-gestores are locked to profile
+  // Navigation tabs inside Settings: developers have full access; regular users are locked to profile
   const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns" | "traditional_queue" | "api_soma" | "profile">(
     isGestor ? "products" : "profile",
   );
@@ -955,11 +955,7 @@ export function Settings({
                 <div className="flex items-center gap-2 h-[42px] px-3.5 bg-slate-100/80 border border-slate-200 rounded-xl">
                   <Shield className="w-3.5 h-3.5 text-slate-400" />
                   <span className="text-xs font-bold text-slate-700 uppercase">
-                    {currentUser?.role === "gestor"
-                      ? "Gestor (Administrador)"
-                      : currentUser?.role === "promotor"
-                      ? "Promotor de Vendas"
-                      : "Vendedor / Auditor"}
+                    {getRoleDisplayName(currentUser?.role)}
                   </span>
                   <span className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
                     Ativo
@@ -1247,7 +1243,7 @@ export function Settings({
                     ) : (
                       <div className="flex items-center gap-1.5 text-slate-500 font-sans text-xs bg-slate-100/60 p-2 rounded-lg border border-slate-200">
                         <Shield className="w-4 h-4 text-slate-400" />
-                        <span>Edição restrita a Gestores.</span>
+                        <span>Edição restrita a Desenvolvedores.</span>
                       </div>
                     )}
                   </div>
@@ -1911,7 +1907,7 @@ export function Settings({
               ) : (
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-slate-700 flex items-center gap-2 text-xs font-sans">
                   <Shield className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span>Para segurança e integridade das redes e filiais, o cadastro de novas lojas é restrito a Gestores.</span>
+                  <span>Para segurança e integridade das redes e filiais, o cadastro de novas lojas é restrito a Desenvolvedores.</span>
                 </div>
               )}
 
@@ -2070,7 +2066,7 @@ export function Settings({
               {/* Creator Form */}
               <div className="border border-[#E0E0E0] rounded-xl p-4 bg-[#F5F5F5]/50">
                 <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-3">
-                  Cadastrar Novo Auditor / Gestor
+                  Cadastrar Novo Usuário / Desenvolvedor
                 </h4>
                 <form
                   onSubmit={handleCreateUserSubmit}
@@ -2109,7 +2105,7 @@ export function Settings({
 
                   <div>
                     <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1">
-                      Nível de Acesso (Perfil)
+                      Nível de Acesso (Cargo)
                     </label>
                     <select
                       id="new-user-role-select"
@@ -2120,10 +2116,10 @@ export function Settings({
                       className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
                     >
                       <option value="vendedor">
-                        Vendedor / Campo (Acesso total, exceto editar produtos e redes)
+                        Usuário (Acesso a pesquisas de preço e perfil)
                       </option>
                       <option value="gestor">
-                        Gestor / Administrador (Acesso total + cadastro e edição)
+                        Desenvolvedor (Acesso total + cadastro e edição)
                       </option>
                     </select>
                   </div>
@@ -2290,12 +2286,12 @@ export function Settings({
                         {/* Profile role badge */}
                         <span
                           className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase font-mono ${
-                            item.role === "gestor"
+                            isDeveloperRole(item.role)
                               ? "bg-amber-100 text-amber-800"
                               : "bg-blue-100 text-blue-800"
                           }`}
                         >
-                          {item.role === "gestor" ? "Gestor" : "Vendedor"}
+                          {getRoleDisplayName(item.role)}
                         </span>
 
                         <button

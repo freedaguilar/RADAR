@@ -87,11 +87,27 @@ export function getPriceRecordState(record: PriceRecord, chains?: Chain[]): stri
   return 'Minas Gerais';
 }
 
+export type UserRole = 'gestor' | 'vendedor' | 'promotor' | 'desenvolvedor' | 'usuario';
+
+export function getRoleDisplayName(role?: string): string {
+  if (!role) return 'Usuário';
+  const r = role.toLowerCase();
+  if (r === 'gestor' || r === 'desenvolvedor' || r === 'admin' || r === 'administrador') return 'Desenvolvedor';
+  if (r === 'promotor') return 'Promotor';
+  return 'Usuário';
+}
+
+export function isDeveloperRole(role?: string): boolean {
+  if (!role) return false;
+  const r = role.toLowerCase();
+  return r === 'gestor' || r === 'desenvolvedor' || r === 'admin' || r === 'administrador';
+}
+
 export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'gestor' | 'vendedor' | 'promotor';
+  role: UserRole;
   active: boolean;
   avatarUrl?: string;
   password?: string;

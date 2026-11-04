@@ -257,10 +257,10 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
       ...campaign,
       id: newId,
       title: `${campaign.title} (Cópia)`,
-      active: false, // Inicia pausada para o gestor ajustar rede/estado
+      active: false, // Inicia pausada para o desenvolvedor ajustar rede/estado
       createdAt: new Date().toISOString(),
       updatedAt: undefined,
-      createdBy: currentUser?.name || "Gestor",
+      createdBy: currentUser?.name || "Desenvolvedor",
     };
     onAddCampaign(duplicated);
     showFeedback("success", `Pesquisa duplicada com sucesso! Ajuste a rede ou estado conforme desejado.`);
@@ -541,7 +541,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
         createdBy:
           guidedCampaigns.find((c) => c.id === editingCampaignId)?.createdBy ||
           currentUser?.name ||
-          "Gestor",
+          "Desenvolvedor",
         notes: formNotes.trim() || undefined,
       };
       onUpdateCampaign(updated);
@@ -555,7 +555,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
         productIds: formProductIds,
         active: formActive,
         createdAt: new Date().toISOString(),
-        createdBy: currentUser?.name || "Gestor",
+        createdBy: currentUser?.name || "Desenvolvedor",
         notes: formNotes.trim() || undefined,
       };
       onAddCampaign(newCampaign);
@@ -683,7 +683,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                     </h4>
                   </div>
                   <p className="text-xs text-amber-900 mt-1 leading-relaxed">
-                    As pesquisas criadas estão salvas em cache local neste dispositivo. Para salvar e sincronizar entre todos os gestores e convidados, crie a tabela <code>guided_campaigns</code> no seu banco de dados Supabase.
+                    As pesquisas criadas estão salvas em cache local neste dispositivo. Para salvar e sincronizar entre todos os desenvolvedores e usuários, crie a tabela <code>guided_campaigns</code> no seu banco de dados Supabase.
                   </p>
                 </div>
               </div>
@@ -719,7 +719,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                     Banco de Dados Supabase Ativo &bull; Tabela <code>guided_campaigns</code>
                   </span>
                   <span className="text-[10px] text-emerald-700">
-                    {dbRowCount !== null ? `${dbRowCount} pesquisa(s) salva(s) no banco de dados.` : "Sincronização em tempo real ativa."} Todas as alterações de gestores e filas para convidados são gravadas na nuvem.
+                    {dbRowCount !== null ? `${dbRowCount} pesquisa(s) salva(s) no banco de dados.` : "Sincronização em tempo real ativa."} Todas as alterações de desenvolvedores e filas para usuários são gravadas na nuvem.
                   </span>
                 </div>
               </div>
@@ -982,7 +982,7 @@ CREATE POLICY "Allow public all on guided_campaigns" ON guided_campaigns FOR ALL
                     {/* Bottom Actions */}
                     <div className="mt-4 pt-3 border-t border-gray-100 flex items-center justify-between gap-2">
                       <span className="text-[9px] text-gray-400 font-mono">
-                        Criada por {camp.createdBy || "Gestor"}
+                        Criada por {camp.createdBy || "Desenvolvedor"}
                       </span>
 
                       <div className="flex items-center gap-1.5">
