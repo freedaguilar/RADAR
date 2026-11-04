@@ -247,7 +247,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS, pendingR
                   {pendingResearch.state ? ` em ${pendingResearch.state}` : ""}.
                 </p>
                 <p className="text-[11px] text-gray-500 mt-0.5">
-                  Basta entrar como <strong>Convidado</strong> (apenas seu nome) ou como <strong>Desenvolvedor</strong> para abrir a fila de preços imediatamente.
+                  Basta entrar como <strong>Convidado</strong> (apenas seu nome) ou como <strong>Usuário</strong> para abrir a fila de preços imediatamente.
                 </p>
               </div>
             </div>
@@ -288,7 +288,7 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS, pendingR
               }`}
             >
               <KeyRound className="w-3.5 h-3.5 text-[#D40511]" />
-              <span>Desenvolvedor</span>
+              <span>Usuário</span>
             </button>
           </div>
 
@@ -396,13 +396,13 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS, pendingR
           )}
 
           {/* ============================================================
-              TAB 2: CREDENTIALS LOGIN (Desenvolvedor - Email + Senha)
+              TAB 2: CREDENTIALS LOGIN (Usuário / Desenvolvedor - Email + Senha)
              ============================================================ */}
           {loginMode === 'credentials' && (
             <div>
               <div className="mb-4">
                 <h2 className="text-lg font-bold text-[#1A1A1A]">
-                  Acesso Desenvolvedor
+                  Acesso Usuário
                 </h2>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Insira seu e-mail corporativo e senha cadastrada
