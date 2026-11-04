@@ -36,7 +36,7 @@ import {
   Tag,
   ChevronRight,
 } from "lucide-react";
-import { Product, Chain, PriceRecord, User, RESEARCH_STATES, getPriceRecordState, getChainStates } from "../types";
+import { Product, Chain, PriceRecord, User, RESEARCH_STATES, getPriceRecordState, getChainStates, isChainInState } from "../types";
 import { normalizeString } from "../lib/textUtils";
 import { getOutdatedProducts } from "../lib/productUtils";
 import { ProductDetailPage } from "./products/ProductDetailPage";
@@ -72,7 +72,7 @@ function RetailerLogo({ chain, size = "md" }: { chain: Chain; size?: "sm" | "md"
 
   if (chain.logoUrl) {
     return (
-      <div className={`overflow-hidden border border-gray-200 shrink-0 bg-white flex items-center justify-center ${sizeClasses}`}>
+      <div className={`overflow-hidden border border-gray-200 shrink-0 bg-white flex items-center justify-center ${sizeClasses}`} title={chain.name}>
         <img src={chain.logoUrl} alt={chain.name} className="w-full h-full object-contain" referrerPolicy="no-referrer" />
       </div>
     );
@@ -124,6 +124,13 @@ export function Products({
   const [displayMode, setDisplayMode] = useState<"grid" | "list">("grid");
   const [productPhotoModal, setProductPhotoModal] = useState<{ url: string; name: string } | null>(null);
   const [showRegisterPriceModal, setShowRegisterPriceModal] = useState(false);
+  const [registerModalState, setRegisterModalState] = useState<string>("Minas Gerais");
+
+  // Redes filtradas pelo estado selecionado dentro do modal de registro de preço
+  const modalFilteredChains = useMemo(() => {
+    const targetState = registerModalState && registerModalState !== "Todas" ? registerModalState : "Minas Gerais";
+    return chains.filter((chain) => isChainInState(chain, targetState));
+  }, [chains, registerModalState]);
 
   // Edit Chain Price Modal state inside product detail
   const [editPriceModal, setEditPriceModal] = useState<{
@@ -578,6 +585,7 @@ export function Products({
   }, []);
 
   // Filters state
+  const [showMoreFilters, setShowMoreFilters] = useState(false);
   const [isOutdatedFilter, setIsOutdatedFilter] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("Todas");
@@ -589,9 +597,19 @@ export function Products({
     ("propria-oetker" | "propria-mavalerio" | "concorrentes")[]
   >(["propria-oetker", "propria-mavalerio", "concorrentes"]);
 
+  const extraFiltersCount = useMemo(() => {
+    let count = 0;
+    if (selectedBrandFilters.length < 3 && selectedBrandFilters.length > 0) count++;
+    if (selectedCategory !== "Todas") count++;
+    if (selectedSubcategory !== "Todas") count++;
+    if (selectedWeight !== "Todas") count++;
+    if (isOutdatedFilter) count++;
+    return count;
+  }, [selectedBrandFilters, selectedCategory, selectedSubcategory, selectedWeight, isOutdatedFilter]);
+
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState(25);
+  const [itemsPerPage, setItemsPerPage] = useState(24);
 
   // Sorting State
   const [sortBy, setSortBy] = useState("ultimo-preco");
@@ -818,67 +836,14 @@ export function Products({
     return Array.from(list);
   }, [products, selectedProduct]);
 
-  // Suggested configs map
-  const SUBCATEGORIES_BY_CATEGORY: Record<string, string[]> = {
-    Coberturas: ["Premium", "Confeiteiro"],
-    Gelatinas: ["Regular", "Zero", "Diet", "Fini"],
-    Fermentos: ["Fermento Químico", "Fermento em Pó"],
-    "Ingredientes de Confeitaria": ["Confeiteiro", "Premium", "Regular"],
-    "Sobremesas em Pó": ["Regular", "Zero", "Diet"],
-    "Chás e Infusões": ["Regular", "Premium"],
-    Congelados: ["Regular", "Premium"],
-    "Geral Retail": ["Regular", "Premium"],
-  };
-
-  // Categories list
-  const categories = useMemo(() => {
-    const list = new Set(products.map((p) => p.category));
-    // Make sure our major categories exist
+  // All categories list (for Create Product & Export modal)
+  const allCategories = useMemo(() => {
+    const list = new Set(products.filter((p) => p.active !== false).map((p) => p.category));
     list.add("Coberturas");
     list.add("Gelatinas");
     list.add("Fermentos");
     return ["Todas", ...Array.from(list)];
   }, [products]);
-
-  // Derived subcategories depending on the selected category
-  const subcategories = useMemo(() => {
-    const list = new Set<string>();
-    products.forEach((p) => {
-      if (selectedCategory === "Todas" || p.category === selectedCategory) {
-        if (p.subcategory) {
-          list.add(p.subcategory);
-        }
-      }
-    });
-    // Add default suggestions for UI if we are on a specific category
-    if (
-      selectedCategory !== "Todas" &&
-      SUBCATEGORIES_BY_CATEGORY[selectedCategory]
-    ) {
-      SUBCATEGORIES_BY_CATEGORY[selectedCategory].forEach((sub) =>
-        list.add(sub),
-      );
-    }
-    return ["Todas", ...Array.from(list)];
-  }, [products, selectedCategory]);
-
-  // Derived weights depending on the selected category and subcategory
-  const weights = useMemo(() => {
-    const list = new Set<string>();
-    products.forEach((p) => {
-      if (p.active && p.weight) {
-        if (selectedCategory === "Todas" || p.category === selectedCategory) {
-          if (
-            selectedSubcategory === "Todas" ||
-            p.subcategory === selectedSubcategory
-          ) {
-            list.add(p.weight);
-          }
-        }
-      }
-    });
-    return ["Todas", ...Array.from(list)];
-  }, [products, selectedCategory, selectedSubcategory]);
 
   // Price record history for selected product sorted by date
   const selectedProductHistory = useMemo(() => {
@@ -932,7 +897,11 @@ export function Products({
       return !!p.isCompetitor || (!isOetker && !isMav);
     }).length;
 
-    const outdatedList = getOutdatedProducts(products, effectiveRecords);
+    const scopedRecords =
+      selectedChainId === "Todas"
+        ? effectiveRecords
+        : effectiveRecords.filter((r) => r.chainId === selectedChainId);
+    const outdatedList = getOutdatedProducts(products, scopedRecords);
 
     return {
       total: activeProducts.length,
@@ -943,120 +912,266 @@ export function Products({
       outdatedIds: new Set(outdatedList.map((p) => p.id)),
       totalRecords: effectiveRecords.length,
     };
-  }, [products, effectiveRecords]);
+  }, [products, effectiveRecords, selectedChainId]);
 
-  // Filtered products list
-  const filteredProducts = useMemo(() => {
-    return products.filter((prod) => {
-      if (prod.active === false) return false;
+  const getProductBrandType = (
+    prod: Product
+  ): "propria-oetker" | "propria-mavalerio" | "concorrentes" => {
+    const brandNormalized = (prod.brand || "").toLowerCase().trim();
+    const isOetker = brandNormalized.includes("oetker");
+    const isMavalerio =
+      brandNormalized.includes("mavalerio") ||
+      brandNormalized.includes("mavalério");
+    if (!prod.isCompetitor && isOetker) return "propria-oetker";
+    if (!prod.isCompetitor && isMavalerio) return "propria-mavalerio";
+    return "concorrentes";
+  };
 
-      const searchTerms = (searchTerm || "").toLowerCase().trim().split(/\s+/).filter(Boolean).map(term => normalizeString(term));
-      const matchesSearch = searchTerms.every((term) => {
-        const nameMatch = normalizeString(prod.name).includes(term);
-        const categoryMatch = normalizeString(prod.category).includes(term);
-        const subcategoryMatch = prod.subcategory ? normalizeString(prod.subcategory).includes(term) : false;
-        const brandMatch = prod.brand ? normalizeString(prod.brand).includes(term) : false;
-        const weightMatch = prod.weight ? normalizeString(prod.weight).includes(term) : false;
-        const internalCodeMatch = prod.internalCode ? normalizeString(prod.internalCode).includes(term) : false;
-        return nameMatch || categoryMatch || subcategoryMatch || brandMatch || weightMatch || internalCodeMatch;
-      });
+  // Cross-filtering helper: returns products matching all active filters EXCEPT `excludeKey`
+  const getMatchingProductsExcluding = useMemo(() => {
+    const searchTerms = (searchTerm || "")
+      .toLowerCase()
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((term) => normalizeString(term));
 
-      const matchesCategory =
-        selectedCategory === "Todas" || prod.category === selectedCategory;
-      const matchesSubcategory =
-        selectedSubcategory === "Todas" ||
-        prod.subcategory === selectedSubcategory;
-
-      // Handle brand/competitor division
-      let matchesBrand = false;
+    return (
+      excludeKey:
+        | "chain"
+        | "state"
+        | "brand"
+        | "category"
+        | "subcategory"
+        | "weight"
+        | "status"
+        | "none"
+    ) => {
+      const checkChain = excludeKey !== "chain" && selectedChainId !== "Todas";
+      const checkState = excludeKey !== "state" && selectedState !== "Todas";
       const isAllBrands =
-        selectedBrandFilters.length === 3 ||
-        selectedBrandFilters.length === 0;
+        selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0;
+      const checkBrand = excludeKey !== "brand" && !isAllBrands;
+      const checkCategory =
+        excludeKey !== "category" && selectedCategory !== "Todas";
+      const checkSubcategory =
+        excludeKey !== "subcategory" && selectedSubcategory !== "Todas";
+      const checkWeight = excludeKey !== "weight" && selectedWeight !== "Todas";
+      const checkStatus = excludeKey !== "status" && isOutdatedFilter;
 
-      if (isAllBrands) {
-        matchesBrand = true;
-      } else {
-        const brandNormalized = (prod.brand || "").toLowerCase().trim();
-        const isOetker = brandNormalized.includes("oetker");
-        const isMavalerio =
-          brandNormalized.includes("mavalerio") ||
-          brandNormalized.includes("mavalério");
-        const isCompetitor =
-          !!prod.isCompetitor || (!isOetker && !isMavalerio);
-
-        if (
-          selectedBrandFilters.includes("propria-oetker") &&
-          isOetker &&
-          !prod.isCompetitor
-        ) {
-          matchesBrand = true;
-        }
-        if (
-          selectedBrandFilters.includes("propria-mavalerio") &&
-          isMavalerio &&
-          !prod.isCompetitor
-        ) {
-          matchesBrand = true;
-        }
-        if (
-          selectedBrandFilters.includes("concorrentes") &&
-          isCompetitor
-        ) {
-          matchesBrand = true;
-        }
+      // Pre-compute product IDs that satisfy the active chain/state record constraints
+      let validRecordProductIds: Set<string> | null = null;
+      if (checkChain || checkState) {
+        validRecordProductIds = new Set<string>();
+        records.forEach((r) => {
+          const rState = r.state || "Minas Gerais";
+          if (checkChain && r.chainId !== selectedChainId) return;
+          if (checkState && rState !== selectedState) return;
+          validRecordProductIds!.add(r.productId);
+        });
       }
 
-      // If a chain is selected, check if this product has at least one recorded price in that chain
-      let matchesChain = true;
-      if (selectedChainId !== "Todas") {
-        matchesChain = effectiveRecords.some(
-          (r) => r.productId === prod.id && r.chainId === selectedChainId
-        );
-      }
+      return products.filter((prod) => {
+        if (prod.active === false) return false;
 
-      // If a specific state is selected, check if this product has at least one recorded price in that state
-      let matchesState = true;
-      if (selectedState !== "Todas") {
-        matchesState = effectiveRecords.some(
-          (r) =>
-            r.productId === prod.id &&
-            (r.state === selectedState ||
-              (!r.state && selectedState === "Minas Gerais"))
-        );
-      }
+        if (searchTerms.length > 0) {
+          const matchesSearch = searchTerms.every((term) => {
+            const nameMatch = normalizeString(prod.name).includes(term);
+            const categoryMatch = normalizeString(prod.category).includes(term);
+            const subcategoryMatch = prod.subcategory
+              ? normalizeString(prod.subcategory).includes(term)
+              : false;
+            const brandMatch = prod.brand
+              ? normalizeString(prod.brand).includes(term)
+              : false;
+            const weightMatch = prod.weight
+              ? normalizeString(prod.weight).includes(term)
+              : false;
+            const internalCodeMatch = prod.internalCode
+              ? normalizeString(prod.internalCode).includes(term)
+              : false;
+            return (
+              nameMatch ||
+              categoryMatch ||
+              subcategoryMatch ||
+              brandMatch ||
+              weightMatch ||
+              internalCodeMatch
+            );
+          });
+          if (!matchesSearch) return false;
+        }
 
-      // Weight filter logic
-      const matchesWeight =
-        selectedWeight === "Todas" || prod.weight === selectedWeight;
-      
-      const isOutdated = catalogMetrics.outdatedIds.has(prod.id);
-      const matchesOutdated = isOutdatedFilter ? isOutdated : true;
+        if (checkCategory && prod.category !== selectedCategory) return false;
+        if (checkSubcategory && prod.subcategory !== selectedSubcategory)
+          return false;
+        if (checkWeight && prod.weight !== selectedWeight) return false;
+        if (checkBrand && !selectedBrandFilters.includes(getProductBrandType(prod)))
+          return false;
+        if (checkStatus && !catalogMetrics.outdatedIds.has(prod.id)) return false;
+        if (validRecordProductIds && !validRecordProductIds.has(prod.id))
+          return false;
 
-      return (
-        matchesSearch &&
-        matchesCategory &&
-        matchesSubcategory &&
-        matchesChain &&
-        matchesState &&
-        matchesBrand &&
-        matchesWeight &&
-        matchesOutdated
-      );
-    });
+        return true;
+      });
+    };
   }, [
     products,
-    effectiveRecords,
+    records,
     searchTerm,
-    selectedCategory,
-    selectedSubcategory,
     selectedChainId,
     selectedState,
     selectedBrandFilters,
+    selectedCategory,
+    selectedSubcategory,
     selectedWeight,
-    latestPricePerChainMap,
     isOutdatedFilter,
-    catalogMetrics,
+    catalogMetrics.outdatedIds,
   ]);
+
+  // Smart Options: Redes (Chains)
+  const availableChains = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("chain");
+    const matchingIds = new Set(matchingProducts.map((p) => p.id));
+    const validChainIds = new Set<string>();
+    records.forEach((r) => {
+      if (!matchingIds.has(r.productId)) return;
+      const rState = r.state || "Minas Gerais";
+      if (selectedState !== "Todas" && rState !== selectedState) return;
+      validChainIds.add(r.chainId);
+    });
+    return chains.filter((c) => validChainIds.has(c.id));
+  }, [getMatchingProductsExcluding, records, selectedState, chains]);
+
+  // Smart Options: UFs (States)
+  const availableStates = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("state");
+    const matchingIds = new Set(matchingProducts.map((p) => p.id));
+    const validStates = new Set<string>();
+    records.forEach((r) => {
+      if (!matchingIds.has(r.productId)) return;
+      if (selectedChainId !== "Todas" && r.chainId !== selectedChainId) return;
+      validStates.add(r.state || "Minas Gerais");
+    });
+    return RESEARCH_STATES.filter((st) => validStates.has(st.name));
+  }, [getMatchingProductsExcluding, records, selectedChainId]);
+
+  // Smart Options: Marcas (Brands)
+  const availableBrandOptions = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("brand");
+    const presentBrands = new Set<string>();
+    matchingProducts.forEach((p) => {
+      presentBrands.add(getProductBrandType(p));
+    });
+    const allBrandDefs: {
+      id: "propria-oetker" | "propria-mavalerio" | "concorrentes";
+      label: string;
+    }[] = [
+      { id: "propria-oetker", label: "Dr. Oetker" },
+      { id: "propria-mavalerio", label: "Mavalério" },
+      { id: "concorrentes", label: "Concorrentes" },
+    ];
+    return allBrandDefs.filter((b) => presentBrands.has(b.id));
+  }, [getMatchingProductsExcluding]);
+
+  // Smart Options: Categorias
+  const categories = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("category");
+    const list = new Set<string>();
+    matchingProducts.forEach((p) => {
+      if (p.category) list.add(p.category);
+    });
+    const sorted = Array.from(list).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return ["Todas", ...sorted];
+  }, [getMatchingProductsExcluding]);
+
+  // Smart Options: Subcategorias
+  const subcategories = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("subcategory");
+    const list = new Set<string>();
+    matchingProducts.forEach((p) => {
+      if (p.subcategory) list.add(p.subcategory);
+    });
+    const sorted = Array.from(list).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return ["Todas", ...sorted];
+  }, [getMatchingProductsExcluding]);
+
+  // Smart Options: Pesos
+  const weights = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("weight");
+    const list = new Set<string>();
+    matchingProducts.forEach((p) => {
+      if (p.weight) list.add(p.weight);
+    });
+    return ["Todas", ...Array.from(list)];
+  }, [getMatchingProductsExcluding]);
+
+  // Smart Options: Status
+  const hasPendingOption = useMemo(() => {
+    const matchingProducts = getMatchingProductsExcluding("status");
+    return matchingProducts.some((p) => catalogMetrics.outdatedIds.has(p.id));
+  }, [getMatchingProductsExcluding, catalogMetrics.outdatedIds]);
+
+  // Auto-reset any filter whose value is no longer valid after cross-filter changes
+  useEffect(() => {
+    if (
+      selectedChainId !== "Todas" &&
+      !availableChains.some((c) => c.id === selectedChainId)
+    ) {
+      setSelectedChainId("Todas");
+    }
+    if (
+      selectedState !== "Todas" &&
+      !availableStates.some((st) => st.name === selectedState)
+    ) {
+      setSelectedState("Todas");
+    }
+    if (
+      selectedBrandFilters.length === 1 &&
+      !availableBrandOptions.some((b) => b.id === selectedBrandFilters[0])
+    ) {
+      setSelectedBrandFilters([
+        "propria-oetker",
+        "propria-mavalerio",
+        "concorrentes",
+      ]);
+    }
+    if (selectedCategory !== "Todas" && !categories.includes(selectedCategory)) {
+      setSelectedCategory("Todas");
+    }
+    if (
+      selectedSubcategory !== "Todas" &&
+      !subcategories.includes(selectedSubcategory)
+    ) {
+      setSelectedSubcategory("Todas");
+    }
+    if (selectedWeight !== "Todas" && !weights.includes(selectedWeight)) {
+      setSelectedWeight("Todas");
+    }
+    if (isOutdatedFilter && !hasPendingOption) {
+      setIsOutdatedFilter(false);
+    }
+  }, [
+    availableChains,
+    availableStates,
+    availableBrandOptions,
+    categories,
+    subcategories,
+    weights,
+    hasPendingOption,
+    selectedChainId,
+    selectedState,
+    selectedBrandFilters,
+    selectedCategory,
+    selectedSubcategory,
+    selectedWeight,
+    isOutdatedFilter,
+  ]);
+
+  // Filtered products list
+  const filteredProducts = useMemo(() => {
+    return getMatchingProductsExcluding("none");
+  }, [getMatchingProductsExcluding]);
 
   // Sort mappings
   const productLatestRecordMap = useMemo(() => {
@@ -1352,7 +1467,7 @@ export function Products({
   const handleStartCreateProduct = () => {
     setIsOutdatedFilter(false);
     setNewProdName("");
-    setNewProdCategory(categories.find(c => c !== "Todas") || "Geral Retail");
+    setNewProdCategory(allCategories.find(c => c !== "Todas") || "Geral Retail");
     setNewProdSubcategory("Regular");
     setNewProdWeight("100g");
     setNewProdImageUrl("");
@@ -1402,410 +1517,16 @@ export function Products({
     <div className="space-y-6" id="products-view">
       {activeView === "list" && (
         <>
-          {/* Top Banner and Actions */}
+          {/* Filtering Widgets Card (All-in-One) */}
           <div
-            className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-200 pb-5"
-            id="products-header"
-          >
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-[11px] font-bold tracking-widest text-[#D40511] uppercase font-mono">
-                  Portfólio & Gôndola
-                </span>
-                <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
-                <span className="text-[11px] font-semibold text-slate-500 font-mono">
-                  {catalogMetrics.total} SKUs Monitorados
-                </span>
-              </div>
-              <h1 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight font-sans">
-                Produtos Cadastrados
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-2xl">
-                Acompanhe o portfólio de produtos próprios e concorrentes, histórico de auditoria de campo e dispersão de preços no varejo.
-              </p>
-            </div>
-
-            {/* Actions: + Novo Produto and Exportar Excel */}
-            <div className="flex items-center gap-2.5 self-start lg:self-center shrink-0">
-              <button
-                id="create-product-btn"
-                type="button"
-                onClick={handleStartCreateProduct}
-                className="flex items-center gap-2 bg-[#D40511] hover:bg-[#b0040e] text-white px-4 py-2.5 rounded-xl font-bold shadow-xs hover:shadow-md transition-all text-xs sm:text-sm cursor-pointer select-none font-sans"
-              >
-                <Plus className="w-4 h-4 text-white" />
-                <span>Novo Produto</span>
-              </button>
-
-              <button
-                id="export-excel-btn"
-                type="button"
-                onClick={() => {
-                  setExportChainIds(["Todas"]);
-                  setExportCategories(["Todas"]);
-                  setExportBrandTypes(["propria-oetker", "propria-mavalerio", "concorrentes"]);
-                  setExportIncludeHistory(false);
-                  setShowExportModal(true);
-                }}
-                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold shadow-xs hover:shadow-md transition-all text-xs sm:text-sm cursor-pointer select-none font-sans"
-              >
-                <Download className="w-4 h-4 text-white" />
-                <span>Exportar Preços (Excel)</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Quick Metrics Ribbon */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5" id="products-kpi-ribbon">
-            {/* KPI 1: Total */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block font-mono">
-                  Portfólio Total
-                </span>
-                <span className="text-2xl font-black text-slate-900 font-mono tracking-tight tabular-nums">
-                  {catalogMetrics.total}
-                </span>
-                <span className="text-xs text-slate-500 block mt-0.5 font-sans">
-                  Itens cadastrados
-                </span>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
-                <Package className="w-5 h-5" />
-              </div>
-            </div>
-
-            {/* KPI 2: Own Brands */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 block font-mono">
-                  Marcas Próprias
-                </span>
-                <span className="text-2xl font-black text-emerald-800 font-mono tracking-tight tabular-nums">
-                  {catalogMetrics.oetker + catalogMetrics.mavalerio}
-                </span>
-                <span className="text-xs text-slate-500 block mt-0.5 truncate font-sans">
-                  {catalogMetrics.oetker} Dr. Oetker · {catalogMetrics.mavalerio} Mavalério
-                </span>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200/60 flex items-center justify-center text-emerald-700 shrink-0">
-                <Store className="w-5 h-5" />
-              </div>
-            </div>
-
-            {/* KPI 3: Competitors */}
-            <div className="bg-white rounded-2xl border border-slate-200/90 p-4 shadow-2xs flex items-center justify-between">
-              <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block font-mono">
-                  Concorrência
-                </span>
-                <span className="text-2xl font-black text-slate-800 font-mono tracking-tight tabular-nums">
-                  {catalogMetrics.competitors}
-                </span>
-                <span className="text-xs text-slate-500 block mt-0.5 font-sans">
-                  SKUs rivais monitorados
-                </span>
-              </div>
-              <div className="w-10 h-10 rounded-xl bg-blue-50 border border-blue-200/60 flex items-center justify-center text-blue-700 shrink-0">
-                <Layers className="w-5 h-5" />
-              </div>
-            </div>
-
-            {/* KPI 4: Audit Status */}
-            <div className={`rounded-2xl border p-4 shadow-2xs flex items-center justify-between transition-colors ${
-              catalogMetrics.outdatedCount > 0 
-                ? "bg-amber-50/50 border-amber-200" 
-                : "bg-white border-slate-200/90"
-            }`}>
-              <div className="min-w-0 pr-2">
-                <span className={`text-[10px] font-bold uppercase tracking-wider block font-mono ${
-                  catalogMetrics.outdatedCount > 0 ? "text-amber-800" : "text-emerald-700"
-                }`}>
-                  Auditorias ({catalogMetrics.totalRecords})
-                </span>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <span className={`text-xl sm:text-2xl font-black font-mono tracking-tight tabular-nums ${
-                    catalogMetrics.outdatedCount > 0 ? "text-amber-900" : "text-emerald-800"
-                  }`}>
-                    {catalogMetrics.outdatedCount > 0 ? `${catalogMetrics.outdatedCount} pendentes` : "100% em dia"}
-                  </span>
-                </div>
-                {catalogMetrics.outdatedCount > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsOutdatedFilter(!isOutdatedFilter)}
-                    className="text-[11px] font-bold text-amber-800 hover:text-amber-950 underline cursor-pointer mt-0.5 block"
-                  >
-                    {isOutdatedFilter ? "Mostrar todos" : "Filtrar pendentes (>15d)"}
-                  </button>
-                ) : (
-                  <span className="text-xs text-slate-500 block mt-0.5 font-sans">
-                    Preços recentes no radar
-                  </span>
-                )}
-              </div>
-              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-                catalogMetrics.outdatedCount > 0 
-                  ? "bg-amber-100 text-amber-800" 
-                  : "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
-              }`}>
-                {catalogMetrics.outdatedCount > 0 ? (
-                  <AlertTriangle className="w-5 h-5" />
-                ) : (
-                  <CheckCircle2 className="w-5 h-5" />
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* Brand Tabs container + View Mode Toggle container */}
-          <div
-            className="flex flex-col lg:flex-row lg:items-center justify-between gap-3.5 mt-1 mb-2 w-full"
-            id="brand-filters-and-modes-container"
-          >
-            {/* Brand Segmented Controls */}
-            <div
-              className="flex flex-wrap bg-slate-100/80 p-1.5 rounded-2xl border border-slate-200/80 gap-1 w-full lg:w-auto shadow-2xs"
-              id="brand-tabs-container"
-            >
-              <button
-                id="brand-tab-todos"
-                type="button"
-                onClick={() => {
-                  setSelectedBrandFilters([
-                    "propria-oetker",
-                    "propria-mavalerio",
-                    "concorrentes",
-                  ]);
-                }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
-                  selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0
-                    ? "bg-white text-slate-900 shadow-xs border border-slate-200"
-                    : "text-slate-600 hover:text-slate-900"
-                }`}
-              >
-                Todos ({catalogMetrics.total})
-              </button>
-              <button
-                id="brand-tab-propria"
-                type="button"
-                onClick={() => {
-                  if (selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0) {
-                    setSelectedBrandFilters(["propria-oetker"]);
-                  } else if (
-                    selectedBrandFilters.length === 1 &&
-                    selectedBrandFilters.includes("propria-oetker")
-                  ) {
-                    setSelectedBrandFilters([
-                      "propria-oetker",
-                      "propria-mavalerio",
-                      "concorrentes",
-                    ]);
-                  } else if (selectedBrandFilters.includes("propria-oetker")) {
-                    setSelectedBrandFilters(
-                      selectedBrandFilters.filter(
-                        (f) => f !== "propria-oetker",
-                      ),
-                    );
-                  } else {
-                    setSelectedBrandFilters([
-                      ...selectedBrandFilters,
-                      "propria-oetker",
-                    ]);
-                  }
-                }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3
-                    ? "bg-emerald-700 text-white shadow-xs"
-                    : "text-emerald-800 hover:bg-emerald-50"
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    selectedBrandFilters.includes("propria-oetker") && selectedBrandFilters.length < 3 
-                      ? "bg-emerald-300" 
-                      : "bg-emerald-500"
-                  }`}
-                />
-                <span className="truncate">
-                  Dr. Oetker ({catalogMetrics.oetker})
-                </span>
-              </button>
-              <button
-                id="brand-tab-propria-mavalerio"
-                type="button"
-                onClick={() => {
-                  if (selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0) {
-                    setSelectedBrandFilters(["propria-mavalerio"]);
-                  } else if (
-                    selectedBrandFilters.length === 1 &&
-                    selectedBrandFilters.includes("propria-mavalerio")
-                  ) {
-                    setSelectedBrandFilters([
-                      "propria-oetker",
-                      "propria-mavalerio",
-                      "concorrentes",
-                    ]);
-                  } else if (selectedBrandFilters.includes("propria-mavalerio")) {
-                    setSelectedBrandFilters(
-                      selectedBrandFilters.filter(
-                        (f) => f !== "propria-mavalerio",
-                      ),
-                    );
-                  } else {
-                    setSelectedBrandFilters([
-                      ...selectedBrandFilters,
-                      "propria-mavalerio",
-                    ]);
-                  }
-                }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3
-                    ? "bg-violet-700 text-white shadow-xs"
-                    : "text-violet-800 hover:bg-violet-50"
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    selectedBrandFilters.includes("propria-mavalerio") && selectedBrandFilters.length < 3 
-                      ? "bg-violet-300" 
-                      : "bg-violet-500"
-                  }`}
-                />
-                <span className="truncate">
-                  Mavalério ({catalogMetrics.mavalerio})
-                </span>
-              </button>
-              <button
-                id="brand-tab-concorrentes"
-                type="button"
-                onClick={() => {
-                  if (selectedBrandFilters.length === 3 || selectedBrandFilters.length === 0) {
-                    setSelectedBrandFilters(["concorrentes"]);
-                  } else if (
-                    selectedBrandFilters.length === 1 &&
-                    selectedBrandFilters.includes("concorrentes")
-                  ) {
-                    setSelectedBrandFilters([
-                      "propria-oetker",
-                      "propria-mavalerio",
-                      "concorrentes",
-                    ]);
-                  } else if (selectedBrandFilters.includes("concorrentes")) {
-                    setSelectedBrandFilters(
-                      selectedBrandFilters.filter((f) => f !== "concorrentes"),
-                    );
-                  } else {
-                    setSelectedBrandFilters([
-                      ...selectedBrandFilters,
-                      "concorrentes",
-                    ]);
-                  }
-                }}
-                className={`flex-1 sm:flex-none justify-center px-3.5 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 cursor-pointer ${
-                  selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3
-                    ? "bg-slate-900 text-white shadow-xs"
-                    : "text-slate-700 hover:bg-slate-200/60"
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full shrink-0 ${
-                    selectedBrandFilters.includes("concorrentes") && selectedBrandFilters.length < 3 
-                      ? "bg-blue-400" 
-                      : "bg-slate-500"
-                  }`}
-                />
-                <span className="truncate">
-                  Concorrentes ({catalogMetrics.competitors})
-                </span>
-              </button>
-            </div>
-
-            {/* View Mode Switcher + Outdated Quick Toggle + Sorter */}
-            <div className="flex flex-wrap items-center gap-2.5" id="sorting-and-view-toggles">
-              {/* Outdated Quick Pill */}
-              {catalogMetrics.outdatedCount > 0 && (
-                <button
-                  type="button"
-                  onClick={() => setIsOutdatedFilter(!isOutdatedFilter)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none shadow-2xs ${
-                    isOutdatedFilter
-                      ? "bg-amber-500 text-white border-amber-600 shadow-xs"
-                      : "bg-white text-amber-800 border-amber-300 hover:bg-amber-50"
-                  }`}
-                >
-                  <Clock className="w-3.5 h-3.5 shrink-0" />
-                  <span>Pendentes ({catalogMetrics.outdatedCount})</span>
-                </button>
-              )}
-
-              {/* View Mode Switcher: Grid vs List */}
-              <div
-                className="flex bg-slate-100/80 p-1 rounded-xl border border-slate-200/80 gap-1 shrink-0 select-none shadow-2xs"
-                id="view-mode-toggle"
-              >
-                <button
-                  id="toggle-grid-mode"
-                  type="button"
-                  onClick={() => setDisplayMode("grid")}
-                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
-                    displayMode === "grid"
-                      ? "bg-white text-[#D40511] shadow-xs border border-slate-200/60"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                  title="Visualização em Grade"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                  <span>Grade</span>
-                </button>
-                <button
-                  id="toggle-list-mode"
-                  type="button"
-                  onClick={() => setDisplayMode("list")}
-                  className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer text-xs font-bold ${
-                    displayMode === "list"
-                      ? "bg-white text-[#D40511] shadow-xs border border-slate-200/60"
-                      : "text-slate-600 hover:text-slate-900"
-                  }`}
-                  title="Visualização em Tabela / Lista"
-                >
-                  <List className="w-3.5 h-3.5" />
-                  <span>Lista</span>
-                </button>
-              </div>
-
-              {/* Sorting Select Filter */}
-              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs select-none" id="sorting-filter-wrapper">
-                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="text-[10px] text-slate-400 uppercase font-bold whitespace-nowrap tracking-wide">
-                  Ordenar:
-                </span>
-                <select
-                  id="product-sort-select"
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
-                  className="bg-transparent border-0 text-xs font-bold text-slate-800 focus:outline-none cursor-pointer p-0 pr-1"
-                >
-                  {sortingOptions.map((opt) => (
-                    <option key={opt.id} value={opt.id} className="font-medium text-slate-800 bg-white">
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Filtering Widgets Card */}
-          <div
-            className="bg-white p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3"
+            className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 shadow-2xs space-y-3"
             id="filters-container"
           >
-            {/* Top row of filters */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-12 gap-3">
-              {/* Search Input with Clear Button */}
+            {/* Primary row: Search (maior espaço) + Rede + UF + Filtros + Ordenar + Grade/Lista + Exportar */}
+            <div className="flex flex-col lg:flex-row lg:items-center gap-2.5">
+              {/* Search Input with Clear Button - Ocupa o maior espaço */}
               <div
-                className="relative w-full sm:col-span-2 lg:col-span-1 xl:col-span-3"
+                className="relative w-full lg:flex-1 min-w-0"
                 id="search-input-wrapper"
               >
                 <input
@@ -1829,110 +1550,247 @@ export function Products({
                 )}
               </div>
 
-              {/* Category Select Filter */}
-              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="category-filter-wrapper">
-                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
-                  Categoria:
-                </span>
-                <select
-                  id="product-category-filter-select"
-                  value={selectedCategory}
-                  onChange={(e) => {
-                    setSelectedCategory(e.target.value);
-                    setSelectedSubcategory("Todas");
-                    setSelectedWeight("Todas");
-                  }}
-                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
-                >
-                  {categories.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Rede + UF + Ações (Filtros, Ordenar, Exportar) */}
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full lg:w-auto shrink-0">
+                {/* Retail Chain Filter */}
+                <div className="flex items-center gap-1.5 w-[calc(50%-4px)] sm:w-auto sm:flex-1 lg:flex-none lg:w-36 xl:w-44 min-w-0" id="chain-filter-wrapper">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    Rede:
+                  </span>
+                  <select
+                    id="product-chain-filter-select"
+                    value={selectedChainId}
+                    onChange={(e) => setSelectedChainId(e.target.value)}
+                    className="w-full flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    <option value="Todas">Todas</option>
+                    {availableChains.map((chain) => (
+                      <option key={chain.id} value={chain.id}>
+                        {chain.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Subcategory Select Filter */}
-              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="subcategory-filter-wrapper">
-                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
-                  Subcat:
-                </span>
-                <select
-                  id="product-subcategory-filter-select"
-                  value={selectedSubcategory}
-                  onChange={(e) => {
-                    setSelectedSubcategory(e.target.value);
-                    setSelectedWeight("Todas");
-                  }}
-                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
-                >
-                  {subcategories.map((sub) => (
-                    <option key={sub} value={sub}>
-                      {sub}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {/* Regional State Filter */}
+                <div className="flex items-center gap-1.5 w-[calc(50%-4px)] sm:w-auto sm:flex-1 lg:flex-none lg:w-32 xl:w-40 min-w-0" id="state-filter-wrapper">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    UF:
+                  </span>
+                  <select
+                    id="product-state-filter-select"
+                    value={selectedState}
+                    onChange={(e) => setSelectedState(e.target.value)}
+                    className="w-full flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    <option value="Todas">Todos</option>
+                    {availableStates.map((st) => (
+                      <option key={st.name} value={st.name}>
+                        {st.uf} - {st.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Weight Select Filter */}
-              <div className="flex items-center gap-2 xl:col-span-1 min-w-0" id="weight-filter-wrapper">
-                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
-                  Peso:
-                </span>
-                <select
-                  id="product-weight-filter-select"
-                  value={selectedWeight}
-                  onChange={(e) => setSelectedWeight(e.target.value)}
-                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
-                >
-                  {weights.map((w) => (
-                    <option key={w} value={w}>
-                      {w === "Todas" ? "Todas" : w}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {/* Toolbar Buttons: Filtros + Ordenar + Exportar */}
+                <div className="flex items-center justify-between sm:justify-end gap-1.5 w-full sm:w-auto shrink-0">
+                  {/* Expandable Filters Button */}
+                  <button
+                    id="toggle-more-filters-btn"
+                    type="button"
+                    onClick={() => setShowMoreFilters((prev) => !prev)}
+                    className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-bold transition-all cursor-pointer select-none shrink-0 ${
+                      showMoreFilters || extraFiltersCount > 0
+                        ? "bg-[#D40511]/10 text-[#D40511] border-[#D40511]/30 shadow-2xs"
+                        : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    <Filter className="w-3.5 h-3.5 shrink-0" />
+                    <span>Filtros</span>
+                    {extraFiltersCount > 0 && (
+                      <span className="px-1.5 py-0.2 rounded-full bg-[#D40511] text-white text-[10px] font-mono font-bold">
+                        {extraFiltersCount}
+                      </span>
+                    )}
+                    {showMoreFilters ? (
+                      <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+                    )}
+                  </button>
 
-              {/* Retail Chain Filter */}
-              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="chain-filter-wrapper">
-                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
-                  Rede:
-                </span>
-                <select
-                  id="product-chain-filter-select"
-                  value={selectedChainId}
-                  onChange={(e) => setSelectedChainId(e.target.value)}
-                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
-                >
-                  <option value="Todas">Todas as Redes</option>
-                  {chains.map((chain) => (
-                    <option key={chain.id} value={chain.id}>
-                      {chain.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  {/* Sorting Select Filter (Ao lado do botão Filtros) */}
+                  <div
+                    className="relative flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 px-3 py-2 rounded-xl border border-slate-200 select-none shrink-0 cursor-pointer transition-colors"
+                    id="sorting-filter-wrapper"
+                    title="Ordenar produtos"
+                  >
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="text-xs font-bold text-slate-700 whitespace-nowrap">
+                      Ordenar
+                    </span>
+                    <select
+                      id="product-sort-select"
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value)}
+                      aria-label="Ordenar produtos"
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    >
+                      {sortingOptions.map((opt) => (
+                        <option key={opt.id} value={opt.id} className="font-medium text-slate-800 bg-white">
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
 
-              {/* Regional State Filter */}
-              <div className="flex items-center gap-2 xl:col-span-2 min-w-0" id="state-filter-wrapper">
-                <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
-                  Estado:
-                </span>
-                <select
-                  id="product-state-filter-select"
-                  value={selectedState}
-                  onChange={(e) => setSelectedState(e.target.value)}
-                  className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer"
-                >
-                  <option value="Todas">Todos Estados</option>
-                  {RESEARCH_STATES.map((st) => (
-                    <option key={st.name} value={st.name}>
-                      {st.uf} - {st.name}
-                    </option>
-                  ))}
-                </select>
+                  {/* Exportar Preços Button */}
+                  <button
+                    id="export-excel-btn"
+                    type="button"
+                    onClick={() => {
+                      setExportChainIds(["Todas"]);
+                      setExportCategories(["Todas"]);
+                      setExportBrandTypes(["propria-oetker", "propria-mavalerio", "concorrentes"]);
+                      setExportIncludeHistory(false);
+                      setShowExportModal(true);
+                    }}
+                    className="flex items-center gap-1.5 bg-emerald-50/70 hover:bg-emerald-100/80 text-emerald-700 px-3 py-2 rounded-xl border border-emerald-200 hover:border-emerald-300 transition-all text-xs font-bold cursor-pointer select-none whitespace-nowrap shrink-0"
+                    title="Exportar Preços (Excel)"
+                  >
+                    <Download className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span>Exportar</span>
+                  </button>
+                </div>
               </div>
             </div>
+
+            {/* Expandable Secondary Filters: Marca, Categoria, Subcategoria, Peso, Status */}
+            {showMoreFilters && (
+              <div
+                className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3 animate-fade-in"
+                id="expanded-filters-row"
+              >
+                {/* Brand Select Filter */}
+                <div className="flex items-center gap-2 min-w-0" id="brand-filter-wrapper">
+                  <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    Marca:
+                  </span>
+                  <select
+                    id="product-brand-filter-select"
+                    value={
+                      selectedBrandFilters.length === 1
+                        ? selectedBrandFilters[0]
+                        : "Todas"
+                    }
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "Todas") {
+                        setSelectedBrandFilters([
+                          "propria-oetker",
+                          "propria-mavalerio",
+                          "concorrentes",
+                        ]);
+                      } else {
+                        setSelectedBrandFilters([
+                          val as "propria-oetker" | "propria-mavalerio" | "concorrentes",
+                        ]);
+                      }
+                    }}
+                    className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    <option value="Todas">Todas</option>
+                    {availableBrandOptions.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Category Select Filter */}
+                <div className="flex items-center gap-2 min-w-0" id="category-filter-wrapper">
+                  <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    Categoria:
+                  </span>
+                  <select
+                    id="product-category-filter-select"
+                    value={selectedCategory}
+                    onChange={(e) => {
+                      setSelectedCategory(e.target.value);
+                      setSelectedSubcategory("Todas");
+                      setSelectedWeight("Todas");
+                    }}
+                    className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    {categories.map((cat) => (
+                      <option key={cat} value={cat}>
+                        {cat}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Subcategory Select Filter */}
+                <div className="flex items-center gap-2 min-w-0" id="subcategory-filter-wrapper">
+                  <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    Subcat:
+                  </span>
+                  <select
+                    id="product-subcategory-filter-select"
+                    value={selectedSubcategory}
+                    onChange={(e) => {
+                      setSelectedSubcategory(e.target.value);
+                      setSelectedWeight("Todas");
+                    }}
+                    className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    {subcategories.map((sub) => (
+                      <option key={sub} value={sub}>
+                        {sub}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Weight Select Filter */}
+                <div className="flex items-center gap-2 min-w-0" id="weight-filter-wrapper">
+                  <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    Peso:
+                  </span>
+                  <select
+                    id="product-weight-filter-select"
+                    value={selectedWeight}
+                    onChange={(e) => setSelectedWeight(e.target.value)}
+                    className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    {weights.map((w) => (
+                      <option key={w} value={w}>
+                        {w === "Todas" ? "Todas" : w}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Status Select Filter (Substitui o botão de Pendentes) */}
+                <div className="flex items-center gap-2 min-w-0" id="status-filter-wrapper">
+                  <span className="text-[11px] text-slate-400 uppercase font-bold whitespace-nowrap shrink-0">
+                    Status:
+                  </span>
+                  <select
+                    id="product-status-filter-select"
+                    value={isOutdatedFilter ? "pendentes" : "atualizados"}
+                    onChange={(e) => setIsOutdatedFilter(e.target.value === "pendentes")}
+                    className="w-full flex-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 text-xs text-slate-800 font-semibold focus:outline-none focus:border-[#D40511] cursor-pointer truncate"
+                  >
+                    <option value="atualizados">Atualizados</option>
+                    {hasPendingOption && (
+                      <option value="pendentes">Pendentes</option>
+                    )}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* Active Filters Row */}
             {activeFiltersCount > 0 && (
@@ -1946,6 +1804,26 @@ export function Products({
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
                       Busca: "{searchTerm}"
                       <button type="button" onClick={() => setSearchTerm("")} className="hover:text-red-600 cursor-pointer">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+
+                  {selectedBrandFilters.length < 3 && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
+                      Marca:{" "}
+                      {selectedBrandFilters.length === 1
+                        ? selectedBrandFilters[0] === "propria-oetker"
+                          ? "Dr. Oetker"
+                          : selectedBrandFilters[0] === "propria-mavalerio"
+                            ? "Mavalério"
+                            : "Concorrentes"
+                        : `${selectedBrandFilters.length} selecionadas`}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedBrandFilters(["propria-oetker", "propria-mavalerio", "concorrentes"])}
+                        className="hover:text-red-600 cursor-pointer"
+                      >
                         <X className="w-3 h-3" />
                       </button>
                     </span>
@@ -1998,21 +1876,8 @@ export function Products({
 
                   {isOutdatedFilter && (
                     <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-bold border border-amber-300">
-                      Apenas Pendentes (&gt;15d)
+                      Status: Pendentes
                       <button type="button" onClick={() => setIsOutdatedFilter(false)} className="hover:text-red-600 cursor-pointer">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  )}
-
-                  {selectedBrandFilters.length < 3 && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[11px] font-medium border border-slate-200">
-                      Marcas Filtradas ({selectedBrandFilters.length})
-                      <button
-                        type="button"
-                        onClick={() => setSelectedBrandFilters(["propria-oetker", "propria-mavalerio", "concorrentes"])}
-                        className="hover:text-red-600 cursor-pointer"
-                      >
                         <X className="w-3 h-3" />
                       </button>
                     </span>
@@ -2140,9 +2005,9 @@ export function Products({
                       </div>
 
                       {/* Price Hero Section */}
-                      <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3 my-3">
+                      <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-2.5 sm:p-3 my-3">
                         <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1">
-                          <span>
+                          <span className="truncate">
                             {selectedChainId === "Todas" ? "Último Preço Auditado" : "Preço Nesta Rede"}
                           </span>
                           {(() => {
@@ -2152,16 +2017,15 @@ export function Products({
                                 ? chains.find((c) => c.id === selectedChainId)
                                 : null;
                             return recordChain ? (
-                              <div className="flex items-center gap-1 text-slate-600 font-sans font-semibold">
+                              <div className="flex items-center text-slate-600 font-sans font-semibold shrink-0 ml-1" title={recordChain.name}>
                                 <RetailerLogo chain={recordChain} size="sm" />
-                                <span className="truncate max-w-[90px]">{recordChain.name.split(" ")[0]}</span>
                               </div>
                             ) : null;
                           })()}
                         </div>
 
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-2xl font-black text-slate-900 font-mono tracking-tight group-hover:text-[#D40511] transition-colors tabular-nums">
+                        <div className="flex items-center justify-between gap-1.5 flex-nowrap">
+                          <span className="text-lg sm:text-xl font-black text-slate-900 font-mono tracking-tight group-hover:text-[#D40511] transition-colors tabular-nums whitespace-nowrap shrink-0">
                             R$ {currentPrice.toFixed(2).replace('.', ',')}
                           </span>
 
@@ -2175,21 +2039,21 @@ export function Products({
 
                             if (deviationStatus === "below") {
                               return (
-                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                                  <TrendingDown className="w-3 h-3 text-emerald-600" />
+                                <span className="inline-flex items-center gap-0.5 text-[9px] xl:text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded-full border border-emerald-200 whitespace-nowrap shrink-0">
+                                  <TrendingDown className="w-2.5 h-2.5 text-emerald-600 shrink-0" />
                                   Abaixo méd.
                                 </span>
                               );
                             } else if (deviationStatus === "above") {
                               return (
-                                <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-rose-800 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-200">
-                                  <TrendingUp className="w-3 h-3 text-rose-600" />
+                                <span className="inline-flex items-center gap-0.5 text-[9px] xl:text-[10px] font-bold text-rose-800 bg-rose-50 px-1.5 py-0.5 rounded-full border border-rose-200 whitespace-nowrap shrink-0">
+                                  <TrendingUp className="w-2.5 h-2.5 text-rose-600 shrink-0" />
                                   Acima méd.
                                 </span>
                               );
                             } else {
                               return (
-                                <span className="inline-flex items-center text-[10px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                                <span className="inline-flex items-center text-[9px] xl:text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded-full border border-slate-200 whitespace-nowrap shrink-0">
                                   Na média
                                 </span>
                               );
@@ -2638,7 +2502,11 @@ export function Products({
             setActiveView("list");
             setSelectedProductId(null);
           }}
-          onRegisterPrice={() => {
+          onRegisterPrice={(initialState) => {
+            const chosen = (initialState && initialState !== "Todas")
+              ? initialState
+              : (selectedState !== "Todas" ? selectedState : "Minas Gerais");
+            setRegisterModalState(chosen);
             setShowRegisterPriceModal(true);
           }}
           onEditProduct={(prod) => {
@@ -3014,113 +2882,165 @@ export function Products({
         <div
           id="product-register-price-modal-backdrop"
           onClick={() => setShowRegisterPriceModal(false)}
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 cursor-pointer"
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
         >
           <div
-            className="bg-white rounded-3xl max-w-lg w-full border border-gray-150 overflow-hidden shadow-2xl relative cursor-default"
+            className="bg-white rounded-2xl sm:rounded-3xl max-w-lg w-full max-h-[calc(100dvh-1.5rem)] sm:max-h-[calc(100dvh-2.5rem)] border border-gray-150 overflow-hidden shadow-2xl relative cursor-default flex flex-col my-auto"
             onClick={(e) => e.stopPropagation()}
             id="product-register-price-modal-card"
           >
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-[#F5F5F5]">
-              <div className="flex items-center gap-2.5">
-                <div className="bg-[#D40511] text-white p-2 rounded-xl">
+            <div className="px-5 py-3.5 sm:px-6 sm:py-4 border-b border-gray-100 flex justify-between items-center bg-[#F5F5F5] shrink-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="bg-[#D40511] text-white p-2 rounded-xl shrink-0">
                   <Camera className="w-5 h-5 text-white" />
                 </div>
-                <div>
-                  <h3 className="text-xs font-extrabold text-[#1A1A1A] font-sans uppercase tracking-wider">
+                <div className="min-w-0">
+                  <h3 className="text-xs font-extrabold text-[#1A1A1A] font-sans uppercase tracking-wider truncate">
                     Registrar Preço Coletado
                   </h3>
-                  <p className="text-[10px] text-gray-505 mt-0.5 font-sans font-semibold">
-                    Selecione a rede de auditoria para prosseguir com a foto do comprovante.
+                  <p className="text-[10px] text-gray-500 mt-0.5 font-sans font-semibold truncate">
+                    Selecione a UF e a rede para prosseguir com o registro.
                   </p>
                 </div>
               </div>
               <button
                 id="close-register-price-modal-btn"
                 onClick={() => setShowRegisterPriceModal(false)}
-                className="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 cursor-pointer"
+                className="text-gray-400 hover:text-gray-600 text-2xl font-bold p-1 cursor-pointer shrink-0 ml-2 leading-none"
               >
                 &times;
               </button>
             </div>
 
-            {/* Grid of registered networks */}
-            <div className="p-6 space-y-4 max-h-[385px] overflow-y-auto">
+            {/* Content Container - Scrollable */}
+            <div className="p-4 sm:p-6 space-y-4 flex-1 overflow-y-auto min-h-0">
+              {/* Produto Selecionado */}
               <div>
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-sans mb-1.5">
                   Produto Selecionado
                 </p>
-                <div className="p-3 bg-red-50/20 border border-red-100 rounded-xl flex items-center gap-2.5">
+                <div className="p-2.5 sm:p-3 bg-red-50/20 border border-red-100 rounded-xl flex items-center gap-2.5">
                   {selectedProduct.imageUrl && (
                     <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="w-8 h-8 rounded-lg object-contain bg-white border border-gray-100 shrink-0" />
                   )}
-                  <div>
-                    <p className="text-[10px] font-extrabold text-slate-800 leading-snug">{selectedProduct.name}</p>
-                    <p className="text-[9px] text-slate-400 font-medium">Categoria: {selectedProduct.category} / Base: R$ {selectedProduct.basePrice.toFixed(2)}</p>
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-extrabold text-slate-800 leading-snug truncate">{selectedProduct.name}</p>
+                    <p className="text-[9px] text-slate-400 font-medium truncate">Categoria: {selectedProduct.category} / Base: R$ {selectedProduct.basePrice.toFixed(2)}</p>
                   </div>
                 </div>
               </div>
 
+              {/* 1. Selecionar Estado (Apenas botões com siglas) */}
               <div className="space-y-2">
-                <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-sans">
-                  Selecione a Rede (PDV)
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {chains.map((chain) => {
-                    // find latest price record for this chain to show last registered price if any
-                    const latestRec = selectedProductHistory
-                      .filter((h) => h.chainId === chain.id)
-                      .sort((a, b) => b.date.localeCompare(a.date))[0];
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-sans flex items-center gap-1.5 shrink-0">
+                    <MapPin className="w-3.5 h-3.5 text-[#D40511]" />
+                    Selecione o Estado
+                  </p>
+                  <span className="text-[10px] font-bold text-[#D40511] bg-red-50 border border-red-200/80 px-2 py-0.5 rounded-lg truncate">
+                    {RESEARCH_STATES.find(s => s.name === registerModalState)?.name || registerModalState} ({RESEARCH_STATES.find(s => s.name === registerModalState)?.uf || registerModalState})
+                  </span>
+                </div>
 
+                {/* Grade de Siglas dos Estados */}
+                <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                  {RESEARCH_STATES.map((st) => {
+                    const isSelected = registerModalState === st.name;
                     return (
                       <button
-                        key={chain.id}
+                        key={st.uf}
                         type="button"
-                        onClick={() => {
-                          setShowRegisterPriceModal(false);
-                          onNavigate?.('registrar', {
-                            productId: selectedProduct.id,
-                            chainId: chain.id,
-                            skipToStep: 3, // skips step 1 & 2 and directly goes to product and price confirmation
-                          });
-                        }}
-                        className="p-3 bg-slate-50 border border-slate-200 hover:border-[#D40511] hover:bg-red-50/5 rounded-xl transition duration-150 flex items-center justify-between text-left cursor-pointer group shadow-2xs h-14"
+                        id={`register-modal-state-${st.uf.toLowerCase()}`}
+                        onClick={() => setRegisterModalState(st.name)}
+                        className={`py-2 px-1 rounded-xl text-xs font-black transition-all cursor-pointer flex flex-col items-center justify-center text-center ${
+                          isSelected
+                            ? "bg-[#D40511] text-white shadow-sm ring-2 ring-red-500/20 scale-[1.02]"
+                            : "bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80"
+                        }`}
+                        title={`${st.name} (${st.region})`}
                       >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span
-                            style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
-                            className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-white text-[9px] shrink-0 overflow-hidden border border-gray-100 shadow-2xs ${
-                              chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
-                            }`}
-                          >
-                            {chain.logoUrl ? (
-                              <img
-                                src={chain.logoUrl}
-                                alt={chain.name}
-                                className="w-full h-full object-contain p-0.5 bg-white"
-                                referrerPolicy="no-referrer"
-                              />
-                            ) : (
-                              <span>{chain.name.substring(0, 2).toUpperCase()}</span>
-                            )}
-                          </span>
-                          <div className="min-w-0">
-                            <p className="text-[10px] font-bold text-slate-800 leading-snug truncate group-hover:text-[#D40511]">
-                              {chain.name}
-                            </p>
-                            <p className="text-[9px] text-slate-400 font-mono font-medium mt-0.5">
-                              {latestRec ? `Último: R$ ${latestRec.price.toFixed(2)}` : 'Sem histórico'}
-                            </p>
-                          </div>
-                        </div>
-                        <span className="text-[#D40511] font-bold text-[10px] group-hover:translate-x-0.5 transition-transform shrink-0">
-                          &rarr;
-                        </span>
+                        <span className="leading-none">{st.uf}</span>
                       </button>
                     );
                   })}
                 </div>
+              </div>
+
+              {/* 2. Selecionar Rede (PDV) */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400 font-sans flex items-center gap-1.5">
+                    <Store className="w-3.5 h-3.5 text-slate-500" />
+                    Selecione a Rede (PDV)
+                  </p>
+                  <span className="text-[9px] font-mono text-slate-400 font-medium">
+                    {modalFilteredChains.length} {modalFilteredChains.length === 1 ? 'rede' : 'redes'}
+                  </span>
+                </div>
+
+                {modalFilteredChains.length === 0 ? (
+                  <div className="p-4 text-center rounded-xl border border-dashed border-slate-200 bg-slate-50 text-slate-400 text-xs font-medium">
+                    Nenhuma rede cadastrada para {registerModalState}.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {modalFilteredChains.map((chain) => {
+                      // find latest price record for this chain in selected state
+                      const latestRec = selectedProductHistory
+                        .filter((h) => h.chainId === chain.id && (h.state || "Minas Gerais") === registerModalState)
+                        .sort((a, b) => b.date.localeCompare(a.date))[0];
+
+                      return (
+                        <button
+                          key={chain.id}
+                          type="button"
+                          onClick={() => {
+                            setShowRegisterPriceModal(false);
+                            onNavigate?.('registrar', {
+                              productId: selectedProduct.id,
+                              chainId: chain.id,
+                              state: registerModalState,
+                              skipToStep: 3, // skips step 1 & 2 and directly goes to product and price confirmation
+                            });
+                          }}
+                          className="p-2.5 sm:p-3 bg-slate-50 border border-slate-200 hover:border-[#D40511] hover:bg-red-50/5 rounded-xl transition duration-150 flex items-center justify-between text-left cursor-pointer group shadow-2xs h-14"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span
+                              style={chain.logoColor?.startsWith("#") ? { backgroundColor: chain.logoColor } : {}}
+                              className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-white text-[9px] shrink-0 overflow-hidden border border-gray-100 shadow-2xs ${
+                                chain.logoColor?.startsWith("#") ? "" : (chain.logoColor || "bg-gray-400")
+                              }`}
+                            >
+                              {chain.logoUrl ? (
+                                <img
+                                  src={chain.logoUrl}
+                                  alt={chain.name}
+                                  className="w-full h-full object-contain p-0.5 bg-white"
+                                  referrerPolicy="no-referrer"
+                                />
+                              ) : (
+                                <span>{chain.name.substring(0, 2).toUpperCase()}</span>
+                              )}
+                            </span>
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold text-slate-800 leading-snug truncate group-hover:text-[#D40511]">
+                                {chain.name}
+                              </p>
+                              <p className="text-[9px] text-slate-400 font-mono font-medium mt-0.5 truncate">
+                                {latestRec ? `Último: R$ ${latestRec.price.toFixed(2)}` : 'Sem histórico'}
+                              </p>
+                            </div>
+                          </div>
+                          <span className="text-[#D40511] font-bold text-[10px] group-hover:translate-x-0.5 transition-transform shrink-0">
+                            &rarr;
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -3291,7 +3211,7 @@ export function Products({
                     <span className="text-xs font-extrabold text-slate-800">Todas as Categorias</span>
                   </label>
 
-                  {categories
+                  {allCategories
                     .filter((cat) => cat !== "Todas")
                     .map((cat) => (
                       <label

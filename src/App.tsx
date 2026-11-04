@@ -994,6 +994,13 @@ export default function App() {
     }
   }, [state.currentUser?.isGuest, activeTab]);
 
+  // Redireciona usuários não-gestores caso tentem acessar a aba de auditoria
+  useEffect(() => {
+    if (state.currentUser && state.currentUser.role !== "gestor" && activeTab === "auditoria") {
+      setActiveTab("dashboard");
+    }
+  }, [state.currentUser, activeTab]);
+
   // Quick navigation with deep parameters support (e.g. going directly to view photo)
   const handleNavigate = useCallback(
     (page: string, params?: any) => {
@@ -1009,7 +1016,7 @@ export default function App() {
       }
 
       if (page === "auditoria") {
-        if (state.currentUser?.role === "promotor") return;
+        if (state.currentUser?.role !== "gestor") return;
         setActiveTab("auditoria");
         if (params && params.recordId) {
           setSelectedAuditRecordId(params.recordId);
@@ -1033,9 +1040,7 @@ export default function App() {
       } else if (page === "dashboard") {
         setActiveTab("dashboard");
       } else if (page === "configuracoes" || page === "settings") {
-        if (state.currentUser?.role === "gestor") {
-          setActiveTab("settings");
-        }
+        setActiveTab("settings");
       }
     },
     [state.currentUser],
@@ -1219,8 +1224,9 @@ export default function App() {
         { id: "auditoria", label: "Auditoria", icon: FileCheck2 },
         { id: "settings", label: "Configurações", icon: SettingsIcon },
       ].filter((item) => {
-        if (state.currentUser?.role === "promotor") {
-          return item.id !== "auditoria" && item.id !== "settings";
+        // Auditoria: estritamente exclusiva para gestores (oculta para promotor, vendedor e outros)
+        if (item.id === "auditoria" && !isGestor) {
+          return false;
         }
         return true;
       });
@@ -1710,7 +1716,7 @@ export default function App() {
           />
         )}
 
-        {activeTab === "settings" && isGestor && (
+        {activeTab === "settings" && (
           <Settings
             products={state.products}
             chains={state.chains}

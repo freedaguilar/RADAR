@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Settings as SettingsIcon,
   Package,
@@ -15,13 +15,14 @@ import {
   ChevronLeft,
   Upload,
   Loader2,
-  LogOut,
   KeyRound,
   Eye,
   EyeOff,
   Target,
   ListOrdered,
   Globe,
+  User as UserIcon,
+  Lock,
 } from "lucide-react";
 import { Product, Chain, User, GuidedCampaign, PriceRecord, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
@@ -170,9 +171,11 @@ export function Settings({
   onSaveCustomQueue = () => {},
   onResetCustomQueue = () => {},
 }: SettingsProps) {
-  // Navigation tabs inside Settings
-  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns" | "traditional_queue" | "api_soma">(
-    "products",
+  const isGestor = currentUser?.role === "gestor";
+
+  // Navigation tabs inside Settings: gestores have full access; non-gestores are locked to profile
+  const [activeTab, setActiveTab] = useState<"products" | "chains" | "users" | "campaigns" | "traditional_queue" | "api_soma" | "profile">(
+    isGestor ? "products" : "profile",
   );
 
   // Native product editing/creating view: 'list' | 'create' | 'edit'
@@ -248,6 +251,24 @@ export function Settings({
     weight?: boolean;
     isCompetitor?: boolean;
   }>({});
+
+  // Estados para edição do próprio perfil do usuário logado
+  const [profileName, setProfileName] = useState(() => currentUser?.name || "");
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState(() => currentUser?.avatarUrl || "");
+  const [profilePassword, setProfilePassword] = useState("");
+  const [showProfilePassword, setShowProfilePassword] = useState(false);
+  const [isUploadingProfileAvatar, setIsUploadingProfileAvatar] = useState(false);
+  const [profileAvatarDragActive, setProfileAvatarDragActive] = useState(false);
+  const [profileFormError, setProfileFormError] = useState("");
+  const [profileFormSuccess, setProfileFormSuccess] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  useEffect(() => {
+    if (currentUser) {
+      setProfileName(currentUser.name || "");
+      setProfileAvatarUrl(currentUser.avatarUrl || "");
+    }
+  }, [currentUser]);
 
   React.useEffect(() => {
     if (productView !== "create" && productView !== "edit") return;
@@ -684,73 +705,337 @@ export function Settings({
     triggerSuccessMsg("Usuário cadastrado com sucesso!");
   };
 
-  return (
-    <div className="space-y-6" id="settings-view">
-      {/* Settings Title & Compact Active Session */}
-      <div className="border-b border-[#E0E0E0] pb-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4" id="settings-header">
+  const handleProfileAvatarFile = async (file: File) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setProfileFormError("Por favor, selecione um arquivo de imagem válido.");
+      return;
+    }
+    setProfileFormError("");
+    setIsUploadingProfileAvatar(true);
+    try {
+      const url = await uploadToSupabaseStorage(file, "images", "avatars/colaboradores");
+      setProfileAvatarUrl(url);
+      setProfileFormSuccess("Foto carregada com sucesso!");
+      setTimeout(() => setProfileFormSuccess(""), 4000);
+    } catch (err) {
+      console.error("Erro ao subir avatar:", err);
+      // Fallback base64
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          setProfileAvatarUrl(e.target.result as string);
+        }
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsUploadingProfileAvatar(false);
+    }
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileFormError("");
+    setProfileFormSuccess("");
+
+    if (!currentUser) return;
+    if (!profileName.trim()) {
+      setProfileFormError("O nome completo não pode ficar em branco.");
+      return;
+    }
+
+    if (profilePassword.trim() && profilePassword.trim().length < 3) {
+      setProfileFormError("A nova senha deve ter no mínimo 3 caracteres.");
+      return;
+    }
+
+    setIsSavingProfile(true);
+    try {
+      const updatedUser: User = {
+        ...currentUser,
+        name: profileName.trim(),
+        avatarUrl: profileAvatarUrl.trim() || undefined,
+        ...(profilePassword.trim() ? { password: profilePassword.trim() } : {}),
+      };
+
+      if (onUpdateUser) {
+        await onUpdateUser(updatedUser);
+      }
+
+      setProfilePassword("");
+      setProfileFormSuccess("Seus dados foram atualizados com sucesso!");
+      triggerSuccessMsg("Seus dados foram atualizados com sucesso!");
+      setTimeout(() => setProfileFormSuccess(""), 5000);
+    } catch (err) {
+      console.error("Erro ao salvar dados do usuário:", err);
+      setProfileFormError("Ocorreu um erro ao atualizar seus dados. Tente novamente.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  };
+
+  const renderProfilePanel = () => {
+    const initials = (profileName || currentUser?.name || "US")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0])
+      .join("")
+      .toUpperCase();
+
+    return (
+      <div className="space-y-6 max-w-3xl" id="profile-settings-panel">
         <div>
-          <span className="text-xs font-semibold tracking-wider text-gray-500 uppercase font-mono">
-            Painel de Gerenciamento do Gestor
+          <span className="text-xs font-semibold tracking-wider text-gray-400 uppercase font-mono">
+            Meu Perfil
           </span>
-          <h1 className="text-2xl sm:text-3xl font-black text-[#1A1A1A] font-sans">
-            Configurações do PriceHub
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-500 mt-1">
-            Gerencie o catálogo de produtos ativos, credencie redes do varejo, configure pesquisas guiadas e ajuste filas.
+          <h2 className="text-xl font-black text-[#1A1A1A] font-sans mt-0.5">
+            Configuração do Usuário
+          </h2>
+          <p className="text-xs text-gray-500 mt-1">
+            Aqui você pode editar seus dados de perfil, atualizar sua foto e alterar sua senha de acesso.
           </p>
         </div>
 
-        {/* Compact Active Session Info (Top Right) */}
-        {currentUser && onLogout && (
-          <div className="flex items-center gap-3 bg-white border border-[#E0E0E0] p-2 sm:px-3 sm:py-2 rounded-2xl shadow-2xs self-start md:self-auto shrink-0" id="settings-session-container">
-            <span className="w-9 h-9 rounded-xl bg-[#D40511] text-white flex items-center justify-center font-bold text-xs uppercase shrink-0 overflow-hidden shadow-2xs">
-              {currentUser.avatarUrl &&
-              (currentUser.avatarUrl.startsWith("http") ||
-                currentUser.avatarUrl.startsWith("data:")) ? (
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.name}
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                currentUser.avatarUrl ||
-                currentUser.name.substring(0, 2).toUpperCase()
-              )}
-            </span>
-            <div className="min-w-0 pr-1">
-              <div className="flex items-center gap-1.5">
-                <p className="text-xs font-bold text-[#1A1A1A] truncate max-w-[140px] sm:max-w-[180px]">
-                  {currentUser.name}
-                </p>
-                <span
-                  className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded uppercase ${
-                    currentUser.isGuest
-                      ? "bg-amber-100 text-amber-900"
-                      : currentUser.role === "gestor"
-                      ? "bg-purple-100 text-purple-800"
-                      : "bg-blue-100 text-blue-800"
-                  }`}
-                >
-                  {currentUser.isGuest ? "Convidado" : currentUser.role}
-                </span>
-              </div>
-              <p className="text-[10px] text-gray-400 truncate font-mono max-w-[160px] sm:max-w-[200px]">
-                {currentUser.email}
-              </p>
-            </div>
-            <button
-              type="button"
-              id="settings-logout-btn"
-              onClick={onLogout}
-              className="p-2 text-gray-400 hover:text-[#D40511] hover:bg-red-50 rounded-xl transition cursor-pointer"
-              title="Sair da Conta Atual"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
+        {profileFormSuccess && (
+          <div className="p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-semibold flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{profileFormSuccess}</span>
           </div>
         )}
+
+        {profileFormError && (
+          <div className="p-3.5 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-semibold flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <span>{profileFormError}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSaveProfile} className="space-y-6">
+          {/* Foto de Perfil */}
+          <div className="bg-slate-50 border border-slate-200/90 rounded-2xl p-4 sm:p-5">
+            <label className="block text-xs font-extrabold uppercase tracking-wider text-slate-600 font-sans mb-3">
+              Foto de Perfil
+            </label>
+
+            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
+              {/* Avatar Preview */}
+              <div className="relative group shrink-0">
+                <div className="w-24 h-24 rounded-2xl bg-[#D40511] text-white flex items-center justify-center font-black text-2xl uppercase overflow-hidden shadow-md border-2 border-white ring-2 ring-slate-200">
+                  {profileAvatarUrl &&
+                  (profileAvatarUrl.startsWith("http") || profileAvatarUrl.startsWith("data:")) ? (
+                    <img
+                      src={profileAvatarUrl}
+                      alt={profileName || "Avatar"}
+                      className="w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span>{initials}</span>
+                  )}
+                </div>
+
+                {isUploadingProfileAvatar && (
+                  <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-white animate-spin" />
+                  </div>
+                )}
+              </div>
+
+              {/* Upload Controls */}
+              <div className="flex-1 w-full space-y-3">
+                <div
+                  onDragEnter={(e) => { e.preventDefault(); setProfileAvatarDragActive(true); }}
+                  onDragLeave={(e) => { e.preventDefault(); setProfileAvatarDragActive(false); }}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setProfileAvatarDragActive(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                      handleProfileAvatarFile(e.dataTransfer.files[0]);
+                    }
+                  }}
+                  className={`border-2 border-dashed rounded-xl p-3.5 text-center transition-all ${
+                    profileAvatarDragActive
+                      ? "border-[#D40511] bg-red-50/50"
+                      : "border-slate-300 hover:border-slate-400 bg-white"
+                  }`}
+                >
+                  <p className="text-xs text-slate-600 font-medium">
+                    Arraste sua foto aqui ou selecione um arquivo do computador
+                  </p>
+                  <label
+                    htmlFor="profile-avatar-file-input"
+                    className="inline-flex items-center gap-1.5 mt-2 px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-bold cursor-pointer transition"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>Escolher Foto</span>
+                  </label>
+                  <input
+                    id="profile-avatar-file-input"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        handleProfileAvatarFile(e.target.files[0]);
+                      }
+                    }}
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Formatos aceitos: JPG, PNG, WEBP (máx. 5MB)
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Ou cole a URL direta da imagem..."
+                    value={profileAvatarUrl}
+                    onChange={(e) => setProfileAvatarUrl(e.target.value)}
+                    className="flex-1 text-xs px-3 py-2 bg-white border border-slate-200 rounded-xl outline-none focus:border-[#D40511] transition"
+                  />
+                  {profileAvatarUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setProfileAvatarUrl("")}
+                      className="px-2.5 py-2 text-xs font-bold text-red-600 hover:bg-red-50 rounded-xl transition cursor-pointer"
+                    >
+                      Remover
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Dados Pessoais */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-4">
+            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-500 font-sans border-b border-slate-100 pb-2">
+              Identificação & Acesso
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Nome */}
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Nome Completo <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={profileName}
+                  onChange={(e) => setProfileName(e.target.value)}
+                  placeholder="Ex: João da Silva"
+                  className="w-full text-xs font-medium px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-[#D40511] focus:ring-1 focus:ring-red-500/10 transition"
+                />
+              </div>
+
+              {/* Email (Readonly) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  E-mail de Login
+                </label>
+                <input
+                  type="email"
+                  disabled
+                  value={currentUser?.email || ""}
+                  className="w-full text-xs font-mono font-medium px-3.5 py-2.5 bg-slate-100/80 border border-slate-200 rounded-xl text-slate-500 cursor-not-allowed"
+                />
+                <span className="text-[10px] text-slate-400 mt-1 block">
+                  O e-mail é vinculado à sua conta institucional.
+                </span>
+              </div>
+
+              {/* Função / Role (Readonly) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Função no Sistema
+                </label>
+                <div className="flex items-center gap-2 h-[42px] px-3.5 bg-slate-100/80 border border-slate-200 rounded-xl">
+                  <Shield className="w-3.5 h-3.5 text-slate-400" />
+                  <span className="text-xs font-bold text-slate-700 uppercase">
+                    {currentUser?.role === "gestor"
+                      ? "Gestor (Administrador)"
+                      : currentUser?.role === "promotor"
+                      ? "Promotor de Vendas"
+                      : "Vendedor / Auditor"}
+                  </span>
+                  <span className="ml-auto text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                    Ativo
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Alteração de Senha */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 space-y-3">
+            <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+              <KeyRound className="w-4 h-4 text-amber-600" />
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-700 font-sans">
+                Segurança & Senha de Acesso
+              </h3>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Nova Senha
+              </label>
+              <div className="relative">
+                <input
+                  type={showProfilePassword ? "text" : "password"}
+                  value={profilePassword}
+                  onChange={(e) => setProfilePassword(e.target.value)}
+                  placeholder="Digite uma nova senha (ou deixe vazio para manter a atual)"
+                  className="w-full text-xs font-medium pl-3.5 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-[#D40511] focus:ring-1 focus:ring-red-500/10 transition"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowProfilePassword(!showProfilePassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  {showProfilePassword ? (
+                    <EyeOff className="w-4 h-4" />
+                  ) : (
+                    <Eye className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-400 mt-1">
+                Preencha apenas caso deseje alterar sua senha. Mínimo de 3 caracteres.
+              </p>
+            </div>
+          </div>
+
+          {/* Botão de Salvar */}
+          <div className="pt-2 flex items-center justify-end gap-3">
+            <button
+              type="submit"
+              disabled={isSavingProfile || isUploadingProfileAvatar}
+              id="save-profile-btn"
+              className="px-5 py-2.5 bg-[#D40511] hover:bg-[#b0040e] text-white rounded-xl text-xs font-bold shadow-md shadow-red-500/20 transition flex items-center gap-2 cursor-pointer disabled:opacity-50"
+            >
+              {isSavingProfile ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>Salvar Alterações</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
+    );
+  };
+
+  return (
+    <div className="space-y-6" id="settings-view">
 
       {successBanner && (
         <div
@@ -762,130 +1047,149 @@ export function Settings({
         </div>
       )}
 
-      {/* Horizontal Tab Navigation Bar (Top navigation, no lateral squashing) */}
-      <div className="bg-white border border-[#E0E0E0] rounded-2xl p-1.5 shadow-2xs overflow-x-auto scrollbar-none" id="settings-tabs-menu">
-        <div className="flex items-center gap-1.5 min-w-max">
-          <button
-            id="settings-tab-products"
-            onClick={() => setActiveTab("products")}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "products"
-                ? "bg-[#1A1A1A] text-white shadow-xs"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <Package className="w-4 h-4" />
-            <span>Portfólio de Produtos</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-              activeTab === "products" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
-            }`}>
-              {products.length}
-            </span>
-          </button>
-
-          <button
-            id="settings-tab-chains"
-            onClick={() => setActiveTab("chains")}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "chains"
-                ? "bg-[#1A1A1A] text-white shadow-xs"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <Layers className="w-4 h-4" />
-            <span>Redes / Lojas</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-              activeTab === "chains" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
-            }`}>
-              {chains.length}
-            </span>
-          </button>
-
-          <button
-            id="settings-tab-campaigns"
-            onClick={() => setActiveTab("campaigns")}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "campaigns"
-                ? "bg-[#1A1A1A] text-white shadow-xs"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <Target className={`w-4 h-4 ${activeTab === "campaigns" ? "text-red-400" : "text-[#D40511]"}`} />
-            <span>Pesquisas Guiadas</span>
-            {guidedCampaigns.filter(c => c.active).length > 0 && (
-              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
-                activeTab === "campaigns" ? "bg-red-500 text-white" : "bg-emerald-100 text-emerald-800"
+      {/* Horizontal Tab Navigation Bar (Top navigation, exclusivo para Gestores) */}
+      {isGestor && (
+        <div className="bg-white border border-[#E0E0E0] rounded-2xl p-1.5 shadow-2xs overflow-x-auto scrollbar-none" id="settings-tabs-menu">
+          <div className="flex items-center gap-1.5 min-w-max">
+            <button
+              id="settings-tab-products"
+              onClick={() => setActiveTab("products")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "products"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <Package className="w-4 h-4" />
+              <span>Portfólio de Produtos</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                activeTab === "products" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
               }`}>
-                {guidedCampaigns.filter(c => c.active).length} ativas
+                {products.length}
               </span>
-            )}
-          </button>
+            </button>
 
-          <button
-            id="settings-tab-traditional-queue"
-            onClick={() => setActiveTab("traditional_queue")}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "traditional_queue"
-                ? "bg-[#1A1A1A] text-white shadow-xs"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <ListOrdered className={`w-4 h-4 ${activeTab === "traditional_queue" ? "text-amber-400" : "text-amber-600"}`} />
-            <span>Fila Tradicional</span>
-            {customTraditionalQueues.length > 0 && (
-              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
-                activeTab === "traditional_queue" ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-800"
+            <button
+              id="settings-tab-chains"
+              onClick={() => setActiveTab("chains")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "chains"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Redes / Lojas</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                activeTab === "chains" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
               }`}>
-                {customTraditionalQueues.length} salva{customTraditionalQueues.length > 1 ? 's' : ''}
+                {chains.length}
               </span>
-            )}
-          </button>
+            </button>
 
-          <button
-            id="settings-tab-users"
-            onClick={() => setActiveTab("users")}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "users"
-                ? "bg-[#1A1A1A] text-white shadow-xs"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <Users2 className="w-4 h-4" />
-            <span>Colaboradores / Usuários</span>
-            <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
-              activeTab === "users" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
-            }`}>
-              {users.length}
-            </span>
-          </button>
+            <button
+              id="settings-tab-campaigns"
+              onClick={() => setActiveTab("campaigns")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "campaigns"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <Target className={`w-4 h-4 ${activeTab === "campaigns" ? "text-red-400" : "text-[#D40511]"}`} />
+              <span>Pesquisas Guiadas</span>
+              {guidedCampaigns.filter(c => c.active).length > 0 && (
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                  activeTab === "campaigns" ? "bg-red-500 text-white" : "bg-emerald-100 text-emerald-800"
+                }`}>
+                  {guidedCampaigns.filter(c => c.active).length} ativas
+                </span>
+              )}
+            </button>
 
-          <button
-            id="settings-tab-api-soma"
-            onClick={() => setActiveTab("api_soma")}
-            className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
-              activeTab === "api_soma"
-                ? "bg-[#1A1A1A] text-white shadow-xs"
-                : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
-            }`}
-          >
-            <Globe className={`w-4 h-4 ${activeTab === "api_soma" ? "text-emerald-400" : "text-emerald-600"}`} />
-            <span>Integração SOMA (API)</span>
-            <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
-              activeTab === "api_soma" ? "bg-emerald-500 text-white" : "bg-emerald-100 text-emerald-800"
-            }`}>
-              v1 Ativa
-            </span>
-          </button>
+            <button
+              id="settings-tab-traditional-queue"
+              onClick={() => setActiveTab("traditional_queue")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "traditional_queue"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <ListOrdered className={`w-4 h-4 ${activeTab === "traditional_queue" ? "text-amber-400" : "text-amber-600"}`} />
+              <span>Fila Tradicional</span>
+              {customTraditionalQueues.length > 0 && (
+                <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                  activeTab === "traditional_queue" ? "bg-amber-500 text-white" : "bg-amber-100 text-amber-800"
+                }`}>
+                  {customTraditionalQueues.length} salva{customTraditionalQueues.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </button>
+
+            <button
+              id="settings-tab-users"
+              onClick={() => setActiveTab("users")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "users"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <Users2 className="w-4 h-4" />
+              <span>Colaboradores / Usuários</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                activeTab === "users" ? "bg-white/20 text-white" : "bg-gray-100 text-gray-600"
+              }`}>
+                {users.length}
+              </span>
+            </button>
+
+            <button
+              id="settings-tab-api-soma"
+              onClick={() => setActiveTab("api_soma")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "api_soma"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <Globe className={`w-4 h-4 ${activeTab === "api_soma" ? "text-emerald-400" : "text-emerald-600"}`} />
+              <span>Integração SOMA (API)</span>
+              <span className={`text-[10px] font-mono font-bold px-1.5 py-0.2 rounded-full ${
+                activeTab === "api_soma" ? "bg-emerald-500 text-white" : "bg-emerald-100 text-emerald-800"
+              }`}>
+                v1 Ativa
+              </span>
+            </button>
+
+            <button
+              id="settings-tab-profile"
+              onClick={() => setActiveTab("profile")}
+              className={`px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap ${
+                activeTab === "profile"
+                  ? "bg-[#1A1A1A] text-white shadow-xs"
+                  : "text-gray-600 hover:text-gray-900 hover:bg-gray-100"
+              }`}
+            >
+              <UserIcon className="w-4 h-4" />
+              <span>Meu Perfil</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Tab Content Panels (Full Width) */}
       <div
         className="w-full bg-white border border-[#E0E0E0] rounded-2xl p-4 sm:p-6 shadow-xs"
         id="settings-tab-content-panel"
       >
-          {/* TAB 1: PRODUCT LIST & TOGGLES */}
-          {activeTab === "products" && (
+        {!isGestor ? (
+          renderProfilePanel()
+        ) : (
+          <>
+            {/* TAB 1: PRODUCT LIST & TOGGLES */}
+            {activeTab === "products" && (
             <div className="space-y-6" id="settings-tab-products-panel">
               {productView === "list" ? (
                 <>
@@ -2070,7 +2374,12 @@ export function Settings({
               <SomaApiIntegration chains={chains} />
             </div>
           )}
-        </div>
+
+          {/* TAB 7: MEU PERFIL (GESTOR) */}
+          {activeTab === "profile" && renderProfilePanel()}
+        </>
+      )}
+    </div>
 
       {/* Custom Delete Confirmation Modal */}
       {deleteConfirm && (
