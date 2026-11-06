@@ -13,8 +13,8 @@ import {
   Loader2,
 } from "lucide-react";
 
-import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, getRoleDisplayName, isDeveloperRole } from "./types";
-import { getInitialState, saveStateToLocalStorage } from "./mockData";
+import { AppState, Product, Chain, PriceRecord, User, GuidedCampaign, CustomTraditionalQueue, getRoleDisplayName, isDeveloperRole, findMatchingRegisteredUser } from "./types";
+import { getInitialState, saveStateToLocalStorage, INITIAL_USERS } from "./mockData";
 import { useSupabaseSync } from "./lib/useSupabaseSync";
 import { supabase } from "./lib/supabase";
 import { parsePriceRecordMeta } from "./lib/textUtils";
@@ -28,8 +28,8 @@ import { RegisterPrice } from "./components/RegisterPrice";
 import { Audit } from "./components/Audit";
 import { Settings } from "./components/Settings";
 
-// Extrai e cria perfil de convidado imediato a partir de parâmetro de URL (ex: acessado direto do SOMA)
-function extractExternalUserFromUrl(): User | null {
+// Extrai o nome de usuário informado via parâmetro de URL (ex: vindo do SOMA)
+function extractExternalUserNameFromUrl(): string | null {
   if (typeof window === "undefined") return null;
   try {
     const search = window.location.search;
@@ -44,33 +44,76 @@ function extractExternalUserFromUrl(): User | null {
       params.get("pesquisador");
 
     if (rawUser && rawUser.trim().length >= 2) {
-      const cleanName = decodeURIComponent(rawUser).trim();
-      const parts = cleanName.split(/\s+/).filter(Boolean);
-      const initials =
-        parts.length === 1
-          ? parts[0].substring(0, 2).toUpperCase()
-          : `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
-
-      const normalizedSlug = cleanName
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9]/g, ".");
-
-      return {
-        id: `guest-${normalizedSlug || "visitante"}-${Date.now()}`,
-        name: cleanName,
-        email: `${normalizedSlug || "visitante"}.convidado@radar.com`,
-        role: "vendedor",
-        active: true,
-        avatarUrl: initials,
-        isGuest: true,
-      };
+      return decodeURIComponent(rawUser).trim();
     }
   } catch (e) {
-    console.debug("Erro ao extrair usuário externo da URL:", e);
+    console.debug("Erro ao extrair nome de usuário externo da URL:", e);
   }
   return null;
+}
+
+// Cria perfil de convidado caso o usuário externo não possua conta cadastrada no PriceHub
+function buildGuestUser(cleanName: string): User {
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length === 1
+      ? parts[0].substring(0, 2).toUpperCase()
+      : `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+
+  const normalizedSlug = cleanName
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, ".");
+
+  return {
+    id: `guest-${normalizedSlug || "visitante"}-${Date.now()}`,
+    name: cleanName,
+    email: `${normalizedSlug || "visitante"}.convidado@radar.com`,
+    role: "vendedor",
+    active: true,
+    avatarUrl: initials,
+    isGuest: true,
+  };
+}
+
+// Resolve a sessão inicial:
+// 1. Se o nome vindo do SOMA corresponder a um usuário cadastrado no PriceHub, loga (ou mantém logado) nessa conta.
+// 2. Se o usuário já estiver logado em uma conta registrada no PriceHub, mantém a conta logada (nunca rebaixa para convidado).
+// 3. Se estiver salvo como convidado mas o nome pertencer a uma conta registrada, promove para a conta registrada.
+function resolveInitialUserSession(loaded: AppState): User | null {
+  const knownUsers = [...(loaded.users || []), ...INITIAL_USERS];
+  let current = loaded.currentUser;
+
+  // Caso o cache atual tenha um convidado cujo nome é de um usuário registrado no PriceHub, promove para a conta real
+  if (current?.isGuest && current.name) {
+    const matchedCached = findMatchingRegisteredUser(current.name, knownUsers);
+    if (matchedCached) {
+      current = matchedCached;
+    }
+  }
+
+  const externalName = extractExternalUserNameFromUrl();
+  if (!externalName) {
+    return current;
+  }
+
+  // Verifica se o nome vindo do SOMA pertence a uma conta existente no PriceHub
+  const matchedRegistered = findMatchingRegisteredUser(externalName, knownUsers);
+  if (matchedRegistered) {
+    if (current && !current.isGuest && current.id === matchedRegistered.id) {
+      return current;
+    }
+    return matchedRegistered;
+  }
+
+  // Se o usuário já está logado em uma conta registrada no PriceHub, mantém logado
+  if (current && !current.isGuest) {
+    return current;
+  }
+
+  // Caso não tenha conta e não esteja logado como usuário registrado, entra como convidado
+  return buildGuestUser(externalName);
 }
 
 export default function App() {
@@ -94,14 +137,14 @@ export default function App() {
   );
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Global app state com detecção imediata de login via link externo (Zero-Login / Auto-Login Convidado)
+  // Global app state com detecção inteligente de conta existente ou login via link externo (SOMA)
   const [state, setState] = useState<AppState>(() => {
     const loaded = getInitialState();
-    const externalUser = extractExternalUserFromUrl();
-    if (externalUser) {
+    const resolvedUser = resolveInitialUserSession(loaded);
+    if (resolvedUser !== loaded.currentUser) {
       const updated: AppState = {
         ...loaded,
-        currentUser: externalUser,
+        currentUser: resolvedUser,
       };
       saveStateToLocalStorage(updated);
       return updated;
@@ -268,21 +311,53 @@ export default function App() {
         try {
           const data = await fetchAll();
           if (data && data.users.length > 0) {
+            const allKnownUsers = [...data.users, ...INITIAL_USERS];
             let activeUser = state.currentUser;
 
-            // Se não veio usuário na URL nem no estado local, verifica a sessão do Supabase Auth
-            const hasExternalUserInUrl =
-              typeof window !== "undefined" &&
-              Boolean(
-                new URLSearchParams(window.location.search).get("usuario") ||
-                new URLSearchParams(window.location.search).get("user") ||
-                new URLSearchParams(window.location.search).get("nome_usuario") ||
-                new URLSearchParams(window.location.search).get("guest") ||
-                new URLSearchParams(window.location.search).get("guest_name") ||
-                new URLSearchParams(window.location.search).get("pesquisador")
-              );
+            const externalUrlName =
+              extractExternalUserNameFromUrl() ||
+              pendingExternalResearch?.usuario ||
+              null;
 
-            if (!hasExternalUserInUrl && !activeUser) {
+            // 1. Se veio um nome do SOMA e corresponde a um usuário registrado no banco, loga diretamente nessa conta
+            if (externalUrlName) {
+              const matchedExternalInDb = findMatchingRegisteredUser(
+                externalUrlName,
+                allKnownUsers
+              );
+              if (matchedExternalInDb) {
+                activeUser = matchedExternalInDb;
+              }
+            }
+
+            // 2. Se a sessão atual estava como convidado mas o nome corresponde a um usuário registrado no banco, promove para a conta real
+            if (activeUser?.isGuest && activeUser.name) {
+              const matchedGuestInDb = findMatchingRegisteredUser(
+                activeUser.name,
+                allKnownUsers
+              );
+              if (matchedGuestInDb) {
+                activeUser = matchedGuestInDb;
+              }
+            }
+
+            // 3. Se já é um usuário registrado logado, sincroniza os dados mais recentes do banco (cargo, avatar, etc.)
+            if (activeUser && !activeUser.isGuest) {
+              const refreshedFromDb = data.users.find(
+                (u) =>
+                  !u.isGuest &&
+                  (u.id === activeUser!.id ||
+                    (u.email &&
+                      activeUser!.email &&
+                      u.email.toLowerCase() === activeUser!.email.toLowerCase()))
+              );
+              if (refreshedFromDb && refreshedFromDb.active !== false) {
+                activeUser = { ...refreshedFromDb, isGuest: false };
+              }
+            }
+
+            // 4. Se não veio usuário na URL nem há sessão ativa, verifica a sessão do Supabase Auth
+            if (!externalUrlName && !activeUser) {
               try {
                 const { data: { session } } = await supabase.auth.getSession();
                 if (session?.user?.email) {
@@ -300,6 +375,7 @@ export default function App() {
                       role: profile.role,
                       active: profile.active,
                       avatarUrl: profile.avatar_url,
+                      isGuest: false,
                     };
                   }
                 }

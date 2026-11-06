@@ -352,7 +352,7 @@ window.addEventListener("message", (event) => {
                   </li>
                   <li>
                     <code className="text-red-700 bg-red-50 px-1 py-0.5 rounded font-mono font-bold">usuario</code> (opcional - Zero Login):
-                    <span className="block text-gray-500 mt-0.5">Nome do usuário do SOMA (ex: "Jesse Aguilar"). Ao ser informado, o PriceHub efetua <strong>login automático como Convidado</strong>, dispensando a tela de login.</span>
+                    <span className="block text-gray-500 mt-0.5">Nome do usuário do SOMA (ex: "Jesse Aguilar"). Se corresponder a uma conta existente no PriceHub, autentica automaticamente (ou mantém logado) nessa conta; caso contrário, inicia sessão como Convidado.</span>
                   </li>
                   <li>
                     <code className="text-red-700 bg-red-50 px-1 py-0.5 rounded font-mono font-bold">dias_limite</code> (opcional, padrão 15):
@@ -405,7 +405,7 @@ window.addEventListener("message", (event) => {
             <div className="p-3 bg-white/80 border border-red-100 rounded-xl text-[11px] text-gray-600 space-y-1.5">
               <span className="font-bold text-gray-800 block text-xs">Zero-Login & Autenticação Transparente:</span>
               <p>
-                • <strong>Com parâmetro `usuario`:</strong> O PriceHub cria automaticamente a sessão de Convidado com o nome do usuário e abre <strong>direto na Etapa 3 (câmera)</strong> sem que o usuário veja a tela de login!
+                • <strong>Com parâmetro `usuario`:</strong> Se o nome corresponder a uma conta existente no PriceHub, autentica automaticamente (ou mantém a sessão ativa) na conta do usuário e abre <strong>direto na Etapa 3 (câmera)</strong>. Caso não tenha conta, entra como Convidado!
               </p>
               <p>
                 • <strong>Sem parâmetro `usuario`:</strong> Se já estiver logado, entra direto; se não estiver, exibe a tela de login preservando a rede de destino.

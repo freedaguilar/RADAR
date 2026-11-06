@@ -14,7 +14,7 @@ import {
   Camera,
   BookOpen,
 } from 'lucide-react';
-import { User as UserType } from '../types';
+import { User as UserType, findMatchingRegisteredUser } from '../types';
 import { supabase } from '../lib/supabase';
 import { INITIAL_USERS } from '../mockData';
 
@@ -164,6 +164,19 @@ export function Login({ onLoginSuccess, availableUsers = INITIAL_USERS, pendingR
     }
 
     setIsGuestLoading(true);
+
+    // Se veio redirecionado do SOMA e o nome corresponde a uma conta existente no PriceHub, loga na conta existente
+    if (pendingResearch) {
+      const matchedRegistered = findMatchingRegisteredUser(cleanName, allUsers);
+      if (matchedRegistered) {
+        setSuccessMessage(`Bem-vindo de volta, ${matchedRegistered.name}!`);
+        setTimeout(() => {
+          onLoginSuccess(matchedRegistered);
+        }, 400);
+        return;
+      }
+    }
+
     setSuccessMessage(`Olá, ${cleanName}! Acessando como Convidado...`);
 
     // Compute initials for avatar (e.g. "João Silva" -> "JS")

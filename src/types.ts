@@ -114,6 +114,58 @@ export interface User {
   isGuest?: boolean;
 }
 
+export function normalizePersonName(value?: string | null): string {
+  if (!value) return '';
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ');
+}
+
+export function findMatchingRegisteredUser(
+  identifier?: string | null,
+  usersList: User[] = []
+): User | null {
+  if (!identifier || !identifier.trim()) return null;
+  const normTarget = normalizePersonName(identifier);
+  const rawLower = identifier.trim().toLowerCase();
+
+  const registeredUsers = usersList.filter(
+    (u) => u && !u.isGuest && u.active !== false && u.name
+  );
+
+  // 1. Correspondência exata por nome normalizado ou e-mail
+  const exactMatch = registeredUsers.find(
+    (u) =>
+      normalizePersonName(u.name) === normTarget ||
+      (u.email && u.email.trim().toLowerCase() === rawLower)
+  );
+  if (exactMatch) {
+    return { ...exactMatch, isGuest: false };
+  }
+
+  // 2. Correspondência por primeiro + último nome caso um dos lados tenha nome do meio
+  const targetTokens = normTarget.split(' ').filter(Boolean);
+  if (targetTokens.length >= 2) {
+    const targetFirstLast = `${targetTokens[0]} ${targetTokens[targetTokens.length - 1]}`;
+    const firstLastMatch = registeredUsers.find((u) => {
+      const uTokens = normalizePersonName(u.name).split(' ').filter(Boolean);
+      if (uTokens.length >= 2) {
+        const uFirstLast = `${uTokens[0]} ${uTokens[uTokens.length - 1]}`;
+        return uFirstLast === targetFirstLast;
+      }
+      return false;
+    });
+    if (firstLastMatch) {
+      return { ...firstLastMatch, isGuest: false };
+    }
+  }
+
+  return null;
+}
+
 export interface GuidedCampaign {
   id: string;
   title: string;
