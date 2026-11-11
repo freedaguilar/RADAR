@@ -6,6 +6,7 @@ import { createClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
 import cors from "cors";
 import exportExcelHandler from "./api/export-excel";
+import exportProductsHandler from "./api/export-products";
 import statusRedeHandler from "./api/status-rede";
 
 dotenv.config();
@@ -222,6 +223,16 @@ ${uniqueCorrections.map(corr => `- Quando identificar "${corr.detected_text}", o
     } catch (error: any) {
       console.error("Erro no endpoint express de exportação:", error);
       res.status(500).json({ error: error.message || "Falha na geração do arquivo Excel." });
+    }
+  });
+
+  // API endpoint for exporting products portfolio in Excel with thumbnails
+  app.post("/api/export-products", async (req, res) => {
+    try {
+      await exportProductsHandler(req, res);
+    } catch (error: any) {
+      console.error("Erro no endpoint express de exportação de produtos:", error);
+      res.status(500).json({ error: error.message || "Falha na geração da planilha de produtos." });
     }
   });
 

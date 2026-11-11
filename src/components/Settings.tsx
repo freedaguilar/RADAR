@@ -23,6 +23,7 @@ import {
   Globe,
   User as UserIcon,
   Lock,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Product, Chain, User, GuidedCampaign, PriceRecord, CustomTraditionalQueue, RESEARCH_STATES, isChainInState, getChainStates, getRoleDisplayName, isDeveloperRole } from "../types";
 import { uploadToSupabaseStorage } from "../lib/supabase";
@@ -30,6 +31,7 @@ import { normalizeString } from "../lib/textUtils";
 import { GuidedCampaignsSettings } from "./GuidedCampaignsSettings";
 import { TraditionalQueueSettings } from "./TraditionalQueueSettings";
 import { SomaApiIntegration } from "./SomaApiIntegration";
+import { ExportProductsModal } from "./ExportProductsModal";
 
 function extractDominantColor(fileOrUrl: File | string): Promise<string> {
   return new Promise((resolve) => {
@@ -181,6 +183,7 @@ export function Settings({
   // Native product editing/creating view: 'list' | 'create' | 'edit'
   const [productView, setProductView] = useState<"list" | "create" | "edit">("list");
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
+  const [showExportProductsModal, setShowExportProductsModal] = useState(false);
 
   // Input states for Products creator/editor
   const [newProdName, setNewProdName] = useState("");
@@ -1218,34 +1221,46 @@ export function Settings({
                         className="w-full px-3 py-2 bg-white border border-[#E0E0E0] rounded-lg text-xs text-[#1A1A1A] focus:outline-none focus:border-[#D40511]"
                       />
                     </div>
-                    {currentUser?.role === "gestor" ? (
+                    <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
                       <button
                         type="button"
-                        onClick={() => {
-                          setProductView("create");
-                          setNewProdName("");
-                          setNewProdCategory("");
-                          setNewProdSubcategory("");
-                          setNewProdWeight("");
-                          setNewProdImageUrl("");
-                          setNewProdBasePrice("0.00");
-                          setNewProdIsCompetitor(false);
-                          setNewProdBrand("");
-                          setNewProdInternalCode("");
-                          setFormFeedback(null);
-                          setAutoFilledFields({});
-                          setUserModifiedFields({});
-                        }}
-                        className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition whitespace-nowrap cursor-pointer"
+                        id="open-export-products-modal-btn"
+                        onClick={() => setShowExportProductsModal(true)}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-xs font-bold transition whitespace-nowrap cursor-pointer flex items-center gap-1.5 shadow-2xs"
                       >
-                        Cadastrar Novo Produto
+                        <FileSpreadsheet className="w-4 h-4" />
+                        <span>Exportar Produtos</span>
                       </button>
-                    ) : (
-                      <div className="flex items-center gap-1.5 text-slate-500 font-sans text-xs bg-slate-100/60 p-2 rounded-lg border border-slate-200">
-                        <Shield className="w-4 h-4 text-slate-400" />
-                        <span>Edição restrita a Desenvolvedores.</span>
-                      </div>
-                    )}
+
+                      {isGestor ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProductView("create");
+                            setNewProdName("");
+                            setNewProdCategory("");
+                            setNewProdSubcategory("");
+                            setNewProdWeight("");
+                            setNewProdImageUrl("");
+                            setNewProdBasePrice("0.00");
+                            setNewProdIsCompetitor(false);
+                            setNewProdBrand("");
+                            setNewProdInternalCode("");
+                            setFormFeedback(null);
+                            setAutoFilledFields({});
+                            setUserModifiedFields({});
+                          }}
+                          className="bg-[#D40511] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-red-700 transition whitespace-nowrap cursor-pointer"
+                        >
+                          Cadastrar Novo Produto
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-1.5 text-slate-500 font-sans text-xs bg-slate-100/60 p-2 rounded-lg border border-slate-200">
+                          <Shield className="w-4 h-4 text-slate-400" />
+                          <span>Edição restrita a Desenvolvedores.</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto">
@@ -2526,6 +2541,13 @@ export function Settings({
           </div>
         </div>
       )}
+
+      {/* Modal de Exportação de Portfólio de Produtos em Excel */}
+      <ExportProductsModal
+        isOpen={showExportProductsModal}
+        onClose={() => setShowExportProductsModal(false)}
+        products={products}
+      />
     </div>
   );
 }
